@@ -1,0 +1,80 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets / local env
+.env
+.env.*
+!.env.example
+*.secret
+
+# Raw/derived media and large artifacts
+# Keep only .gitkeep placeholders.
+data/raw/*
+!data/raw/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+artifacts/keyframes/*
+!artifacts/keyframes/.gitkeep
+artifacts/embeddings/*
+!artifacts/embeddings/.gitkeep
+artifacts/indexes/*
+!artifacts/indexes/.gitkeep
+artifacts/metrics/*
+!artifacts/metrics/.gitkeep
+
+# Model weights / databases / generated outputs
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.bin
+*.safetensors
+*.npy
+*.npz
+*.parquet
+*.faiss
+*.index
+*.db
+*.sqlite*
+*.log
+output/
+output_*/
+tmp/
+temp/
+/keyframes/
+lab6_metrics.json
+keyframe_docs.json
+keyframe_metadata.parquet
+
+# Raw video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# Elasticsearch local distribution/data
+elasticsearch-*/
+*.tar.gz
+*.zip
+
+# Notebook transient files
+.ipynb_checkpoints/

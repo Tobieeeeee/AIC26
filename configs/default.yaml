@@ -1,0 +1,25 @@
+ingestion:
+  shot_detector: pyscenedetect
+  pyscene_threshold: 27.0
+  transnet_threshold: 0.5
+  long_shot_seconds: 12.0
+  sample_every_seconds: 8.0
+
+enrichment:
+  ocr_engine: paddleocr
+  ocr_confidence: 0.3
+  object_detector: yolov8n
+  object_confidence: 0.4
+  embedding_model: clip_rn50
+
+retrieval:
+  lexical_backend: elasticsearch
+  semantic_backend: elasticsearch_knn
+  candidate_k: 30
+  hybrid_method: weighted
+  rrf_k: 60
+  weighted_alpha: 0.25
+
+api:
+  top_k_default: 20
+  top_k_max: 100
