@@ -35,22 +35,32 @@ Blockers:
 
 ## Phase 02 — Reuse Ingestion
 
-Status: NOT STARTED
+Status: COMPLETE
 
-Commit: N/A
+Commit: `feat: reuse shot boundary ingestion pipeline` (this phase commit; hash reported after commit)
 
 Completed:
-- None
+- Reused the Shot Boundary Lab models, ffprobe probing, detector factory, PySceneDetect backend, TransNetV2 backend, keyframe selection, exact FFmpeg extraction, metadata writers, and pipeline under `src/mvr/ingestion/`.
+- Added `python -m mvr.cli ingest` packaging while preserving the lab defaults and validation.
+- Preserved zero-based frame indices, inclusive shot ends, timestamps, thresholds, primary-detector behavior, long-shot sampling, output schemas, and benchmark semantics.
+- Added the lab's lightweight PySceneDetect, OpenCV, and tqdm dependency ranges.
+- Verified the complete default ingestion flow on source sample `L01_V001.mp4`.
+- Recorded all reused files and compatibility-only changes in `docs/LAB_REUSE_MAP.md`.
+- Kept TransNetV2 lazy/optional and did not start Phase 03 or any OpenCLIP, FAISS, OCR, YOLO, Elasticsearch, or FastAPI work.
 
 Remaining:
-- Reuse Shot Boundary Lab.
-- Verify ingestion CLI/pipeline.
+- None for Phase 02.
 
 Tests:
-- N/A
+- `py -3.12 -m pytest -q`: 23 passed, 1 skipped (optional TransNetV2 runtime dependencies unavailable).
+- `py -3.12 -m mvr.cli --help`: passed.
+- `py -3.12 -m mvr.cli ingest --help`: passed.
+- Verified smoke command: `py -3.12 -m mvr.cli ingest "D:\project\STUDY\NAM_2\SELF_PRJ\AIC26\New folder\shot-boundary-lab-student\student\data\videos\L01_V001.mp4" --output "artifacts\keyframes\phase02-smoke"`.
+- Smoke outputs: 5 shots, 5 keyframe mappings, 5 JPEGs, and JSON/CSV benchmark metadata.
+- Read-only source integrity: unchanged at 11,177 files / 1,221,999,740 bytes / metadata SHA-256 `07b34aa47d766429a2667a682d504df837a304b707c9b999aacc737ef057bfbd`.
 
 Blockers:
-- None recorded.
+- None. TransNetV2 runtime verification is intentionally skipped as an optional heavy dependency, not a Phase 02 blocker.
 
 ---
 
@@ -156,11 +166,11 @@ Blockers:
 
 # Current active phase
 
-Phase 01 — Discover and Map: COMPLETE
+Phase 02 — Reuse Ingestion: COMPLETE
 
-Next phase: Phase 02 — Reuse Ingestion (NOT STARTED).
+Next phase: Phase 03 — Semantic End-to-End Baseline (NOT STARTED).
 
-Stop gate: do not begin Phase 02 without an explicit instruction.
+Stop gate: do not begin Phase 03 without an explicit instruction.
 
 # Resume instruction
 

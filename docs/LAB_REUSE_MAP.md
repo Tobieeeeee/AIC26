@@ -1,6 +1,6 @@
 # Lab Reuse Map
 
-This file records the Phase 01 inspection of reusable code for the first MVR baseline. No production code was migrated during this phase.
+This file records source provenance and verification for the first MVR baseline. Phase 01 mapped the labs; Phase 02 migrated only the Shot Boundary Lab ingestion implementation.
 
 ## Source inventory
 
@@ -22,24 +22,24 @@ The three notebook copies already under `notebooks/reference/` have the same SHA
 
 ## Component mapping
 
-`MAPPED` means the source implementation and intended destination were verified. It does not mean code has been migrated or verified in the target package.
+`MAPPED` means the source implementation and intended destination were verified. `MIGRATED` means code is present but its runtime was not fully exercised. `VERIFIED` means the target behavior was covered by lightweight tests or the Phase 02 smoke run.
 
 Notebook cell numbers below are zero-based JSON cell indices.
 
 | Source Lab | Original Source | Reused Component | Destination | Expected/Actual Changes | Status |
 |---|---|---|---|---|---|
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/models.py` | `VideoInfo`, `Shot`, and `Keyframe` data contracts | `src/mvr/ingestion/models.py` | Package rename only. Preserve frozen dataclasses, zero-based frames, inclusive `Shot.end_frame`, computed time fields, and keyframe fields. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/probe.py` | `ffprobe` video probing | `src/mvr/ingestion/probe.py` | Package/import adaptation only. Preserve FPS fraction parsing, duration fallback, and frame-count fallback. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/detectors/__init__.py` | Detector protocol and factory | `src/mvr/ingestion/shot_detection/__init__.py` | Adapt imports/names while retaining lazy backend imports and the `detect(VideoInfo) -> list[Shot]` contract. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/detectors/pyscenedetect.py` | PySceneDetect `ContentDetector` | `src/mvr/ingestion/shot_detection/pyscenedetect.py` | Preserve threshold `27.0`, `start_in_scene=True`, exclusive-to-inclusive end conversion, clamping, and full-video fallback. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/detectors/transnetv2_pytorch.py` | TransNetV2 PyTorch detector | `src/mvr/ingestion/shot_detection/transnetv2.py` | Preserve threshold `0.5`, device selection, one model load per detector, trusted package weight loading with `weights_only=True`, clamping, and full-video fallback. Make dependency optional rather than changing the detector. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/keyframes.py` | Keyframe frame selection | `src/mvr/ingestion/keyframes.py` | Preserve floor midpoint, long-shot trigger `duration >= 12s`, samples every `8s` from shot start, sorted uniqueness, validation, and in-shot bounds. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/keyframes.py` | Keyframe IDs and metadata construction | `src/mvr/ingestion/keyframes.py` | Preserve IDs like `V_S0001_K01`, `timestamp = frame_idx / fps`, ordinal numbering, and POSIX path `keyframes/<video_id>/<keyframe_id>.jpg`. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/extract.py` | Exact FFmpeg frame extraction | `src/mvr/ingestion/extract.py` | Preserve one decoder scan per video, `rgb24` pipe, early stop after the last requested frame, duplicate-index fan-out, JPEG quality, and missing-frame checks. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/metadata.py` | Shot/keyframe metadata writers | `src/mvr/ingestion/metadata.py` | Preserve `shots.json` schema version `1.0`, indexing declarations, `keyframe_mapping.csv` columns, benchmark JSON/CSV, and summary calculations. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/pipeline.py` | Video discovery and pipeline orchestration | `src/mvr/ingestion/pipeline.py` | Adapt package paths only. Preserve supported extensions, per-method thresholds, detector reuse, primary detector selection, per-video extraction, timing, and output sequence. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/cli.py` | Ingestion CLI defaults | `src/mvr/ingestion/cli.py` or `scripts/ingest_videos.py` | Preserve argument validation and defaults; expose through the target package without changing behavior. | MAPPED |
-| Shot Boundary Lab | `shot-boundary-lab-student/student/tests/test_models.py`, `test_keyframes.py`, `test_pipeline_progress.py` | Ingestion behavior tests | `tests/unit/ingestion/` | Adapt imports and temporary paths only; retain inclusive-end, midpoint/long-shot, orchestration, and error-propagation assertions. Add extraction/detector tests only in Phase 02. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/models.py` | `VideoInfo`, `Shot`, and `Keyframe` data contracts | `src/mvr/ingestion/models.py` | Package rename only. Frozen dataclasses, zero-based frames, inclusive `Shot.end_frame`, computed time fields, and keyframe fields are preserved. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/probe.py` | `ffprobe` video probing | `src/mvr/ingestion/probe.py` | Package-relative import only. FPS fraction parsing, duration fallback, and frame-count fallback are preserved. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/detectors/__init__.py` | Detector protocol and factory | `src/mvr/ingestion/shot_detection/__init__.py` | Namespace changed from `detectors` to `shot_detection`; lazy imports and the detector contract are preserved. The TransNet module import follows its destination filename. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/detectors/pyscenedetect.py` | PySceneDetect `ContentDetector` | `src/mvr/ingestion/shot_detection/pyscenedetect.py` | Package import only. Threshold `27.0`, `start_in_scene=True`, exclusive-to-inclusive conversion, clamping, and full-video fallback are preserved. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/detectors/transnetv2_pytorch.py` | TransNetV2 PyTorch detector | `src/mvr/ingestion/shot_detection/transnetv2.py` | Filename/import adaptation only. Threshold `0.5`, device selection, one model load, package weights with `weights_only=True`, clamping, and fallback are preserved. Heavy runtime dependencies remain lazy/optional and were not installed in Phase 02. | MIGRATED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/keyframes.py` | Keyframe frame selection | `src/mvr/ingestion/keyframes.py` | Package import only. Floor midpoint, `duration >= 12s`, `8s` sampling, sorted uniqueness, validation, and bounds are preserved. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/keyframes.py` | Keyframe IDs and metadata construction | `src/mvr/ingestion/keyframes.py` | IDs, `frame_idx / fps` timestamps, ordinals, and POSIX image paths are preserved. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/extract.py` | Exact FFmpeg frame extraction | `src/mvr/ingestion/extract.py` | Verbatim source with only EOF newline normalization. One `rgb24` decoder scan, early stop, duplicate-index fan-out, FFmpeg JPEG quality, and missing-frame checks are preserved. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/metadata.py` | Shot/keyframe metadata writers | `src/mvr/ingestion/metadata.py` | Package import only. `shots.json` schema `1.0`, indexing declarations, CSV columns, benchmark files, and summary calculations are preserved. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/pipeline.py` | Video discovery and pipeline orchestration | `src/mvr/ingestion/pipeline.py` | Only the detector package import points to `shot_detection`. Extensions, thresholds, detector reuse, primary selection, per-video extraction, timing, diagnostics, and output sequence are preserved. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/cli.py` | Ingestion CLI defaults | `src/mvr/cli.py` | Wrapped as the `ingest` subcommand; `--input` became the positional `input`. Required `--output`, methods, primary, device choices, thresholds `27.0`/`0.5`, and sampling defaults `12s`/`8s` are preserved. Postponed annotations support the declared Python 3.10+ range. | VERIFIED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/tests/test_models.py`, `test_keyframes.py`, `test_pipeline_progress.py` | Ingestion behavior tests | `tests/unit/ingestion/`, `tests/unit/test_cli.py` | Imports/temporary paths adapted; inclusive-end, midpoint/long-shot, metadata, probing, detector, extraction no-op, orchestration, error propagation, and CLI defaults are covered. | VERIFIED |
 | Lab 3 | `SkillPixel_Lab3_Homework_Completed.ipynb`, cells 2-3 | OpenCLIP `ViT-B-32` / `laion2b_s34b_b79k` loading and preprocessing | `src/mvr/enrichment/embeddings/openclip.py` | Extract into a reusable adapter. Preserve model/pretrained IDs, `eval()`, RGB conversion, OpenCLIP preprocessing, and batching. | MAPPED |
 | Lab 3 | Same notebook, cells 3 and 13 | Batched image encoding | `src/mvr/enrichment/embeddings/openclip.py` | Replace notebook globals with injected/configured components; preserve `torch.no_grad`, stacking, `encode_image`, L2 normalization, CPU NumPy output, and float behavior. | MAPPED |
 | Lab 3 | Same notebook, cells 5 and 13 | Batched text encoding | `src/mvr/enrichment/embeddings/openclip.py` | Package helper while preserving tokenizer use, `encode_text`, L2 normalization, and batching. | MAPPED |
@@ -76,12 +76,20 @@ Notebook cell numbers below are zero-based JSON cell indices.
 | FastAPI Lab | `lab1-fastapi-student/tests/test_app.py` | API contract tests | `tests/unit/api/` | Preserve TestClient patterns for success, case-insensitive search, empty results, required query, limit bounds, limit behavior, and score ordering. | MAPPED |
 | FastAPI Lab | `lab1-fastapi-student/.github/workflows/ci.yml` | GitHub Actions pytest workflow | `.github/workflows/ci.yml` | Target CI already has the same checkout/setup/install/test pattern. Reconcile action versions and dependencies deliberately; do not copy generated environments. | MAPPED |
 
-## Behavior and compatibility decisions for later phases
+## Phase 02 ingestion verification
+
+- Added the Shot Boundary Lab's exact lightweight dependency ranges to `pyproject.toml`: PySceneDetect `>=0.6.4,<0.8`, OpenCV `>=4.8,<6`, and tqdm `>=4.66,<5`.
+- Verified `py -3.12 -m mvr.cli ingest "<video>" --output "artifacts\keyframes\phase02-smoke"` against source sample `L01_V001.mp4`.
+- Generated 5 inclusive-end shot records, 5 keyframe records, 5 JPEGs, `shots.json`, `keyframe_mapping.csv`, `benchmark.json`, `benchmark.csv`, and `benchmark_summary.csv` under the ignored smoke output directory.
+- The optional TransNetV2 source is migrated but runtime verification is skipped because Torch, `transnetv2-pytorch`, and model weights are intentionally not installed for the lightweight Phase 02 run.
+- No OpenCLIP, FAISS, OCR, YOLO, Elasticsearch, FastAPI, or other Phase 03+ code was started.
+
+## Behavior and compatibility decisions
 
 1. **No model substitution:** Lab 3's primary OpenCLIP source is `ViT-B-32` with `laion2b_s34b_b79k`; Lab 4/Lab 6 use `RN50` with `openai`, while `configs/default.yaml` currently says `clip_rn50`. Phase 03 must make the selected baseline explicit and must not silently treat these as equivalent.
 2. **Normalized inner product:** Image and text embeddings are L2-normalized before dot product or `faiss.IndexFlatIP`; this is the cosine-similarity contract.
 3. **Frame contract:** Frames are zero-based, shot ends are inclusive, and timestamps are derived from `frame_idx / fps`.
-4. **Optional heavy dependencies:** TransNetV2, OCR engines, YOLO, OpenCLIP, FAISS, Elasticsearch, and their weights/services must remain optional by phase. Phase 01 installed none of them.
+4. **Optional heavy dependencies:** TransNetV2, OCR engines, YOLO, OpenCLIP, FAISS, Elasticsearch, and their weights/services must remain optional by phase. Phase 02 installed only the lightweight PySceneDetect/OpenCV/tqdm ingestion dependencies.
 5. **Generated data remains external:** Videos, keyframes, embeddings, Parquet/JSON outputs, indexes, Elasticsearch data, model weights, and raw benchmark artifacts remain ignored.
 6. **Elasticsearch lifecycle separation:** Lab 6 downloads/starts a local unsecured Elasticsearch process and deletes/recreates the `keyframes` index. Later packaging must separate service startup from index operations while retaining index semantics.
 7. **PaddleOCR is Lab 6's selected OCR output:** EasyOCR is retained for comparison; downstream Lab 6 documents use PaddleOCR text.

@@ -13,9 +13,13 @@ Existing foundation:
 - CI configuration;
 - original reference notebooks.
 
-Planned or in progress:
+Available now:
 
-- video ingestion, shot detection, and keyframe extraction integration;
+- verified video probe, PySceneDetect shot detection, keyframe selection, exact FFmpeg extraction, and metadata mapping;
+- `py -3.12 -m mvr.cli ingest` for one video or a directory of videos.
+
+Planned:
+
 - OCR, object detection, and image/text embedding pipelines;
 - FAISS/Elasticsearch indexing and semantic, OCR, object, and hybrid retrieval integration;
 - query understanding, temporal retrieval, and reranking;
@@ -54,6 +58,17 @@ python -m venv .venv
 pip install -e .[dev]
 pytest -q
 ```
+
+## Verified ingestion command
+
+The Phase 02 smoke run used Python 3.12, FFmpeg/ffprobe, and the default PySceneDetect settings:
+
+```powershell
+py -3.12 -m pip install -e ".[dev]"
+py -3.12 -m mvr.cli ingest "D:\project\STUDY\NAM_2\SELF_PRJ\AIC26\New folder\shot-boundary-lab-student\student\data\videos\L01_V001.mp4" --output "artifacts\keyframes\phase02-smoke"
+```
+
+The output contains `shots.json`, `keyframe_mapping.csv`, benchmark JSON/CSV, and JPEG keyframes. The input may also be a directory. TransNetV2 is preserved as an optional backend but was not runtime-verified in Phase 02.
 
 Đọc tiếp:
 

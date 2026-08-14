@@ -7,10 +7,14 @@ name = "mvr-competition"
 version = "0.1.0"
 description = "Modular multimedia video retrieval competition system"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "scenedetect>=0.6.4,<0.8",
+    "opencv-python>=4.8,<6",
+    "tqdm>=4.66,<5",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8,<9"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
