@@ -1,0 +1,101 @@
+# Lab Reuse Map
+
+This file records the Phase 01 inspection of reusable code for the first MVR baseline. No production code was migrated during this phase.
+
+## Source inventory
+
+Read-only source root:
+
+```text
+D:\project\STUDY\NAM_2\SELF_PRJ\AIC26\New folder
+```
+
+| Expected lab | Verified source location | Form | Notes |
+|---|---|---|---|
+| Shot Boundary Lab | `shot-boundary-lab-student/student/` | Python package | Contains probe, models, detectors, keyframe selection/extraction, metadata, pipeline, CLI, and tests. |
+| Lab 3 | `SkillPixel_Lab3_Homework_Completed.ipynb` | Notebook | OpenCLIP baseline plus Vietnamese, SigLIP/SigLIP2, optional GVE, and concatenation experiments. |
+| Lab 4 | `HCM_AIC_Lab4_semifinal.ipynb` | Notebook | OpenCLIP, exact FAISS search, retrieval metrics/latency, dense candidates, and CrossEncoder reranking. |
+| Lab 6 | `HCM_AIC_Lab6.ipynb` | Notebook | OCR, objects, CLIP, Elasticsearch, retrieval/fusion, evaluation, and FastAPI prototype. |
+| FastAPI Lab | `lab1-fastapi-student/` | Python app | FastAPI/Pydantic structure, query validation, tests, and GitHub Actions workflow. |
+
+The three notebook copies already under `notebooks/reference/` have the same SHA-256 hashes as their source originals. Source datasets, videos, virtual environments, generated outputs, model weights, Elasticsearch distributions, and `New folder.rar` are evidence/artifacts, not migration inputs.
+
+## Component mapping
+
+`MAPPED` means the source implementation and intended destination were verified. It does not mean code has been migrated or verified in the target package.
+
+Notebook cell numbers below are zero-based JSON cell indices.
+
+| Source Lab | Original Source | Reused Component | Destination | Expected/Actual Changes | Status |
+|---|---|---|---|---|---|
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/models.py` | `VideoInfo`, `Shot`, and `Keyframe` data contracts | `src/mvr/ingestion/models.py` | Package rename only. Preserve frozen dataclasses, zero-based frames, inclusive `Shot.end_frame`, computed time fields, and keyframe fields. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/probe.py` | `ffprobe` video probing | `src/mvr/ingestion/probe.py` | Package/import adaptation only. Preserve FPS fraction parsing, duration fallback, and frame-count fallback. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/detectors/__init__.py` | Detector protocol and factory | `src/mvr/ingestion/shot_detection/__init__.py` | Adapt imports/names while retaining lazy backend imports and the `detect(VideoInfo) -> list[Shot]` contract. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/detectors/pyscenedetect.py` | PySceneDetect `ContentDetector` | `src/mvr/ingestion/shot_detection/pyscenedetect.py` | Preserve threshold `27.0`, `start_in_scene=True`, exclusive-to-inclusive end conversion, clamping, and full-video fallback. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/detectors/transnetv2_pytorch.py` | TransNetV2 PyTorch detector | `src/mvr/ingestion/shot_detection/transnetv2.py` | Preserve threshold `0.5`, device selection, one model load per detector, trusted package weight loading with `weights_only=True`, clamping, and full-video fallback. Make dependency optional rather than changing the detector. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/keyframes.py` | Keyframe frame selection | `src/mvr/ingestion/keyframes.py` | Preserve floor midpoint, long-shot trigger `duration >= 12s`, samples every `8s` from shot start, sorted uniqueness, validation, and in-shot bounds. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/keyframes.py` | Keyframe IDs and metadata construction | `src/mvr/ingestion/keyframes.py` | Preserve IDs like `V_S0001_K01`, `timestamp = frame_idx / fps`, ordinal numbering, and POSIX path `keyframes/<video_id>/<keyframe_id>.jpg`. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/extract.py` | Exact FFmpeg frame extraction | `src/mvr/ingestion/extract.py` | Preserve one decoder scan per video, `rgb24` pipe, early stop after the last requested frame, duplicate-index fan-out, JPEG quality, and missing-frame checks. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/metadata.py` | Shot/keyframe metadata writers | `src/mvr/ingestion/metadata.py` | Preserve `shots.json` schema version `1.0`, indexing declarations, `keyframe_mapping.csv` columns, benchmark JSON/CSV, and summary calculations. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/pipeline.py` | Video discovery and pipeline orchestration | `src/mvr/ingestion/pipeline.py` | Adapt package paths only. Preserve supported extensions, per-method thresholds, detector reuse, primary detector selection, per-video extraction, timing, and output sequence. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/src/shotlab/cli.py` | Ingestion CLI defaults | `src/mvr/ingestion/cli.py` or `scripts/ingest_videos.py` | Preserve argument validation and defaults; expose through the target package without changing behavior. | MAPPED |
+| Shot Boundary Lab | `shot-boundary-lab-student/student/tests/test_models.py`, `test_keyframes.py`, `test_pipeline_progress.py` | Ingestion behavior tests | `tests/unit/ingestion/` | Adapt imports and temporary paths only; retain inclusive-end, midpoint/long-shot, orchestration, and error-propagation assertions. Add extraction/detector tests only in Phase 02. | MAPPED |
+| Lab 3 | `SkillPixel_Lab3_Homework_Completed.ipynb`, cells 2-3 | OpenCLIP `ViT-B-32` / `laion2b_s34b_b79k` loading and preprocessing | `src/mvr/enrichment/embeddings/openclip.py` | Extract into a reusable adapter. Preserve model/pretrained IDs, `eval()`, RGB conversion, OpenCLIP preprocessing, and batching. | MAPPED |
+| Lab 3 | Same notebook, cells 3 and 13 | Batched image encoding | `src/mvr/enrichment/embeddings/openclip.py` | Replace notebook globals with injected/configured components; preserve `torch.no_grad`, stacking, `encode_image`, L2 normalization, CPU NumPy output, and float behavior. | MAPPED |
+| Lab 3 | Same notebook, cells 5 and 13 | Batched text encoding | `src/mvr/enrichment/embeddings/openclip.py` | Package helper while preserving tokenizer use, `encode_text`, L2 normalization, and batching. | MAPPED |
+| Lab 3 | Same notebook, cells 4-5 | Embedding and metadata persistence | `scripts/build_embeddings.py`, `artifacts/embeddings/`, `data/processed/` | Parameterize paths and use project manifests; preserve `.npy` matrix plus Parquet mapping semantics. Generated files remain ignored. | MAPPED |
+| Lab 3 | Same notebook, cells 5-6 | Dot-product/cosine retrieval and Recall@K/MRR | `src/mvr/retrieval/semantic.py`, `src/mvr/evaluation/metrics.py` | Preserve normalized dot product, descending ranking, single-ground-truth rank logic, Recall@1/5/10, and MRR. Prefer the more general Lab 4 metrics contract where multiple relevant IDs exist. | MAPPED |
+| Lab 3 | Same notebook, cells 15-16 | English-to-Vietnamese NLLB query experiment | `notebooks/reference/` and future evaluation utilities | Already preserved as reference. Defer production migration; translation/model experiments are outside the first baseline. | MAPPED |
+| Lab 3 | Same notebook, cells 18-20 | SigLIP and SigLIP2 evaluation adapters | `notebooks/reference/` and future embedding adapters | Already preserved as reference. Do not replace the selected OpenCLIP baseline during reuse phases. | MAPPED |
+| Lab 3 | Same notebook, cell 22 | Optional GVE/Qwen2.5-VL embeddings | `notebooks/reference/` | Keep deferred (`RUN_QWEN25_GVE=False`); VLM embedding experiments are explicitly out of scope. | MAPPED |
+| Lab 3 | Same notebook, cell 24 | OpenCLIP + SigLIP2 concatenation fusion | `notebooks/reference/` and future evaluation | Preserve normalization, square-root alpha weighting, concatenation, and final normalization if revisited. Not part of the first baseline. | MAPPED |
+| Lab 4 | `HCM_AIC_Lab4_semifinal.ipynb`, cells 13 and 15 | Contiguous normalized `float32` vectors | `src/mvr/enrichment/embeddings/openclip.py`, `src/mvr/indexing/faiss_index.py` | Preserve L2 normalization before inner-product indexing and contiguous `float32` conversion at the FAISS boundary. | MAPPED |
+| Lab 4 | Same notebook, cell 17 | Exact FAISS `IndexFlatIP` construction | `src/mvr/indexing/faiss_index.py` | Package index creation/add/save/load without changing exact inner-product behavior. Do not substitute IVF/HNSW/PQ in the baseline. | MAPPED |
+| Lab 4 | Same notebook, cell 19 | Text-to-image top-K search | `src/mvr/retrieval/semantic.py` | Separate plotting from retrieval; preserve query validation, normalized OpenCLIP text vector, `IndexFlatIP.search`, score order, and metadata lookup. | MAPPED |
+| Lab 4 | Same notebook, cells 7 and 21 | Recall@K, Hit@K, MRR, and FAISS latency | `src/mvr/evaluation/metrics.py` | Consolidate single/multiple-ground-truth helpers. Preserve 1-based rank, explicit top-K behavior, and distinction between FAISS-only and end-to-end latency. | MAPPED |
+| Lab 4 | Same notebook, cells 29, 31, and 33 | Dense candidate retrieval with FAISS | `src/mvr/retrieval/semantic.py` or a future text-retrieval module | Reusable pattern, but MiniLM/SciFact is not the Phase 03 video baseline. Preserve normalized vectors and candidate limits if later adopted. | MAPPED |
+| Lab 4 | Same notebook, cells 28 and 35 | CrossEncoder candidate reranking | Future `src/mvr/retrieval/reranking.py` | Keep as a deferred reference; advanced reranking is out of the first reuse baseline. Preserve two-stage candidate-then-rerank semantics if implemented later. | MAPPED |
+| Lab 4 | Same notebook, cells 37 and 39 | End-to-end retrieval evaluation | `src/mvr/evaluation/metrics.py` | Preserve query-level timing and aggregation across Recall, Hit, and reciprocal rank; parameterize datasets and search callables. | MAPPED |
+| Lab 6 | `HCM_AIC_Lab6.ipynb`, cell 6 | EasyOCR (`vi`, `en`) | `src/mvr/enrichment/ocr/easyocr_engine.py` | Extract adapter; preserve confidence threshold `0.3`, GPU choice, result text join, and model initialization outside timed inference. | MAPPED |
+| Lab 6 | Same notebook, cells 7-8 | PaddleOCR Vietnamese pipeline | `src/mvr/enrichment/ocr/paddleocr_engine.py` | Preserve PaddleOCR 2.x/3.x compatibility, orientation settings, deduplication, confidence filtering, and final selection as `ocr_text`. | MAPPED |
+| Lab 6 | Same notebook, cells 6 and 8 | OCR `word_recall` comparison | `src/mvr/evaluation/ocr_metrics.py` | Preserve lowercase whitespace-token recall and hit threshold `0.60`; use only for comparable labelled samples. | MAPPED |
+| Lab 6 | Same notebook, cell 10 | YOLOv8n object counts | `src/mvr/enrichment/objects/yolo.py` | Preserve `yolov8n.pt`, confidence `0.4`, COCO label names, per-frame `Counter`, and minimum-count semantics. Model weights remain external. | MAPPED |
+| Lab 6 | Same notebook, cell 11 | OpenCLIP RN50 image embeddings | `src/mvr/enrichment/embeddings/openclip.py` | Preserve `RN50`/`openai`, batch `64`, RGB preprocessing, and L2-normalized `float32` vectors when Lab 6 parity is required. Do not silently conflate this model with Lab 3's ViT-B-32 baseline. | MAPPED |
+| Lab 6 | Same notebook, cell 12 | Search document schema | `src/mvr/indexing/documents.py` | Introduce a typed representation for `frame_id`, `video_id`, `ts`, `caption`, `ocr_text`, `objects`, and `clip_vector`; keep generated JSON/Parquet outside Git. | MAPPED |
+| Lab 6 | Same notebook, cells 14-15 | Elasticsearch lifecycle, analyzer, mapping, and bulk indexing | `src/mvr/indexing/elasticsearch_index.py`, setup scripts | Preserve ES 8.x API, lowercase+asciifolding `vi_folded` analyzer, keyword/time/text/object fields, cosine dense vector, frame ID document IDs, and bulk insertion. Separate local service startup from index logic. | MAPPED |
+| Lab 6 | Same notebook, cells 17 and 28 | BM25 OCR/caption retrieval | `src/mvr/retrieval/lexical.py` | Preserve OCR emphasis (`ocr_text^2` in API multi-match), caption fallback, optional object range filters, highlighting, and top-K validation. | MAPPED |
+| Lab 6 | Same notebook, cells 17 and 28 | Flexible object query parsing/search | `src/mvr/retrieval/object_search.py` | Preserve `COCO-class:non-negative-count`, comma-separated conditions, class validation, duplicate rejection, and Elasticsearch `range gte` filters. | MAPPED |
+| Lab 6 | Same notebook, cells 18-19 | CLIP text vector and Elasticsearch semantic kNN | `src/mvr/retrieval/semantic.py` | Preserve RN50 text normalization, cosine vector field, branch size `30`, and `num_candidates` behavior (`100` notebook; `200` API) as explicit configuration. | MAPPED |
+| Lab 6 | Same notebook, cells 19 and 28 | Reciprocal Rank Fusion | `src/mvr/retrieval/hybrid.py` | Existing target utility is equivalent in core formula. Phase 04 must verify parity for 1-based ranks, default `rrf_k=60`, deterministic ID tie-break, and top-K truncation before marking migrated. | MAPPED |
+| Lab 6 | Same notebook, cell 25 | Weighted hybrid fusion | `src/mvr/retrieval/hybrid.py` | Existing target utility preserves independent per-query min-max normalization and equal-score-to-`1.0`. Phase 04 must verify endpoint/tie behavior and configured alpha (`0.25`) before marking migrated. | MAPPED |
+| Lab 6 | Same notebook, cells 19, 22, and 25 | Query-group evaluation and fusion studies | `src/mvr/evaluation/metrics.py` | Preserve OCR-text versus semantic grouping, R@1/R@5/MRR, latency, RRF-k study, and alpha study as evaluation code; tuning remains out of the reuse baseline. | MAPPED |
+| Lab 6 | Same notebook, cell 28 | FastAPI retrieval prototype | `src/mvr/api/app.py` | Extract app lifecycle and real endpoints (`/health`, `/search/text`, `/search/object`, `/search/hybrid`); preserve lazy CLIP load, validation bounds, stable hit payload, and static keyframe serving. | MAPPED |
+| Lab 6 | Same notebook, cell 29 | API smoke checks | `tests/integration/test_api.py` | Convert process/network smoke checks into deterministic tests with dependency injection where practical; preserve success, malformed-object `400`, static image, and OpenAPI assertions. | MAPPED |
+| FastAPI Lab | `lab1-fastapi-student/app/main.py` | FastAPI app/route structure and query validation | `src/mvr/api/app.py` | Reuse app organization, typed query bounds, async-compatible route shape, and response models; replace mock search with real services only in Phase 05. | MAPPED |
+| FastAPI Lab | `lab1-fastapi-student/app/models.py` | Pydantic response schemas | `src/mvr/api/schemas.py` | Adapt fields to MVR hit/search contracts while preserving explicit response models and generated OpenAPI documentation. | MAPPED |
+| FastAPI Lab | `lab1-fastapi-student/tests/test_app.py` | API contract tests | `tests/unit/api/` | Preserve TestClient patterns for success, case-insensitive search, empty results, required query, limit bounds, limit behavior, and score ordering. | MAPPED |
+| FastAPI Lab | `lab1-fastapi-student/.github/workflows/ci.yml` | GitHub Actions pytest workflow | `.github/workflows/ci.yml` | Target CI already has the same checkout/setup/install/test pattern. Reconcile action versions and dependencies deliberately; do not copy generated environments. | MAPPED |
+
+## Behavior and compatibility decisions for later phases
+
+1. **No model substitution:** Lab 3's primary OpenCLIP source is `ViT-B-32` with `laion2b_s34b_b79k`; Lab 4/Lab 6 use `RN50` with `openai`, while `configs/default.yaml` currently says `clip_rn50`. Phase 03 must make the selected baseline explicit and must not silently treat these as equivalent.
+2. **Normalized inner product:** Image and text embeddings are L2-normalized before dot product or `faiss.IndexFlatIP`; this is the cosine-similarity contract.
+3. **Frame contract:** Frames are zero-based, shot ends are inclusive, and timestamps are derived from `frame_idx / fps`.
+4. **Optional heavy dependencies:** TransNetV2, OCR engines, YOLO, OpenCLIP, FAISS, Elasticsearch, and their weights/services must remain optional by phase. Phase 01 installed none of them.
+5. **Generated data remains external:** Videos, keyframes, embeddings, Parquet/JSON outputs, indexes, Elasticsearch data, model weights, and raw benchmark artifacts remain ignored.
+6. **Elasticsearch lifecycle separation:** Lab 6 downloads/starts a local unsecured Elasticsearch process and deletes/recreates the `keyframes` index. Later packaging must separate service startup from index operations while retaining index semantics.
+7. **PaddleOCR is Lab 6's selected OCR output:** EasyOCR is retained for comparison; downstream Lab 6 documents use PaddleOCR text.
+8. **Deferred experiments stay deferred:** Vietnamese translation, SigLIP/SigLIP2, GVE/Qwen, vector-concatenation fusion, CrossEncoder reranking, RRF/alpha tuning, VLM captioning, temporal retrieval, UI, submission, and deployment are not part of the first runnable reuse baseline.
+9. **Dependency anomaly to verify later:** `lab1-fastapi-student/requirements.txt` contains `httpx2==2.7.0`; Phase 05 must verify the intended package rather than copying the pin blindly.
+
+## Status values
+
+```text
+NOT STARTED
+MAPPED
+MIGRATED
+VERIFIED
+BLOCKED
+```
+
+Any later behavior change must record the original behavior, new behavior, reason, whether it is compatibility-only or semantic, and verification status.
