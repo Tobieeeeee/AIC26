@@ -66,24 +66,37 @@ Blockers:
 
 ## Phase 03 — Semantic End-to-End Baseline
 
-Status: NOT STARTED
+Status: COMPLETE
 
-Commit: N/A
+Commit: `feat: reuse CLIP and FAISS semantic baseline` (this phase commit; hash reported after commit)
 
 Completed:
-- None
+- Reused Lab 3's OpenCLIP `ViT-B-32` / `laion2b_s34b_b79k` model loading, RGB preprocessing, image/text batching, and L2 normalization in `src/mvr/enrichment/embeddings/openclip.py`.
+- Reused Lab 4's contiguous normalized `float32` vectors, exact `faiss.IndexFlatIP`, inner-product search, descending top-K ranking, and retrieval metrics.
+- Added persistent FAISS index, JSON row metadata, schema-versioned manifest, and `.npy` embedding output without changing retrieval mathematics.
+- Connected the Phase 02 `keyframe_mapping.csv` and JPEG output to `build-index`, then connected the saved index to OpenCLIP text encoding and `search`.
+- Added optional semantic dependency packaging and kept heavy imports lazy so Phase 02 ingestion remains independently usable.
+- Verified real OpenCLIP image/text inference, FAISS save/load, and text-to-keyframe search over five real extracted keyframes.
+- Enforced normalized-vector and persistence invariants, preserved multi-relevance Recall@K, and made returned image paths directly resolvable.
+- Documented every reused component and all compatibility-only changes in `docs/LAB_REUSE_MAP.md`.
+- Did not begin OCR, YOLO, Elasticsearch, FastAPI, UI, temporal retrieval, reranking, or any Phase 04+ work.
 
 Remaining:
-- Reuse OpenCLIP from Lab 3.
-- Reuse FAISS from Lab 4.
-- Connect ingestion → embedding → index → text search.
-- Verify first E2E semantic baseline.
+- None for Phase 03.
 
 Tests:
-- N/A
+- `py -3.12 -m pip install -e ".[dev,semantic]"`: passed.
+- `py -3.12 -m pytest -q`: 42 passed, 2 skipped (real OpenCLIP opt-in test and optional TransNetV2 runtime).
+- `$env:MVR_RUN_OPENCLIP_TESTS='1'; py -3.12 -m pytest -q`: 43 passed, 1 skipped (only optional TransNetV2 runtime).
+- Real OpenCLIP integration: image and text outputs each had shape `(2, 512)`, `float32` dtype, and unit L2 norms.
+- Verified build command: `py -3.12 -m mvr.cli build-index --input artifacts\keyframes\phase02-smoke --output artifacts\indexes\phase03-smoke --device cpu`.
+- Persisted index check: 5 normalized vectors of dimension 512, exact `IndexFlatIP`, 5 FAISS rows, and 5 metadata rows after reload.
+- Verified search command: `py -3.12 -m mvr.cli search "a man riding a motorcycle" --index artifacts\indexes\phase03-smoke --top-k 5 --device cpu`.
+- Search rank 1: `L01_V001_S0002_K01`, video `L01_V001`, timestamp `1.56`, score `0.16651125252246857`.
+- Read-only source integrity count/size remained unchanged at 11,177 files / 1,221,999,740 bytes.
 
 Blockers:
-- None recorded.
+- None. TransNetV2 remains an intentionally optional Phase 02 backend and is not a Phase 03 blocker.
 
 ---
 
@@ -166,11 +179,11 @@ Blockers:
 
 # Current active phase
 
-Phase 02 — Reuse Ingestion: COMPLETE
+Phase 03 — Semantic End-to-End Baseline: COMPLETE
 
-Next phase: Phase 03 — Semantic End-to-End Baseline (NOT STARTED).
+Next phase: Phase 04 — Multimodal Reuse (NOT STARTED).
 
-Stop gate: do not begin Phase 03 without an explicit instruction.
+Stop gate: do not begin Phase 04 without an explicit instruction.
 
 # Resume instruction
 

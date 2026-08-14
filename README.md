@@ -31,11 +31,13 @@ Available now:
 
 - verified video probe, PySceneDetect shot detection, keyframe selection, exact FFmpeg extraction, and metadata mapping;
 - `py -3.12 -m mvr.cli ingest` for one video or a directory of videos.
+- verified OpenCLIP `ViT-B-32` image/text embeddings and persistent exact FAISS `IndexFlatIP` search;
+- `py -3.12 -m mvr.cli build-index` and `py -3.12 -m mvr.cli search` for semantic keyframe retrieval.
 
 Planned:
 
-- OCR, object detection, and image/text embedding pipelines;
-- FAISS/Elasticsearch indexing and semantic, OCR, object, and hybrid retrieval integration;
+- OCR and object detection pipelines;
+- Elasticsearch indexing and OCR, object, and hybrid retrieval integration;
 - query understanding, temporal retrieval, and reranking;
 - FastAPI serving, competition UI, submission adapter, and complete evaluation framework.
 
@@ -83,6 +85,18 @@ py -3.12 -m mvr.cli ingest "D:\project\STUDY\NAM_2\SELF_PRJ\AIC26\New folder\sho
 ```
 
 The output contains `shots.json`, `keyframe_mapping.csv`, benchmark JSON/CSV, and JPEG keyframes. The input may also be a directory. TransNetV2 is preserved as an optional backend but was not runtime-verified in Phase 02.
+
+## Verified semantic retrieval commands
+
+The Phase 03 smoke run reused the five real keyframes produced above and ran OpenCLIP and FAISS on CPU:
+
+```powershell
+py -3.12 -m pip install -e ".[dev,semantic]"
+py -3.12 -m mvr.cli build-index --input "artifacts\keyframes\phase02-smoke" --output "artifacts\indexes\phase03-smoke" --device cpu
+py -3.12 -m mvr.cli search "a man riding a motorcycle" --index "artifacts\indexes\phase03-smoke" --top-k 5 --device cpu
+```
+
+The build writes ignored `image_embeddings.npy`, `keyframes.faiss`, `metadata.json`, and `manifest.json` files. Search prints JSON results containing `rank`, `frame_id`, `video_id`, `timestamp`, `score`, and `image_path`.
 
 Đọc tiếp:
 

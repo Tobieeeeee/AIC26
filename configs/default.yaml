@@ -10,11 +10,13 @@ enrichment:
   ocr_confidence: 0.3
   object_detector: yolov8n
   object_confidence: 0.4
-  embedding_model: clip_rn50
+  embedding_model: ViT-B-32
+  embedding_pretrained: laion2b_s34b_b79k
+  embedding_batch_size: 32
 
 retrieval:
   lexical_backend: elasticsearch
-  semantic_backend: elasticsearch_knn
+  semantic_backend: faiss_flat_ip
   candidate_k: 30
   hybrid_method: weighted
   rrf_k: 60
