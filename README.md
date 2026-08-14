@@ -4,6 +4,20 @@ Repo khung để biến các lab hiện có thành một hệ thống thi Multim
 
 This is a starter/base repository for an end-to-end Multimedia Video Retrieval competition system. It defines the shared architecture and includes a small tested retrieval foundation; the complete competition system is not implemented yet.
 
+
+## Development Convention
+
+This repository separates experimental work from production implementation.
+
+- Production system code belongs under `src/mvr/` as importable `.py` modules.
+- Experimental notebooks belong under `notebooks/experiments/`.
+- Original lab/reference notebooks remain under `notebooks/reference/`.
+- The production pipeline must not depend on manually executing Jupyter notebooks.
+- Successful notebook experiments should be promoted into tested Python modules before integration.
+
+All coding agents and contributors must read `AGENTS.md` before implementing features.
+
+
 ## Development status
 
 Existing foundation:
