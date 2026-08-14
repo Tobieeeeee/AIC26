@@ -34,11 +34,12 @@ Available now:
 - verified OpenCLIP `ViT-B-32` image/text embeddings and persistent exact FAISS `IndexFlatIP` search;
 - `py -3.12 -m mvr.cli build-index` and `py -3.12 -m mvr.cli search` for semantic keyframe retrieval.
 - lightweight-verified Lab 6 adapters for EasyOCR, PaddleOCR, YOLOv8n, Elasticsearch documents/index requests, BM25, object filtering, semantic kNN, RRF, and weighted fusion.
+- a verified FastAPI serving layer with health and semantic search, plus text, object, and RRF hybrid routes when the configured Elasticsearch index is reachable.
 
 Planned:
 
 - query understanding, temporal retrieval, and reranking;
-- FastAPI serving, competition UI, submission adapter, and complete evaluation framework.
+- competition UI, submission adapter, and complete evaluation framework.
 
 ## Pipeline
 
@@ -70,7 +71,7 @@ Video
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
-pip install -e .[dev]
+pip install -e .[dev,api]
 pytest -q
 ```
 
@@ -126,6 +127,49 @@ py -3.12 -m pytest -q
 ```
 
 The runtime test performs real EasyOCR, PaddleOCR, YOLOv8n, and RN50 inference; creates five `SearchDocument` records; indexes them in Elasticsearch; and runs BM25, object, semantic kNN, RRF, and weighted hybrid retrieval. The synthetic smoke frames contained no YOLO-detectable COCO objects, so the real `person:1` object request returned zero hits. This is runtime verification only; retrieval quality has not been benchmarked or validated.
+
+## Verified API startup and requests
+
+Install the lightweight API stack with the confirmed FastAPI/Starlette test client package. Add the existing `semantic` and `search` extras for the real local retrieval smoke run:
+
+```powershell
+py -3.12 -m pip install -e ".[dev,api,semantic,search]"
+```
+
+Start Elasticsearch as shown in the Phase 04 section, then configure the existing ignored smoke artifacts and start Uvicorn:
+
+```powershell
+$env:MVR_SEMANTIC_INDEX=(Resolve-Path -LiteralPath "artifacts\indexes\phase03-smoke").Path
+$env:MVR_DEVICE="cpu"
+$env:MVR_ES_URL="http://localhost:9200"
+$env:MVR_ES_INDEX="keyframes"
+$env:MVR_KEYFRAME_DIR=(Resolve-Path -LiteralPath "artifacts\keyframes\phase02-smoke\keyframes").Path
+py -3.12 -m uvicorn mvr.api.app:app --host 127.0.0.1 --port 8015
+```
+
+These requests were verified against the five-keyframe smoke indexes:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8015/health"
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/semantic" `
+  -ContentType "application/json" `
+  -Body '{"query":"a man riding a motorcycle","top_k":3}'
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/text" `
+  -ContentType "application/json" `
+  -Body '{"query":"00","top_k":3}'
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/object" `
+  -ContentType "application/json" `
+  -Body '{"want":"person:1","top_k":3}'
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/hybrid" `
+  -ContentType "application/json" `
+  -Body '{"query":"00","top_k":3,"rrf_k":60}'
+```
+
+`/search/semantic` is always registered, but returns `503` when no valid `MVR_SEMANTIC_INDEX` is configured. The text, object, and hybrid routes are registered only when `MVR_ES_URL` is explicitly configured, reachable at startup, and contains `MVR_ES_INDEX`; the health payload reports the actual runtime state instead of treating unavailable dependencies as healthy.
 
 Đọc tiếp:
 

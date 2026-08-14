@@ -149,23 +149,44 @@ Blockers:
 
 ## Phase 05 — API and Tests
 
-Status: NOT STARTED
+Status: COMPLETE
 
-Commit: N/A
+Commit: `feat: reuse FastAPI serving baseline` (this phase commit; hash reported after commit)
 
 Completed:
-- None
+- Reused the FastAPI Lab application/Pydantic/TestClient structure and Lab 6 health, BM25, object, RRF hybrid, lazy CLIP, validation, stable hit, OpenAPI, and static-file patterns.
+- Added `GET /health` and the required `POST /search/semantic` backed by the persisted Phase 03 FAISS index and its manifest-selected OpenCLIP model.
+- Added `POST /search/text`, `/search/object`, and `/search/hybrid` only when explicitly configured Elasticsearch is reachable and the configured index exists at application startup.
+- Kept index/model loading lazy and reusable; request handlers call existing retrieval services instead of rebuilding indexes or reimplementing retrieval mathematics.
+- Added explicit Pydantic request/response schemas, nonblank query and numeric bound validation, framework-neutral object-error translation to HTTP `400`, and runtime failures as HTTP `503`.
+- Preserved Lab 6 hybrid API defaults: branch candidate size `30`, RRF `60`, and API kNN candidates `200`; no model, retrieval, or fusion tuning was performed.
+- Added optional real static JPEG serving from `MVR_KEYFRAME_DIR` and adapted URLs to the Phase 02 nested keyframe layout.
+- Added twelve lightweight API contract tests using injected retrieval services and changed CI to install only the lightweight `dev,api` extras.
+- Verified that `httpx2` is the intended modern Starlette TestClient dependency and used a compatible range rather than copying the lab pin blindly.
+- Verified real Uvicorn startup and every implemented endpoint over the existing five-keyframe FAISS/Elasticsearch smoke corpus.
+- Updated README with only the exact startup and request commands exercised in Phase 05.
+- Did not begin UI, query understanding, temporal retrieval, reranking, submission, deployment, publication, or Phase 06.
 
 Remaining:
-- Reuse FastAPI patterns.
-- Add verified endpoints.
-- Complete lightweight tests/CI.
+- None for Phase 05.
+- Retrieval quality remains unbenchmarked; the API smoke run verifies serving/runtime integration only.
 
 Tests:
-- N/A
+- Baseline before Phase 05: `py -3.12 -m pytest -q`: 71 passed, 3 skipped.
+- Test-first red gate: `py -3.12 -m pytest -q tests\unit\api\test_app.py` failed at collection because FastAPI and the serving modules did not yet exist.
+- Focused API suite: `py -3.12 -m pytest -q tests\unit\api\test_app.py`: 12 passed.
+- API compilation: `py -3.12 -m compileall -q src\mvr\api`: passed.
+- Lightweight suite after implementation: `py -3.12 -m pytest -q`: 83 passed, 3 skipped (real OpenCLIP, real Lab 6 runtime, and optional TransNetV2 opt-in tests).
+- Independent Phase 05 code review: all four Important findings were fixed; follow-up assessment reported no Critical/Important issues and readiness `Yes`.
+- Real Uvicorn health: semantic configured/available and initially lazy; Elasticsearch available with 5 documents; semantic reported loaded after the first request.
+- Real semantic POST `a man riding a motorcycle`: 3 hits; rank 1 `L01_V001_S0002_K01` at `1.56s`, score `0.16651125252246857`.
+- Real text POST `00`: 1 hit; `L01_V001_S0001_K01` with OCR text `00:00:00.480 12`, score `1.6309344`.
+- Real object POST `person:1`: request executed successfully with 0 hits, consistent with the Phase 04 smoke corpus.
+- Real hybrid POST `00`, `rrf_k=60`: 3 hits; rank 1 `L01_V001_S0001_K01`, RRF score `0.032266458495966696`.
+- Malformed object POST returned `400`; static keyframe request returned `200 image/jpeg`; OpenAPI contained all five implemented routes.
 
 Blockers:
-- None recorded.
+- None. Elasticsearch is required only for the conditionally exposed text/object/hybrid routes.
 
 ---
 
@@ -200,11 +221,11 @@ Blockers:
 
 # Current active phase
 
-Phase 04 — Multimodal Reuse: COMPLETE
+Phase 05 — API and Tests: COMPLETE
 
-Next phase: Phase 05 — API and Tests (NOT STARTED).
+Next phase: Phase 06 — Verify and Publish (NOT STARTED).
 
-Stop gate: do not begin Phase 05 without an explicit instruction.
+Stop gate: do not begin Phase 06 without an explicit instruction.
 
 # Resume instruction
 
