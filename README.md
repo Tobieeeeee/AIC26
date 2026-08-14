@@ -97,23 +97,35 @@ py -3.12 -m mvr.cli search "a man riding a motorcycle" --index "artifacts\indexe
 
 The build writes ignored `image_embeddings.npy`, `keyframes.faiss`, `metadata.json`, and `manifest.json` files. Search prints JSON results containing `rank`, `frame_id`, `video_id`, `timestamp`, `score`, and `image_path`.
 
-## Phase 04 optional integrations
+## Verified Phase 04 runtime integration
 
-The Phase 04 adapters preserve Lab 6 defaults, but their external runtimes have different verification levels:
+The real CPU smoke test uses the five ignored Phase 02 keyframes and preserves Lab 6's EasyOCR/PaddleOCR threshold `0.3`, `yolov8n.pt` threshold `0.4`, OpenCLIP `RN50` / `openai` batch `64`, Elasticsearch 8.11.4 mapping, kNN candidates `100`, RRF `60`, and weighted alpha `0.25`. It recreates the local development index named `keyframes`.
 
-- Elasticsearch 8.x client installation and request construction are verified; no service was available at `localhost:9200`, so live indexing/search was not run.
-- EasyOCR and PaddleOCR/PaddlePaddle remain in the optional `ocr` dependency extra; their model runtimes and OCR quality were not tested.
-- Ultralytics YOLOv8n remains in the optional `objects` dependency extra; model weights were not downloaded and detection quality was not tested.
-- Lab 6's Elasticsearch vector path explicitly uses OpenCLIP `RN50` / `openai`, separate from Phase 03's `ViT-B-32` FAISS index. RN50 inference was not run in Phase 04.
-
-The verified lightweight setup and test commands were:
+Install the optional runtimes with the command that was verified locally:
 
 ```powershell
-py -3.12 -m pip install -e ".[dev,semantic,search]"
+py -3.12 -m pip install -e ".[dev,semantic,search,ocr,objects]"
+```
+
+The smoke run used the official Elasticsearch 8.11.4 Windows archive after verifying its published SHA-512. Once extracted under the ignored runtime directory, it was started with the original Lab 6 settings:
+
+```powershell
+$esRuntimeRoot=(Resolve-Path -LiteralPath "artifacts\indexes\phase04-elasticsearch").Path
+$esInstall=Join-Path $esRuntimeRoot "elasticsearch-8.11.4"
+$esBat=Join-Path $esInstall "bin\elasticsearch.bat"
+$env:ES_JAVA_OPTS="-Xms1g -Xmx1g"
+Start-Process -FilePath "cmd.exe" -ArgumentList @("/c",$esBat,"-E","xpack.security.enabled=false","-E","discovery.type=single-node") -RedirectStandardOutput (Join-Path $esRuntimeRoot "es_boot.stdout.log") -RedirectStandardError (Join-Path $esRuntimeRoot "es_boot.stderr.log") -WindowStyle Hidden
+```
+
+Run the opt-in real-runtime integration test only after Elasticsearch is reachable:
+
+```powershell
+$env:MVR_RUN_PHASE04_RUNTIME_TESTS="1"
+py -3.12 -m pytest -q -s tests\integration\test_lab6_runtime.py
 py -3.12 -m pytest -q
 ```
 
-These checks validate packaging, schemas, request construction, error handling, and fusion mathematics. Retrieval quality has not been benchmarked or validated.
+The runtime test performs real EasyOCR, PaddleOCR, YOLOv8n, and RN50 inference; creates five `SearchDocument` records; indexes them in Elasticsearch; and runs BM25, object, semantic kNN, RRF, and weighted hybrid retrieval. The synthetic smoke frames contained no YOLO-detectable COCO objects, so the real `person:1` object request returned zero hits. This is runtime verification only; retrieval quality has not been benchmarked or validated.
 
 Đọc tiếp:
 

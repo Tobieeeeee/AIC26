@@ -104,7 +104,7 @@ Blockers:
 
 Status: COMPLETE
 
-Commit: `feat: reuse Lab 6 multimodal retrieval components` (this phase commit; hash reported after commit)
+Commits: `feat: reuse Lab 6 multimodal retrieval components`; `test: verify Lab 6 multimodal retrieval runtime` (runtime hash reported after commit)
 
 Completed:
 - Reused Lab 6 EasyOCR (`vi`, `en`) filtering with automatic CUDA choice and confidence threshold `0.3` in a lazy adapter.
@@ -120,25 +120,30 @@ Completed:
 - Added compatibility validation for frame IDs, OCR metric preconditions, normalized semantic vectors, and Elasticsearch candidate limits.
 - Verified RRF one-based ranks/default `60` and weighted-fusion independent normalization, equal-score handling, endpoint ties, and configured alpha `0.25` without tuning.
 - Kept EasyOCR, PaddleOCR/PaddlePaddle, Ultralytics, and Elasticsearch as optional dependency groups with lazy model/backend imports.
+- Completed real CPU inference with EasyOCR, PaddleOCR, YOLOv8n, and exact Lab 6 RN50/OpenAI over five existing Phase 02 keyframes.
+- Started checksum-verified Elasticsearch 8.11.4 locally with Lab 6's single-node/security/heap settings, recreated the preserved `keyframes` mapping, and indexed five real enriched documents.
+- Executed real BM25, object, semantic kNN, RRF, and weighted retrieval requests and printed representative metadata-rich Top-K results.
+- Added `tests/integration/test_lab6_runtime.py` as an opt-in reproducible real-runtime gate.
 - Did not start FastAPI, UI, temporal retrieval, reranking, or any Phase 05+ work.
 
 Remaining:
-- None for Phase 04 packaging and lightweight behavior verification.
-- Live OCR, YOLO, RN50, and Elasticsearch service execution remains optional and was not required by the lightweight phase gate.
+- None for Phase 04 packaging or runtime integration verification.
+- The five-frame synthetic corpus produced no YOLO objects, so object retrieval executed successfully with zero hits; a positive real object-match case remains unobserved rather than fabricated.
 - Retrieval quality remains unbenchmarked; Phase 03 and Phase 04 are engineering baselines only.
 
 Tests:
 - Baseline before Phase 04: `py -3.12 -m pytest -q`: 42 passed, 2 skipped.
-- Verified dependency command: `py -3.12 -m pip install -e ".[dev,semantic,search]"`.
+- Verified runtime dependency command: `py -3.12 -m pip install -e ".[dev,semantic,search,ocr,objects]"`.
 - Phase 04 focused tests: 37 passed.
-- Full lightweight suite: `py -3.12 -m pytest -q`: 71 passed, 2 skipped (real OpenCLIP opt-in test and optional TransNetV2 runtime).
-- OpenCLIP opt-in suite: `$env:MVR_RUN_OPENCLIP_TESTS='1'; py -3.12 -m pytest -q`: 72 passed, 1 skipped (optional TransNetV2 runtime).
-- Production import smoke: EasyOCR, PaddleOCR, YOLO, documents, Elasticsearch indexing, BM25, object parsing, and semantic kNN modules imported successfully without model packages installed.
-- Elasticsearch 8.19.3 client installed successfully; `Elasticsearch("http://localhost:9200").ping()` returned `False`, so live index creation/search was not attempted.
+- Full lightweight suite: `py -3.12 -m pytest -q`: 71 passed, 3 skipped (real OpenCLIP, real Lab 6 runtime, and optional TransNetV2 opt-in tests).
+- Real Phase 04 runtime test: `$env:MVR_RUN_PHASE04_RUNTIME_TESTS='1'; py -3.12 -m pytest -q -s tests\integration\test_lab6_runtime.py`: 1 passed, 9 upstream deprecation/runtime warnings.
+- Combined real-runtime suite: `$env:MVR_RUN_OPENCLIP_TESTS='1'; $env:MVR_RUN_PHASE04_RUNTIME_TESTS='1'; py -3.12 -m pytest -q`: 73 passed, 1 skipped, 9 upstream warnings (only optional TransNetV2 skipped).
+- Runtime versions: EasyOCR 1.7.2, PaddleOCR 3.7.0, PaddlePaddle 3.3.1, Ultralytics 8.4.120, OpenCLIP 3.3.0, Elasticsearch client 8.19.3, and Elasticsearch server 8.11.4.
+- Real RN50 output: five 1024-dimensional normalized `float32` image vectors; Elasticsearch index count: five.
 - Read-only source integrity count/size remained unchanged at 11,177 files / 1,221,999,740 bytes.
 
 Blockers:
-- None for Phase 04. Missing local Elasticsearch, OCR model runtimes, Ultralytics, and model weights limit optional runtime verification but do not block the required lightweight reuse packaging.
+- None for Phase 04 runtime execution. The smoke corpus has no YOLO-detectable objects, so positive-hit object retrieval was not demonstrated; the real `person:1` branch was executed and returned zero results.
 
 ---
 
