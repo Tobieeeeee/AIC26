@@ -13,6 +13,9 @@ enrichment:
   embedding_model: ViT-B-32
   embedding_pretrained: laion2b_s34b_b79k
   embedding_batch_size: 32
+  lab6_embedding_model: RN50
+  lab6_embedding_pretrained: openai
+  lab6_embedding_batch_size: 64
 
 retrieval:
   lexical_backend: elasticsearch
@@ -21,6 +24,12 @@ retrieval:
   hybrid_method: weighted
   rrf_k: 60
   weighted_alpha: 0.25
+  elasticsearch_num_candidates: 100
+
+elasticsearch:
+  url: http://localhost:9200
+  index: keyframes
+  server_version: 8.11.4
 
 api:
   top_k_default: 20

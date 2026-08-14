@@ -102,27 +102,43 @@ Blockers:
 
 ## Phase 04 — Multimodal Reuse
 
-Status: NOT STARTED
+Status: COMPLETE
 
-Commit: N/A
+Commit: `feat: reuse Lab 6 multimodal retrieval components` (this phase commit; hash reported after commit)
 
 Completed:
-- None
+- Reused Lab 6 EasyOCR (`vi`, `en`) filtering with automatic CUDA choice and confidence threshold `0.3` in a lazy adapter.
+- Reused PaddleOCR Vietnamese 3.x/2.x construction compatibility, result traversal, confidence threshold `0.3`, deduplication, and final joined OCR text.
+- Reused YOLOv8n `yolov8n.pt`, confidence `0.4`, COCO name lookup, and per-frame object counts.
+- Reused lowercase whitespace-token OCR recall and the Lab 6 hit threshold `0.60`.
+- Added the Lab 6 search document schema and an adapter from Phase 02 keyframe IDs/timestamps.
+- Reused the Elasticsearch 8.x `vi_folded` analyzer, field mapping, cosine dense vector, explicit recreate, frame-ID bulk indexing, chunk size `50`, timeout `120`, refresh, and count semantics.
+- Reused BM25 OCR emphasis (`ocr_text^2`), caption fallback, match-all behavior, optional person/car filters, and highlighting.
+- Reused all-COCO flexible object parsing, validation, and Elasticsearch `range gte` filters.
+- Reused semantic kNN request behavior with `clip_vector`, normalized injected text embeddings, and notebook `num_candidates=100`.
+- Made Lab 6's `RN50` / `openai` / batch `64` embedding identity explicit without replacing or conflating the Phase 03 ViT-B-32 FAISS baseline.
+- Added compatibility validation for frame IDs, OCR metric preconditions, normalized semantic vectors, and Elasticsearch candidate limits.
+- Verified RRF one-based ranks/default `60` and weighted-fusion independent normalization, equal-score handling, endpoint ties, and configured alpha `0.25` without tuning.
+- Kept EasyOCR, PaddleOCR/PaddlePaddle, Ultralytics, and Elasticsearch as optional dependency groups with lazy model/backend imports.
+- Did not start FastAPI, UI, temporal retrieval, reranking, or any Phase 05+ work.
 
 Remaining:
-- EasyOCR
-- PaddleOCR
-- YOLOv8n
-- Elasticsearch
-- BM25
-- object search
-- hybrid retrieval
+- None for Phase 04 packaging and lightweight behavior verification.
+- Live OCR, YOLO, RN50, and Elasticsearch service execution remains optional and was not required by the lightweight phase gate.
+- Retrieval quality remains unbenchmarked; Phase 03 and Phase 04 are engineering baselines only.
 
 Tests:
-- N/A
+- Baseline before Phase 04: `py -3.12 -m pytest -q`: 42 passed, 2 skipped.
+- Verified dependency command: `py -3.12 -m pip install -e ".[dev,semantic,search]"`.
+- Phase 04 focused tests: 37 passed.
+- Full lightweight suite: `py -3.12 -m pytest -q`: 71 passed, 2 skipped (real OpenCLIP opt-in test and optional TransNetV2 runtime).
+- OpenCLIP opt-in suite: `$env:MVR_RUN_OPENCLIP_TESTS='1'; py -3.12 -m pytest -q`: 72 passed, 1 skipped (optional TransNetV2 runtime).
+- Production import smoke: EasyOCR, PaddleOCR, YOLO, documents, Elasticsearch indexing, BM25, object parsing, and semantic kNN modules imported successfully without model packages installed.
+- Elasticsearch 8.19.3 client installed successfully; `Elasticsearch("http://localhost:9200").ping()` returned `False`, so live index creation/search was not attempted.
+- Read-only source integrity count/size remained unchanged at 11,177 files / 1,221,999,740 bytes.
 
 Blockers:
-- None recorded.
+- None for Phase 04. Missing local Elasticsearch, OCR model runtimes, Ultralytics, and model weights limit optional runtime verification but do not block the required lightweight reuse packaging.
 
 ---
 
@@ -179,11 +195,11 @@ Blockers:
 
 # Current active phase
 
-Phase 03 — Semantic End-to-End Baseline: COMPLETE
+Phase 04 — Multimodal Reuse: COMPLETE
 
-Next phase: Phase 04 — Multimodal Reuse (NOT STARTED).
+Next phase: Phase 05 — API and Tests (NOT STARTED).
 
-Stop gate: do not begin Phase 04 without an explicit instruction.
+Stop gate: do not begin Phase 05 without an explicit instruction.
 
 # Resume instruction
 

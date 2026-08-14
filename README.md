@@ -33,11 +33,10 @@ Available now:
 - `py -3.12 -m mvr.cli ingest` for one video or a directory of videos.
 - verified OpenCLIP `ViT-B-32` image/text embeddings and persistent exact FAISS `IndexFlatIP` search;
 - `py -3.12 -m mvr.cli build-index` and `py -3.12 -m mvr.cli search` for semantic keyframe retrieval.
+- lightweight-verified Lab 6 adapters for EasyOCR, PaddleOCR, YOLOv8n, Elasticsearch documents/index requests, BM25, object filtering, semantic kNN, RRF, and weighted fusion.
 
 Planned:
 
-- OCR and object detection pipelines;
-- Elasticsearch indexing and OCR, object, and hybrid retrieval integration;
 - query understanding, temporal retrieval, and reranking;
 - FastAPI serving, competition UI, submission adapter, and complete evaluation framework.
 
@@ -97,6 +96,24 @@ py -3.12 -m mvr.cli search "a man riding a motorcycle" --index "artifacts\indexe
 ```
 
 The build writes ignored `image_embeddings.npy`, `keyframes.faiss`, `metadata.json`, and `manifest.json` files. Search prints JSON results containing `rank`, `frame_id`, `video_id`, `timestamp`, `score`, and `image_path`.
+
+## Phase 04 optional integrations
+
+The Phase 04 adapters preserve Lab 6 defaults, but their external runtimes have different verification levels:
+
+- Elasticsearch 8.x client installation and request construction are verified; no service was available at `localhost:9200`, so live indexing/search was not run.
+- EasyOCR and PaddleOCR/PaddlePaddle remain in the optional `ocr` dependency extra; their model runtimes and OCR quality were not tested.
+- Ultralytics YOLOv8n remains in the optional `objects` dependency extra; model weights were not downloaded and detection quality was not tested.
+- Lab 6's Elasticsearch vector path explicitly uses OpenCLIP `RN50` / `openai`, separate from Phase 03's `ViT-B-32` FAISS index. RN50 inference was not run in Phase 04.
+
+The verified lightweight setup and test commands were:
+
+```powershell
+py -3.12 -m pip install -e ".[dev,semantic,search]"
+py -3.12 -m pytest -q
+```
+
+These checks validate packaging, schemas, request construction, error handling, and fusion mathematics. Retrieval quality has not been benchmarked or validated.
 
 Đọc tiếp:
 
