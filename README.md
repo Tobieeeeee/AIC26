@@ -1,4 +1,4 @@
-# Multimedia Video Retrieval Competition System
+# AI Challenge 2026 - Okchokchok..
 
 Repo khung để biến các lab hiện có thành một hệ thống thi Multimedia Video Retrieval có thể phát triển theo module.
 
