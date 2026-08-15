@@ -192,40 +192,63 @@ Blockers:
 
 ## Phase 06 — Verify and Publish
 
-Status: NOT STARTED
+Status: COMPLETE
 
-Commit: N/A
+Commit: `chore: add agent_output to gitignore and record Phase 06 completion` (hash recorded after push)
 
 Completed:
-- None
+- Confirmed branch `feat/reuse-lab-baseline` with local HEAD and `origin/feat/reuse-lab-baseline` both at `83fe5e1` before the phase started.
+- Ran full branch diff against `origin/main` (`3c64022`): 64 files changed, 6706 insertions, 14 deletions — all legitimate source/doc/test/config/CI files.
+- Verified no generated artifacts, model weights, datasets, raw videos, FAISS indexes, embeddings, `.env`, secrets, or Elasticsearch runtime data are tracked. Only `.gitkeep` placeholders exist under ignored artifact directories.
+- Found `agent_output/` (AI agent output directory) was untracked but not gitignored; added `agent_output/` to `.gitignore` — this is the only legitimate Phase 06 repository change.
+- Ran lightweight test suite: **83 passed, 3 skipped** in 2.32s.
+- 3 skipped: real OpenCLIP opt-in test (`MVR_RUN_OPENCLIP_TESTS` not set), real Lab 6 runtime test (`MVR_RUN_PHASE04_RUNTIME_TESTS` not set), and optional TransNetV2 runtime.
+- Verified all documented README commands against actual implementation:
+  - `py -3.12 -m mvr.cli --help` → passed, shows `ingest`, `build-index`, `search`.
+  - `py -3.12 -m mvr.cli ingest --help` → passed, all flags present.
+  - `py -3.12 -m mvr.cli build-index --help` → passed, all flags present.
+  - `py -3.12 -m mvr.cli search --help` → passed, all flags present.
+  - `import mvr.api.app` → passed.
+  - `pytest -q` → passed.
+- Verified GitHub CLI (`gh` 2.97.0) authenticated as `Tobieeeeee` with `repo` scope.
+- Verified remote `origin` is the intended repository `https://github.com/Tobieeeeee/AIC26.git`.
+- Committed `.gitignore` and this progress update.
+- Pushed `feat/reuse-lab-baseline` to `origin`.
+- Created Pull Request `feat/reuse-lab-baseline → main` titled `feat: build runnable MVR baseline from existing labs`.
+- Did not merge the PR.
 
 Remaining:
-- Final audit.
-- Final tests.
-- Push feature branch.
-- Create PR to `main`.
+- None for Phase 06.
+- PR merge to `main` requires explicit human approval.
+- Retrieval quality benchmarking is future work.
+- TransNetV2 real runtime verification remains optional/deferred.
 
 Tests:
-- N/A
+- Lightweight suite: `py -3.12 -m pytest -q`: **83 passed, 3 skipped** in 2.32s.
+- Real OpenCLIP tests: skipped (opt-in, requires `MVR_RUN_OPENCLIP_TESTS=1`).
+- Real Lab 6 runtime tests: skipped (opt-in, requires `MVR_RUN_PHASE04_RUNTIME_TESTS=1`).
+- Optional TransNetV2 runtime: skipped (intentional; heavy optional dependency).
 
 Git:
-- Branch: TBD
-- Remote: TBD
-- Push: NOT STARTED
-- PR: NOT CREATED
+- Branch: `feat/reuse-lab-baseline`
+- Remote: `origin → https://github.com/Tobieeeeee/AIC26.git`
+- Push: COMPLETE
+- PR: CREATED (feat/reuse-lab-baseline → main)
 
 Blockers:
-- None recorded.
+- None.
 
 ---
 
 # Current active phase
 
-Phase 05 — API and Tests: COMPLETE
+Phase 06 — Verify and Publish: COMPLETE
 
-Next phase: Phase 06 — Verify and Publish (NOT STARTED).
+All planned phases are complete.
 
-Stop gate: do not begin Phase 06 without an explicit instruction.
+Next action: human review and merge of the open Pull Request.
+
+Stop gate: do not begin post-baseline improvements without explicit approval.
 
 # Resume instruction
 
@@ -237,4 +260,4 @@ codex/00_MASTER_PLAN.md
 docs/CODEX_PROGRESS.md
 ```
 
-Then execute only the currently active phase file.
+All six phases are complete. The feature branch is pushed and a PR to `main` is open.
