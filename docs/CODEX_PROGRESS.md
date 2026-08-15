@@ -194,46 +194,60 @@ Blockers:
 
 Status: COMPLETE
 
-Commit: `chore: add agent_output to gitignore and record Phase 06 completion` (hash recorded after push)
+Commits:
+1. `chore: add agent_output to gitignore and record Phase 06 completion` (`5522202`) — initial Phase 06 commit
+2. `chore: extend gitignore for agent_task and requirements-dev; record full Phase 06 E2E verification` — E2E/fresh-clone results
 
 Completed:
 - Confirmed branch `feat/reuse-lab-baseline` with local HEAD and `origin/feat/reuse-lab-baseline` both at `83fe5e1` before the phase started.
 - Ran full branch diff against `origin/main` (`3c64022`): 64 files changed, 6706 insertions, 14 deletions — all legitimate source/doc/test/config/CI files.
 - Verified no generated artifacts, model weights, datasets, raw videos, FAISS indexes, embeddings, `.env`, secrets, or Elasticsearch runtime data are tracked. Only `.gitkeep` placeholders exist under ignored artifact directories.
-- Found `agent_output/` (AI agent output directory) was untracked but not gitignored; added `agent_output/` to `.gitignore` — this is the only legitimate Phase 06 repository change.
-- Ran lightweight test suite: **83 passed, 3 skipped** in 2.32s.
-- 3 skipped: real OpenCLIP opt-in test (`MVR_RUN_OPENCLIP_TESTS` not set), real Lab 6 runtime test (`MVR_RUN_PHASE04_RUNTIME_TESTS` not set), and optional TransNetV2 runtime.
-- Verified all documented README commands against actual implementation:
-  - `py -3.12 -m mvr.cli --help` → passed, shows `ingest`, `build-index`, `search`.
-  - `py -3.12 -m mvr.cli ingest --help` → passed, all flags present.
-  - `py -3.12 -m mvr.cli build-index --help` → passed, all flags present.
-  - `py -3.12 -m mvr.cli search --help` → passed, all flags present.
-  - `import mvr.api.app` → passed.
-  - `pytest -q` → passed.
-- Verified GitHub CLI (`gh` 2.97.0) authenticated as `Tobieeeeee` with `repo` scope.
-- Verified remote `origin` is the intended repository `https://github.com/Tobieeeeee/AIC26.git`.
-- Committed `.gitignore` and this progress update.
-- Pushed `feat/reuse-lab-baseline` to `origin`.
-- Created Pull Request `feat/reuse-lab-baseline → main` titled `feat: build runnable MVR baseline from existing labs`.
-- Did not merge the PR.
+- Added `agent_output/`, `agent_task/`, and `requirements-dev.txt` to `.gitignore` — these are AI agent and developer convenience files, not source.
+- Verified no hard-coded local absolute paths exist in any production source file (`src/`).
+- Ran Phase 05 API runtime verification (separate task): confirmed `/health` was degraded only due to missing env vars; no production code changes needed.
+- **E2E smoke path verified** (Phase 06 task):
+  - Artifacts present: `artifacts/indexes/phase03-smoke/` (4 files) and `artifacts/keyframes/phase02-smoke/keyframes/L01_V001/` (5 JPEGs) ✅
+  - Elasticsearch 8.11.4 at `http://localhost:9200`, `keyframes` index with 5 documents ✅
+  - Uvicorn started with all 5 env vars configured ✅
+  - `GET /health` → `status=ok`, `semantic.configured=true, available=true`, `elasticsearch.configured=true, available=true, documents=5` ✅
+  - `POST /search/semantic` `"a man riding a motorcycle"` → rank 1 `L01_V001_S0002_K01` at `1.56s`, score `0.16651` (matches Phase 03 baseline exactly) ✅
+  - `POST /search/text` `"00"` → rank 1 `L01_V001_S0001_K01`, OCR `00:00:00.480 12`, score `1.6309` (matches Phase 04/05) ✅
+  - `POST /search/hybrid` `"00", rrf_k=60` → rank 1 `L01_V001_S0001_K01`, RRF score `0.03226` ✅
+  - `GET /keyframes/L01_V001/L01_V001_S0002_K01.jpg` → `200 image/jpeg` ✅
+- **Fresh-clone verification**:
+  - Cloned `https://github.com/Tobieeeeee/AIC26.git` into `AIC26-clean-verify/`
+  - Checked out `feat/reuse-lab-baseline`
+  - Created new `.venv-verify` Python 3.12 environment
+  - Installed `.[dev,api]` — no undeclared dependencies, no missing source files
+  - `import mvr` → OK in clean clone
+  - `python -m pytest -q -rs` → **75 passed, 11 skipped** — PASS
+    - 3 expected skips (real OpenCLIP, real Lab 6 runtime, optional TransNetV2)
+    - 8 additional FAISS skips: expected — `faiss-cpu` is in the `semantic` extra, not `dev,api`; tests correctly self-skip when optional extras are absent
+    - 0 failures ✅
+- Ran full test suite in working repo: **83 passed, 3 skipped** in 1.20s.
+- Committed and pushed final `.gitignore` and progress updates.
+- All six planned phases verified; PR #1 open for human merge.
 
 Remaining:
 - None for Phase 06.
 - PR merge to `main` requires explicit human approval.
 - Retrieval quality benchmarking is future work.
 - TransNetV2 real runtime verification remains optional/deferred.
+- Fresh-clone `semantic` extra tests require `.[dev,api,semantic]` install to be fully exercised.
 
 Tests:
-- Lightweight suite: `py -3.12 -m pytest -q`: **83 passed, 3 skipped** in 2.32s.
-- Real OpenCLIP tests: skipped (opt-in, requires `MVR_RUN_OPENCLIP_TESTS=1`).
-- Real Lab 6 runtime tests: skipped (opt-in, requires `MVR_RUN_PHASE04_RUNTIME_TESTS=1`).
-- Optional TransNetV2 runtime: skipped (intentional; heavy optional dependency).
+- Working repo normal suite: `py -3.12 -m pytest -q`: **83 passed, 3 skipped** in 1.20s.
+- Fresh-clone `.[dev,api]` suite: **75 passed, 11 skipped** (8 FAISS skips expected without `semantic` extra) — PASS.
+- Real OpenCLIP tests: previously PASS (`MVR_RUN_OPENCLIP_TESTS=1`).
+- Real Lab 6 runtime tests: previously PASS (`MVR_RUN_PHASE04_RUNTIME_TESTS=1`).
+- Phase 05 API runtime verification: PASS (separate task, no code changes).
+- Phase 06 E2E smoke: PASS.
 
 Git:
 - Branch: `feat/reuse-lab-baseline`
 - Remote: `origin → https://github.com/Tobieeeeee/AIC26.git`
 - Push: COMPLETE
-- PR: CREATED (feat/reuse-lab-baseline → main)
+- PR: CREATED — https://github.com/Tobieeeeee/AIC26/pull/1 (OPEN, not merged)
 
 Blockers:
 - None.
@@ -244,7 +258,7 @@ Blockers:
 
 Phase 06 — Verify and Publish: COMPLETE
 
-All planned phases are complete.
+All planned phases are complete. The baseline is end-to-end verified, fresh-clone verified, and published.
 
 Next action: human review and merge of the open Pull Request.
 
@@ -260,4 +274,4 @@ codex/00_MASTER_PLAN.md
 docs/CODEX_PROGRESS.md
 ```
 
-All six phases are complete. The feature branch is pushed and a PR to `main` is open.
+All six phases are complete. The feature branch is pushed and PR #1 to `main` is open.
