@@ -71,8 +71,8 @@ Video
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
-pip install -e .[dev,api]
-pytest -q
+pip install -e requirement.text
+pytest -q python -m
 ```
 
 ## Verified ingestion command
@@ -133,7 +133,7 @@ The runtime test performs real EasyOCR, PaddleOCR, YOLOv8n, and RN50 inference; 
 Install the lightweight API stack with the confirmed FastAPI/Starlette test client package. Add the existing `semantic` and `search` extras for the real local retrieval smoke run:
 
 ```powershell
-py -3.12 -m pip install -e ".[dev,api,semantic,search]"
+py -3.12 -m pip install -e requierment.txt
 ```
 
 Start Elasticsearch as shown in the Phase 04 section, then configure the existing ignored smoke artifacts and start Uvicorn:
