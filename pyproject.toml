@@ -7,10 +7,36 @@ name = "mvr-competition"
 version = "0.1.0"
 description = "Modular multimedia video retrieval competition system"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "scenedetect>=0.6.4,<0.8",
+    "opencv-python>=4.8,<6",
+    "tqdm>=4.66,<5",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = [
+    "httpx2>=2.7,<3",
+    "pytest>=8,<9",
+]
+api = [
+    "fastapi>=0.110,<1",
+    "pydantic>=2.5,<3",
+    "uvicorn>=0.27,<1",
+]
+semantic = [
+    "faiss-cpu>=1.8,<2",
+    "open-clip-torch>=2.24,<4",
+    "Pillow>=10,<13",
+    "torch>=2.2,<3",
+    "torchvision>=0.17,<1",
+]
+search = ["elasticsearch>=8,<9"]
+ocr = [
+    "easyocr>=1.7,<2",
+    "paddleocr>=2,<4",
+    "paddlepaddle>=2,<4",
+]
+objects = ["ultralytics>=8,<9"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

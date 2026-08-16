@@ -55,4 +55,23 @@ def weighted_fuse(
         + (1.0 - alpha) * semantic.get(item_id, 0.0)
         for item_id in candidates
     }
-    return sorted(combined.items(), key=lambda item: (-item[1], item[0]))[:top_k]
+
+    def tie_key(item_id: str):
+        active_present = (
+            (alpha > 0.0 and item_id in lexical_scores)
+            or (alpha < 1.0 and item_id in semantic_scores)
+        )
+        active_scores = []
+        if alpha > 0.0:
+            active_scores.append(lexical.get(item_id, 0.0))
+        if alpha < 1.0:
+            active_scores.append(semantic.get(item_id, 0.0))
+        return (
+            -combined[item_id],
+            not active_present,
+            -max(active_scores, default=0.0),
+            item_id,
+        )
+
+    ordered = sorted(candidates, key=tie_key)[:top_k]
+    return [(item_id, combined[item_id]) for item_id in ordered]

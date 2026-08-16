@@ -27,13 +27,19 @@ Existing foundation:
 - CI configuration;
 - original reference notebooks.
 
-Planned or in progress:
+Available now:
 
-- video ingestion, shot detection, and keyframe extraction integration;
-- OCR, object detection, and image/text embedding pipelines;
-- FAISS/Elasticsearch indexing and semantic, OCR, object, and hybrid retrieval integration;
+- verified video probe, PySceneDetect shot detection, keyframe selection, exact FFmpeg extraction, and metadata mapping;
+- `py -3.12 -m mvr.cli ingest` for one video or a directory of videos.
+- verified OpenCLIP `ViT-B-32` image/text embeddings and persistent exact FAISS `IndexFlatIP` search;
+- `py -3.12 -m mvr.cli build-index` and `py -3.12 -m mvr.cli search` for semantic keyframe retrieval.
+- lightweight-verified Lab 6 adapters for EasyOCR, PaddleOCR, YOLOv8n, Elasticsearch documents/index requests, BM25, object filtering, semantic kNN, RRF, and weighted fusion.
+- a verified FastAPI serving layer with health and semantic search, plus text, object, and RRF hybrid routes when the configured Elasticsearch index is reachable.
+
+Planned:
+
 - query understanding, temporal retrieval, and reranking;
-- FastAPI serving, competition UI, submission adapter, and complete evaluation framework.
+- competition UI, submission adapter, and complete evaluation framework.
 
 ## Pipeline
 
@@ -65,9 +71,105 @@ Video
 python -m venv .venv
 # Windows: .venv\Scripts\activate
 # macOS/Linux: source .venv/bin/activate
-pip install -e .[dev]
+pip install -e .[dev,api]
 pytest -q
 ```
+
+## Verified ingestion command
+
+The Phase 02 smoke run used Python 3.12, FFmpeg/ffprobe, and the default PySceneDetect settings:
+
+```powershell
+py -3.12 -m pip install -e ".[dev]"
+py -3.12 -m mvr.cli ingest "D:\project\STUDY\NAM_2\SELF_PRJ\AIC26\New folder\shot-boundary-lab-student\student\data\videos\L01_V001.mp4" --output "artifacts\keyframes\phase02-smoke"
+```
+
+The output contains `shots.json`, `keyframe_mapping.csv`, benchmark JSON/CSV, and JPEG keyframes. The input may also be a directory. TransNetV2 is preserved as an optional backend but was not runtime-verified in Phase 02.
+
+## Verified semantic retrieval commands
+
+The Phase 03 smoke run reused the five real keyframes produced above and ran OpenCLIP and FAISS on CPU:
+
+```powershell
+py -3.12 -m pip install -e ".[dev,semantic]"
+py -3.12 -m mvr.cli build-index --input "artifacts\keyframes\phase02-smoke" --output "artifacts\indexes\phase03-smoke" --device cpu
+py -3.12 -m mvr.cli search "a man riding a motorcycle" --index "artifacts\indexes\phase03-smoke" --top-k 5 --device cpu
+```
+
+The build writes ignored `image_embeddings.npy`, `keyframes.faiss`, `metadata.json`, and `manifest.json` files. Search prints JSON results containing `rank`, `frame_id`, `video_id`, `timestamp`, `score`, and `image_path`.
+
+## Verified Phase 04 runtime integration
+
+The real CPU smoke test uses the five ignored Phase 02 keyframes and preserves Lab 6's EasyOCR/PaddleOCR threshold `0.3`, `yolov8n.pt` threshold `0.4`, OpenCLIP `RN50` / `openai` batch `64`, Elasticsearch 8.11.4 mapping, kNN candidates `100`, RRF `60`, and weighted alpha `0.25`. It recreates the local development index named `keyframes`.
+
+Install the optional runtimes with the command that was verified locally:
+
+```powershell
+py -3.12 -m pip install -e ".[dev,semantic,search,ocr,objects]"
+```
+
+The smoke run used the official Elasticsearch 8.11.4 Windows archive after verifying its published SHA-512. Once extracted under the ignored runtime directory, it was started with the original Lab 6 settings:
+
+```powershell
+$esRuntimeRoot=(Resolve-Path -LiteralPath "artifacts\indexes\phase04-elasticsearch").Path
+$esInstall=Join-Path $esRuntimeRoot "elasticsearch-8.11.4"
+$esBat=Join-Path $esInstall "bin\elasticsearch.bat"
+$env:ES_JAVA_OPTS="-Xms1g -Xmx1g"
+Start-Process -FilePath "cmd.exe" -ArgumentList @("/c",$esBat,"-E","xpack.security.enabled=false","-E","discovery.type=single-node") -RedirectStandardOutput (Join-Path $esRuntimeRoot "es_boot.stdout.log") -RedirectStandardError (Join-Path $esRuntimeRoot "es_boot.stderr.log") -WindowStyle Hidden
+```
+
+Run the opt-in real-runtime integration test only after Elasticsearch is reachable:
+
+```powershell
+$env:MVR_RUN_PHASE04_RUNTIME_TESTS="1"
+py -3.12 -m pytest -q -s tests\integration\test_lab6_runtime.py
+py -3.12 -m pytest -q
+```
+
+The runtime test performs real EasyOCR, PaddleOCR, YOLOv8n, and RN50 inference; creates five `SearchDocument` records; indexes them in Elasticsearch; and runs BM25, object, semantic kNN, RRF, and weighted hybrid retrieval. The synthetic smoke frames contained no YOLO-detectable COCO objects, so the real `person:1` object request returned zero hits. This is runtime verification only; retrieval quality has not been benchmarked or validated.
+
+## Verified API startup and requests
+
+Install the lightweight API stack with the confirmed FastAPI/Starlette test client package. Add the existing `semantic` and `search` extras for the real local retrieval smoke run:
+
+```powershell
+py -3.12 -m pip install -e ".[dev,api,semantic,search]"
+```
+
+Start Elasticsearch as shown in the Phase 04 section, then configure the existing ignored smoke artifacts and start Uvicorn:
+
+```powershell
+$env:MVR_SEMANTIC_INDEX=(Resolve-Path -LiteralPath "artifacts\indexes\phase03-smoke").Path
+$env:MVR_DEVICE="cpu"
+$env:MVR_ES_URL="http://localhost:9200"
+$env:MVR_ES_INDEX="keyframes"
+$env:MVR_KEYFRAME_DIR=(Resolve-Path -LiteralPath "artifacts\keyframes\phase02-smoke\keyframes").Path
+py -3.12 -m uvicorn mvr.api.app:app --host 127.0.0.1 --port 8015
+```
+
+These requests were verified against the five-keyframe smoke indexes:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8015/health"
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/semantic" `
+  -ContentType "application/json" `
+  -Body '{"query":"a man riding a motorcycle","top_k":3}'
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/text" `
+  -ContentType "application/json" `
+  -Body '{"query":"00","top_k":3}'
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/object" `
+  -ContentType "application/json" `
+  -Body '{"want":"person:1","top_k":3}'
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/hybrid" `
+  -ContentType "application/json" `
+  -Body '{"query":"00","top_k":3,"rrf_k":60}'
+```
+
+`/search/semantic` is always registered, but returns `503` when no valid `MVR_SEMANTIC_INDEX` is configured. The text, object, and hybrid routes are registered only when `MVR_ES_URL` is explicitly configured, reachable at startup, and contains `MVR_ES_INDEX`; the health payload reports the actual runtime state instead of treating unavailable dependencies as healthy.
 
 Đọc tiếp:
 

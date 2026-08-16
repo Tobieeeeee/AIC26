@@ -1,0 +1,129 @@
+from pathlib import Path
+
+import pytest
+
+from mvr.ingestion.models import Keyframe, Shot, VideoInfo
+
+
+def test_pipeline_uses_primary_shots_for_keyframes_and_metadata(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from mvr.ingestion import pipeline
+
+    video_path = tmp_path / "video.mp4"
+    video_path.touch()
+    video = VideoInfo("video", video_path, 25.0, 25, 1.0)
+    monkeypatch.setattr(pipeline, "probe_video", lambda path: video)
+
+    class Detector:
+        def __init__(self, method: str) -> None:
+            self.method = method
+
+        def detect(self, current: VideoInfo) -> list[Shot]:
+            return [Shot(current.video_id, self.method, 1, 0, 24, current.fps)]
+
+    monkeypatch.setattr(
+        pipeline,
+        "create_detector",
+        lambda method, threshold, device: Detector(method),
+    )
+    keyframe = Keyframe(
+        "video_S0001_K01",
+        "video",
+        1,
+        1,
+        12,
+        0.48,
+        "keyframes/video/video_S0001_K01.jpg",
+    )
+    selected: list[list[Shot]] = []
+
+    def fake_make_keyframes(shots, long_shot_seconds, sample_every_seconds):
+        selected.append(shots)
+        return [keyframe]
+
+    monkeypatch.setattr(pipeline, "make_keyframes", fake_make_keyframes)
+    monkeypatch.setattr(pipeline, "extract_keyframes", lambda *args: None)
+    metadata: list[tuple[list[Shot], list[Keyframe]]] = []
+    monkeypatch.setattr(
+        pipeline,
+        "write_metadata",
+        lambda output, shots, frames: metadata.append((shots, frames)),
+    )
+    monkeypatch.setattr(pipeline, "write_benchmark", lambda *args: None)
+
+    pipeline.run_pipeline(
+        video_path,
+        tmp_path / "output",
+        ["pyscenedetect", "transnetv2"],
+        "transnetv2",
+        27.0,
+        0.5,
+        "cpu",
+        12.0,
+        8.0,
+    )
+
+    assert [shot.method for shot in selected[0]] == ["transnetv2"]
+    assert metadata == [(selected[0], [keyframe])]
+
+
+def test_probe_error_closes_progress_and_propagates_original_exception(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from mvr.ingestion import pipeline
+
+    video_path = tmp_path / "broken.mp4"
+    video_path.touch()
+
+    class RecordingProgress:
+        def __init__(self, iterable, **kwargs) -> None:
+            self.iterable = iterable
+            self.closed = False
+            self.postfixes: list[dict[str, str]] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            self.closed = True
+
+        def __iter__(self):
+            return iter(self.iterable)
+
+        def set_postfix(self, **values: str) -> None:
+            self.postfixes.append(values)
+
+    bars: list[RecordingProgress] = []
+
+    def fake_tqdm(iterable, **kwargs):
+        bar = RecordingProgress(iterable, **kwargs)
+        bars.append(bar)
+        return bar
+
+    failure = RuntimeError("probe failed")
+    monkeypatch.setattr(pipeline, "tqdm", fake_tqdm)
+    monkeypatch.setattr(
+        pipeline,
+        "probe_video",
+        lambda path: (_ for _ in ()).throw(failure),
+    )
+
+    with pytest.raises(RuntimeError) as captured:
+        pipeline.run_pipeline(
+            video_path,
+            tmp_path / "output",
+            ["pyscenedetect"],
+            "pyscenedetect",
+            27.0,
+            0.5,
+            "cpu",
+            12.0,
+            8.0,
+        )
+
+    assert captured.value is failure
+    assert bars[0].postfixes == [{"file": "broken.mp4"}]
+    assert bars[0].closed is True

@@ -25,3 +25,22 @@ def test_weighted_fuse_combines_modalities():
         top_k=3,
     )
     assert {item_id for item_id, _ in result} == {"ocr-hit", "semantic-hit", "shared"}
+
+
+def test_rrf_preserves_one_based_scores_and_deterministic_ties():
+    assert rrf_fuse([["b"], ["a"]], rrf_k=60, top_k=2) == [
+        ("a", 1 / 61),
+        ("b", 1 / 61),
+    ]
+
+
+def test_weighted_endpoint_ties_prefer_candidates_from_active_branch():
+    assert [
+        item_id
+        for item_id, _ in weighted_fuse(
+            {"a": 10.0},
+            {"b": 1.0, "c": 2.0},
+            alpha=0.0,
+            top_k=3,
+        )
+    ] == ["c", "b", "a"]
