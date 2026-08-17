@@ -160,6 +160,36 @@ Notebook cell numbers below are zero-based JSON cell indices.
 21. **POST request contracts:** Lab 6 used GET query parameters, while the approved Phase 05 contract requires POST endpoints. Query values and all preserved bounds/defaults moved into typed JSON request models; retrieval calls and ranking mathematics are unchanged.
 22. **API failure reporting:** Health marks missing/corrupt semantic artifacts or missing semantic packages unavailable. Backend failures use controlled HTTP `503` responses, while diagnostic exceptions stay in server logs. This changes only failure presentation, not successful retrieval behavior.
 
+## Textual KIS task pack (post-baseline) — reuse without lab migration
+
+The Textual KIS competition-ready work (branch `feat/kis-competition-ready`,
+Tasks 01–09; see `docs/CODEX_PROGRESS.md` and `docs/AIC_KIS_FINAL_REPORT.md`)
+migrated **no new lab code**. It consumed already-migrated production modules
+and added KIS-specific logic on top, so it introduces no new source-lab rows
+above. Recorded here for completeness per rule 18 of `AGENTS.md`:
+
+| Existing module consumed | Consumed by | Lab-derived behavior changed? |
+|---|---|---|
+| `mvr.ingestion.probe.probe_video` | frame registry, refinement, E2E | No — called unmodified. |
+| `mvr.ingestion.extract.extract_keyframes` | exact-frame refinement window decode | No — called unmodified; the file was deliberately not edited. |
+| `mvr.ingestion.models.Keyframe` / `VideoInfo` | registry and refinement contracts | No. |
+| `mvr.indexing.faiss_index.FaissIndex`, `mvr.indexing.semantic_builder.build_semantic_index` | real AIC index build | No — an adapter emits the `keyframe_mapping.csv` shape the builder already expects instead of modifying the builder. |
+| `mvr.retrieval.semantic.SemanticRetriever`, `mvr.retrieval.hybrid.rrf_fuse` | KIS orchestration | No — retrieval and fusion mathematics untouched. |
+| `mvr.api.app.create_app`, `mvr.api.schemas` | `POST /search/kis` | No — new route follows the existing injectable-service/validation conventions; existing routes unchanged. |
+
+Two behavior notes for KIS-owned code (not lab-derived):
+
+23. **Refinement failure isolation:** `retrieval.frame_refinement.refine_top_candidates`
+    catches a per-candidate `OSError`/`RuntimeError` and falls back to that candidate's
+    unrefined coarse result instead of aborting the batch. This was added after an
+    intermittent FFmpeg pipe failure was observed under sustained real load
+    (heavy CPU OpenCLIP inference interleaved with repeated subprocess decodes).
+    It affects only failure handling; successful refinement is unchanged, and no
+    frame index is ever guessed.
+24. **Frame identity source:** KIS predictions use the organizer `map_keyframes`
+    `frame_idx` column as the original-video frame ID. The `n` ordinal and keyframe
+    filenames are used only as lookup keys, never as the submitted frame ID.
+
 ## Status values
 
 ```text

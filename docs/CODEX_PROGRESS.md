@@ -254,15 +254,151 @@ Blockers:
 
 ---
 
+---
+
+# Post-baseline work: Textual KIS Competition-Ready task pack
+
+Status: COMPLETE (all 9 tasks)
+
+Branch: `feat/kis-competition-ready` (branched from `main` after PR #1 merged)
+
+This work followed a separate task pack (kept out of Git as agent working
+material, like `codex/` phases but for KIS) rather than the `codex/` phase
+files. It was explicitly approved post-baseline work, executed one gated task
+at a time with a stop-and-report boundary after each.
+
+Commits, in order:
+
+1. `9b373dc` — Task 01, repository contract audit → `docs/AIC_KIS_IMPLEMENTATION_NOTES.md`
+2. `37576a6` — Task 02, AIC original-frame registry / organizer keyframe adapter
+3. `bfcf125` — Task 03, official KIS evaluator (R-Score, R@k, per-query Final Score)
+4. `dc297b1` — Task 04, KIS orchestration, Top-100 contract, `POST /search/kis`
+5. `9e688c0` — Task 05, exact-frame refinement on the original video
+6. `77c89aa` — Task 06, real-data KIS benchmark and refinement decision
+7. `47cd694` — Task 07, prediction contract validation and local export
+8. `245bda6` — Task 08, real AIC KIS end-to-end verification
+9. `6551e58` — Task 09, `docs/AIC_KIS_FINAL_REPORT.md`
+
+Completed:
+
+- Audited and reused the existing retrieval hit types, probe/extract utilities, and
+  API conventions instead of creating parallel abstractions.
+- Added an original-video frame registry that resolves organizer keyframes via the
+  verified `map_keyframes` `frame_idx` column (never the `n` ordinal or filename),
+  keyed compositely on `(video_id, keyframe_ref)`, and never guesses a missing mapping.
+- Implemented the documented competition scoring rule exactly, deliberately not
+  reusing the generic ID-set Recall@K/MRR in `evaluation/metrics.py`.
+- Exposed Top-100 KIS predictions through both a service and an always-registered
+  `POST /search/kis` route that reuses the existing lazily-loaded index/model.
+- Implemented and real-video-verified exact-frame refinement, then benchmarked it.
+- Added prediction validation plus a clearly-labeled local verification export;
+  no organizer transport format was invented.
+- Created `src/mvr/submission/`, which did not previously exist.
+
+Tests (current state, after the PR #2 hardening pass recorded below):
+
+- Working repo (with `semantic` extras installed): 173 passed, 5 skipped, 0 failed.
+- CI-equivalent environment (`.[dev,api]` only, matching `.github/workflows/ci.yml`):
+  165 passed, 13 skipped, 0 failed — the 8 extra skips are the existing
+  faiss-dependent tests, consistent with the Phase 06 fresh-clone result.
+- Real AIC KIS E2E (`MVR_RUN_AIC_KIS_E2E=1`): PASS in 60.37s.
+- Real exact-frame refinement decode (`MVR_RUN_FRAME_REFINEMENT_REAL_TESTS=1`): PASS,
+  cross-verified against an independent OpenCV decode of the same frame index.
+- Real `POST /search/kis` smoke over HTTP against a live Uvicorn process: PASS.
+- Real benchmark over 29 real L21 videos / 7800 real keyframes: executed; results and
+  the refinement decision are recorded in `docs/AIC_KIS_FINAL_REPORT.md`.
+
+Remaining / explicitly out of scope:
+
+- Hybrid and text/OCR modes were not benchmarked on real data in this environment
+  (no local Java/Elasticsearch/OCR runtime); the code paths exist and are unit-tested.
+- Exact-frame refinement is correct but not latency-viable (measured ~205s/query mean)
+  and is therefore not enabled by default; a seek-based decode would be needed first.
+- Ground truth is a small team-curated internal set, not organizer-labeled.
+- Q&A, TRAKE/temporal, Frontend, VLM, and deployment remain untouched per the pack's
+  stop gate.
+
+Blockers:
+
+- None.
+
+## PR #2 pre-merge hardening pass
+
+Status: COMPLETE
+
+Commit: `b6c35b1` — `fix: harden KIS correctness and candidate handling`
+
+An independent review of PR #2 (then-head `50cdc47`) identified three issues.
+Each was re-verified as a real defect against the actual code before being
+fixed, rather than accepted on the review's word:
+
+1. **Weak E2E correctness assertion.** The real E2E test asserted only
+   `0.0 <= final_score <= 1.0`, which a completely wrong retrieval also
+   satisfies. The known query's correct answer was measured to sit at real
+   rank 6, so the test now asserts `score.recall_at_k[20] == 1.0` — the
+   strongest official cutoff supported by evidence — and fails on regression.
+2. **Coarse and refinement scores were mixed.** `refine_top_candidates` wrote
+   the refinement window's local similarity into `KisCandidate.score`,
+   discarding the coarse retrieval score and conflating two non-comparable
+   score spaces (harmless while only semantic cosine is used, dangerous once
+   hybrid RRF scores are refined). `KisCandidate` gained a separate
+   `refinement_score: float | None`; `score` is now immutable across refinement.
+3. **Top-100 overfetch was capped at 100.** `search_kis`'s internal pool was
+   `min(top_k * 3, 100)`, so at `top_k=100` no overfetching occurred at all
+   and unmapped/duplicate hits inside the first 100 raw ranks could starve the
+   output below 100. Now `max(top_k * 3, 30)`, uncapped.
+
+Tests: 8 added. Focused suites 49 passed. Real AIC KIS E2E re-verified PASS
+(72.67s) with the strengthened assertion. Real frame-refinement decode
+re-verified PASS (47.67s). Full regression 173 passed / 5 skipped / 0 failed;
+CI-equivalent 165 passed / 13 skipped / 0 failed.
+
+Handoff gap closed in the same pass: the README told a reader to point
+`MVR_SEMANTIC_INDEX` at `artifacts/indexes/aic_l21`, but nothing documented or
+exposed how to *create* that index from an AIC organizer dataset — it had only
+ever been built by an uncommitted ad-hoc script, so no teammate could
+reproduce it. `python -m mvr.cli build-aic-index` now exposes the existing,
+already-tested `build_aic_keyframe_mapping_csv` + `build_semantic_index` path
+(discovering every video that has both local keyframes and a mapping CSV), and
+the README documents it. Verified for real on `L21_V001`: 307 vectors, all
+four index files written.
+
+Deliberate scope decisions (recorded so they are not mistaken for oversights):
+
+- **Fix 3 has no measured effect on the current benchmark.** Re-running all six
+  internal queries against the live code confirmed identical R@k and an
+  identical mean Final Score of `0.6333`, because every query already returned
+  a full 100 candidates under the old formula — the current index is built from
+  organizer keyframes, all of which resolve, so there were no unmapped losses
+  to recover. Fix 3 removes a latent defect; it is not a score improvement, and
+  the benchmark table in `docs/AIC_KIS_FINAL_REPORT.md` remains accurate.
+- **Fix 3 only fully applies to the semantic path.** The Elasticsearch hybrid
+  branch is still bounded by the pre-existing baseline `TOP_N_EACH = 30`
+  per-branch candidate limit in `mvr.api.app`, which caps the fused union at
+  roughly 60 regardless of the KIS overfetch value. That constant is Lab 6
+  baseline code and was intentionally left untouched.
+- **`refinement_score` is intentionally not exposed on `KisHit`.** The
+  `POST /search/kis` route does not run refinement (it is default-off for
+  latency), so no data is lost today. If refinement is ever wired into that
+  route, `KisHit` must be extended at the same time or the field will silently
+  disappear from API responses.
+
+Blockers:
+
+- None.
+
+---
+
 # Current active phase
 
-Phase 06 — Verify and Publish: COMPLETE
+None. Phases 01–06 (reuse baseline) are COMPLETE and merged via PR #1. The
+Textual KIS competition-ready task pack (Tasks 01–09) is also COMPLETE on
+`feat/kis-competition-ready`.
 
-All planned phases are complete. The baseline is end-to-end verified, fresh-clone verified, and published.
+Next action: human review of `feat/kis-competition-ready`.
 
-Next action: human review and merge of the open Pull Request.
-
-Stop gate: do not begin post-baseline improvements without explicit approval.
+Stop gate: do not begin Q&A, TRAKE, Frontend, VLM, advanced reranking, or
+deployment without explicit approval.
 
 # Resume instruction
 
@@ -272,6 +408,6 @@ If work is interrupted, read:
 AGENTS.md
 codex/00_MASTER_PLAN.md
 docs/CODEX_PROGRESS.md
+docs/AIC_KIS_IMPLEMENTATION_NOTES.md
+docs/AIC_KIS_FINAL_REPORT.md
 ```
-
-All six phases are complete. The feature branch is pushed and PR #1 to `main` is open.

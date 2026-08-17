@@ -177,6 +177,183 @@ def test_semantic_commands_reject_non_positive_values_before_model_load(
         )
 
 
+def test_build_aic_index_command_discovers_videos_and_reuses_semantic_builder(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The AIC dataset -> index path must be reproducible from the CLI alone,
+    otherwise a teammate cannot rebuild the index the README points at."""
+    from mvr import cli
+
+    dataset_root = tmp_path / "dataset"
+    for video_id in ("L21_V001", "L21_V002"):
+        keyframe_dir = dataset_root / "keyframes" / video_id
+        keyframe_dir.mkdir(parents=True)
+        (keyframe_dir / "001.jpg").write_bytes(b"")
+        map_dir = dataset_root / "map_keyframes"
+        map_dir.mkdir(exist_ok=True)
+        (map_dir / f"{video_id}.csv").write_text(
+            "n,pts_time,fps,frame_idx\n1,0.0,30.0,0\n", encoding="utf-8"
+        )
+    # A video with keyframes but no mapping CSV must be skipped, not guessed at.
+    (dataset_root / "keyframes" / "L21_V999").mkdir(parents=True)
+
+    calls: list[tuple] = []
+
+    class FakeEncoder:
+        def __init__(self, device: str) -> None:
+            calls.append(("encoder", device))
+
+    def fake_build(input_root, output_root, encoder, batch_size):
+        calls.append(("build", Path(input_root), Path(output_root), batch_size))
+        return type("BuiltIndex", (), {"manifest": {"vector_count": 2}})()
+
+    monkeypatch.setattr(cli, "OpenClipEncoder", FakeEncoder)
+    monkeypatch.setattr(cli, "build_semantic_index", fake_build)
+    output_root = tmp_path / "index"
+
+    cli.main(
+        [
+            "build-aic-index",
+            "--dataset-root", str(dataset_root),
+            "--output", str(output_root),
+            "--device", "cpu",
+        ]
+    )
+
+    assert calls[0] == ("encoder", "cpu")
+    staging_root = calls[1][1]
+    assert calls[1][2] == output_root
+    assert calls[1][3] == 32
+
+    import csv as csv_module
+
+    with (staging_root / "keyframe_mapping.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv_module.DictReader(handle))
+    assert {row["video_id"] for row in rows} == {"L21_V001", "L21_V002"}
+
+
+def test_build_aic_index_command_rejects_dataset_with_no_indexable_videos(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import pytest
+
+    from mvr import cli
+
+    dataset_root = tmp_path / "dataset"
+    (dataset_root / "keyframes").mkdir(parents=True)
+    monkeypatch.setattr(
+        cli, "OpenClipEncoder", lambda **_: pytest.fail("model must not load with no videos")
+    )
+
+    with pytest.raises(ValueError, match="no indexable videos"):
+        cli.main(
+            [
+                "build-aic-index",
+                "--dataset-root", str(dataset_root),
+                "--output", str(tmp_path / "index"),
+            ]
+        )
+
+
+def test_benchmark_kis_command_writes_summary_and_records(monkeypatch, tmp_path: Path) -> None:
+    from mvr import cli
+    from mvr.retrieval.semantic import SearchResult
+
+    class FakeIndex:
+        manifest = {"embedding_model": "ViT-B-32", "pretrained": "laion2b_s34b_b79k"}
+
+        @classmethod
+        def load(cls, index_root):
+            return cls()
+
+    class FakeEncoder:
+        def __init__(self, model_name: str, pretrained: str, device: str) -> None:
+            pass
+
+        def encode_text(self, texts):
+            return [[1.0]]
+
+    class FakeRetriever:
+        def __init__(self, encoder, index) -> None:
+            pass
+
+        def search(self, query: str, top_k: int):
+            return [
+                SearchResult(
+                    rank=1, frame_id="003", video_id="L21_V001",
+                    timestamp=8.7, score=0.9, image_path="unused.jpg",
+                )
+            ]
+
+    class FakeRegistry:
+        def __init__(self, root) -> None:
+            pass
+
+        def video_path(self, video_id: str):
+            return Path(f"{video_id}.mp4")
+
+        def video_info(self, video_id: str):
+            from mvr.ingestion.models import VideoInfo
+
+            return VideoInfo(video_id, Path(f"{video_id}.mp4"), 30.0, 100000, 3000.0)
+
+        def resolve_frame(self, video_id: str, keyframe_ref: str):
+            from mvr.ingestion.aic_dataset import AicFrameMapping
+
+            return AicFrameMapping(
+                video_id=video_id, keyframe_ref=keyframe_ref, frame_idx=261,
+                timestamp=8.7, fps=30.0,
+            )
+
+    refine_calls: list[tuple] = []
+
+    def fake_refine_top_candidates(candidates, **kwargs):
+        refine_calls.append((candidates, kwargs))
+        return candidates  # pass-through: no real FFmpeg/model needed for this wiring test
+
+    monkeypatch.setattr(cli, "FaissIndex", FakeIndex)
+    monkeypatch.setattr(cli, "OpenClipEncoder", FakeEncoder)
+    monkeypatch.setattr(cli, "SemanticRetriever", FakeRetriever)
+    monkeypatch.setattr(cli, "AicDatasetRegistry", FakeRegistry)
+    monkeypatch.setattr(cli, "refine_top_candidates", fake_refine_top_candidates)
+
+    gt_path = tmp_path / "gt.json"
+    gt_path.write_text(
+        json.dumps(
+            {
+                "label": "internal",
+                "queries": [
+                    {
+                        "query_id": "q1", "query_text": "a red car",
+                        "video_id": "L21_V001", "start_frame": 250, "end_frame": 270,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "bench_out"
+
+    cli.main(
+        [
+            "benchmark-kis",
+            "--index", str(tmp_path / "index"),
+            "--gt", str(gt_path),
+            "--dataset-root", str(tmp_path / "dataset"),
+            "--output", str(output_dir),
+            "--device", "cpu",
+        ]
+    )
+
+    records = json.loads((output_dir / "records.json").read_text(encoding="utf-8"))
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert {r["config_name"] for r in records} == {"semantic", "semantic+refine"}
+    assert all(r["final_score"] == 1.0 for r in records)  # frame 261 is inside [250,270]
+    assert set(summary.keys()) == {"semantic", "semantic+refine"}
+    assert refine_calls  # the refine branch was actually invoked, not skipped
+
+
 def test_search_requires_embedding_identity_in_manifest(monkeypatch, tmp_path: Path) -> None:
     import pytest
 
