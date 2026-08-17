@@ -34,3 +34,14 @@ elasticsearch:
 api:
   top_k_default: 20
   top_k_max: 100
+
+# Textual KIS. `frame_id` is always an ORIGINAL-video frame index resolved from
+# the organizer `map_keyframes` `frame_idx` column, never the `n` ordinal.
+kis:
+  top_k_default: 100
+  top_k_max: 100
+  benchmark_top_k: 100
+  refinement_enabled: false      # correct but ~205s/query; see AIC_KIS_FINAL_REPORT.md
+  refinement_top_n: 3
+  refinement_frame_radius: 45
+  local_export_format: local_verification_export

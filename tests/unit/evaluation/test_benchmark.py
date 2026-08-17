@@ -143,6 +143,43 @@ def test_build_aic_keyframe_mapping_csv_includes_only_existing_jpegs(tmp_path: P
     assert Path(rows[0]["image_path"]).name == "001.jpg"
 
 
+def test_build_aic_keyframe_mapping_csv_does_not_assume_zero_padding_width(
+    tmp_path: Path,
+) -> None:
+    """Keyframe JPEGs are matched numerically, so a different padding width
+    (e.g. 4-digit "0003.jpg" instead of 3-digit "003.jpg") still resolves."""
+    _write_map_keyframes_csv(tmp_path, "L21_V001", [("3", "8.7", "30.0", "261")])
+    _touch_keyframe(tmp_path, "L21_V001", "0003")  # 4-digit, not 3-digit
+
+    output = build_aic_keyframe_mapping_csv(
+        tmp_path, tmp_path / "generated" / "keyframe_mapping.csv", ["L21_V001"]
+    )
+
+    import csv as csv_module
+
+    with output.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv_module.DictReader(handle))
+
+    assert len(rows) == 1
+    assert rows[0]["keyframe_id"] == "0003"
+    assert Path(rows[0]["image_path"]).name == "0003.jpg"
+
+
+def test_build_aic_keyframe_mapping_csv_handles_missing_keyframe_dir(tmp_path: Path) -> None:
+    """A video with a mapping CSV but no downloaded keyframes yields no rows
+    (the real L22-L30 situation) rather than raising."""
+    _write_map_keyframes_csv(tmp_path, "L22_V001", [("1", "0.0", "30.0", "0")])
+
+    output = build_aic_keyframe_mapping_csv(
+        tmp_path, tmp_path / "generated" / "keyframe_mapping.csv", ["L22_V001"]
+    )
+
+    import csv as csv_module
+
+    with output.open(newline="", encoding="utf-8") as handle:
+        assert list(csv_module.DictReader(handle)) == []
+
+
 def test_build_aic_keyframe_mapping_csv_spans_multiple_videos(tmp_path: Path) -> None:
     _write_map_keyframes_csv(tmp_path, "L21_V001", [("1", "0.0", "30.0", "0")])
     _write_map_keyframes_csv(tmp_path, "L21_V002", [("1", "0.0", "25.0", "0")])

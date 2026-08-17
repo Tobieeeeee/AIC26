@@ -133,9 +133,17 @@ refinement is turned on in a live setting.
   returned 5 correctly-ranked real predictions; server verified cleanly
   stopped afterward (port confirmed free).
 - normal pytest before Task 08: 163 passed, 4 skipped, 0 failed.
-- normal pytest after Task 08: 163 passed, 5 skipped (added E2E test is
-  itself opt-in), 0 failed.
-- `git diff --check`: clean at every task boundary (01 through 08).
+- normal pytest after Task 08 and the final cleanup pass: **165 passed,
+  5 skipped, 0 failed** (working environment, `semantic` extras installed).
+- **CI-equivalent verification**: in a clean throwaway virtualenv installed
+  with only `.[dev,api]` — exactly what `.github/workflows/ci.yml` installs,
+  with no torch/faiss/open-clip/elasticsearch present — the suite is
+  **157 passed, 13 skipped, 0 failed**. The 8 extra skips versus the working
+  environment are the pre-existing faiss-dependent tests, matching the Phase
+  06 fresh-clone precedent exactly. No new module introduces a hard
+  dependency that would break CI.
+- `git diff --check`: clean at every task boundary (01 through 08) and after
+  the final cleanup pass.
 - private/generated data tracked: **no** — verified via `git status` at every
   task boundary; the AIC dataset lives entirely outside the repository tree
   (`E:\AIC\AIC_DATASET_ROOT`, sibling to `E:\AIC\PROJECT`), and

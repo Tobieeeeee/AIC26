@@ -35,11 +35,12 @@ Available now:
 - `py -3.12 -m mvr.cli build-index` and `py -3.12 -m mvr.cli search` for semantic keyframe retrieval.
 - lightweight-verified Lab 6 adapters for EasyOCR, PaddleOCR, YOLOv8n, Elasticsearch documents/index requests, BM25, object filtering, semantic kNN, RRF, and weighted fusion.
 - a verified FastAPI serving layer with health and semantic search, plus text, object, and RRF hybrid routes when the configured Elasticsearch index is reachable.
+- real-data-verified Textual KIS support: an AIC original-frame registry, the official KIS evaluator (`R@1/5/20/50/100` and per-query Final Score), Top-100 KIS orchestration behind `POST /search/kis`, exact-frame refinement on the original video, a reproducible KIS benchmark, and prediction validation/export. See `docs/AIC_KIS_FINAL_REPORT.md` for measured results and limitations.
 
 Planned:
 
 - query understanding, temporal retrieval, and reranking;
-- competition UI, submission adapter, and complete evaluation framework.
+- competition UI, organizer submission transport, and complete evaluation framework.
 
 ## Pipeline
 
@@ -170,6 +171,55 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/hybrid" `
 ```
 
 `/search/semantic` is always registered, but returns `503` when no valid `MVR_SEMANTIC_INDEX` is configured. The text, object, and hybrid routes are registered only when `MVR_ES_URL` is explicitly configured, reachable at startup, and contains `MVR_ES_INDEX`; the health payload reports the actual runtime state instead of treating unavailable dependencies as healthy.
+
+## Verified Textual KIS commands
+
+KIS returns competition predictions as `<video_id>, <frame_id>` pairs on the
+**original** video (at most 100 per query). Point `MVR_AIC_DATASET_ROOT` at a
+local AIC dataset root containing `videos/`, `keyframes/<video_id>/`, and
+`map_keyframes/<video_id>.csv`; never commit that data.
+
+`POST /search/kis` is always registered and needs only the semantic index —
+it resolves each retrieved keyframe to its original frame index and drops any
+candidate it cannot verify rather than guessing:
+
+```powershell
+$env:MVR_SEMANTIC_INDEX=(Resolve-Path -LiteralPath "artifacts\indexes\aic_l21").Path
+$env:MVR_AIC_DATASET_ROOT="<local AIC dataset root>"
+$env:MVR_DEVICE="cpu"
+py -3.12 -m uvicorn mvr.api.app:app --host 127.0.0.1 --port 8015
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/kis" `
+  -ContentType "application/json" `
+  -Body '{"query":"a geyser of water shooting high into the sky","top_k":5}'
+```
+
+The benchmark command scores a query set with the official KIS evaluator and
+writes `records.json` plus `summary.json` under an ignored output directory:
+
+```powershell
+py -3.12 -m mvr.cli benchmark-kis `
+  --index "artifacts\indexes\aic_l21" `
+  --gt "artifacts\verification\aic_kis\gt_queries.json" `
+  --dataset-root "<local AIC dataset root>" `
+  --output "artifacts\verification\aic_kis" `
+  --device cpu
+```
+
+Opt-in real-data verification (both skip unless explicitly enabled):
+
+```powershell
+$env:MVR_RUN_AIC_KIS_E2E="1"; $env:MVR_AIC_DATASET_ROOT="<local AIC dataset root>"
+py -3.12 -m pytest tests\integration\test_aic_kis_e2e.py -v
+
+$env:MVR_RUN_FRAME_REFINEMENT_REAL_TESTS="1"
+py -3.12 -m pytest tests\integration\test_frame_refinement_real.py -v
+```
+
+Exact-frame refinement is implemented and verified against real decoded video,
+but is **not enabled by default**: the measured benchmark showed identical
+accuracy at roughly 3500x the latency. `docs/AIC_KIS_FINAL_REPORT.md` records
+that evidence and the remaining limitations.
 
 Đọc tiếp:
 

@@ -8,6 +8,7 @@ from typing import Sequence
 from .enrichment.embeddings.openclip import OpenClipEncoder
 from .evaluation.benchmark import (
     KisBenchmarkQuery,
+    KisBenchmarkRecord,
     run_kis_benchmark_query,
     summarize_kis_benchmark,
 )
@@ -18,6 +19,9 @@ from .ingestion.pipeline import run_pipeline
 from .retrieval.frame_refinement import RefinementWindowConfig, refine_top_candidates
 from .retrieval.kis import KisCandidate, search_kis
 from .retrieval.semantic import SemanticRetriever
+
+
+KIS_BENCHMARK_TOP_K = 100
 
 
 def _positive_int(value: str) -> int:
@@ -112,6 +116,19 @@ def _add_benchmark_kis_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(command="benchmark-kis")
 
 
+def _load_kis_benchmark_queries(gt_path: Path) -> list[KisBenchmarkQuery]:
+    payload = json.loads(Path(gt_path).read_text(encoding="utf-8"))
+    label = payload.get("label", "internal")
+    return [
+        KisBenchmarkQuery(
+            query_id=row["query_id"], query_text=row["query_text"],
+            video_id=row["video_id"], start_frame=row["start_frame"],
+            end_frame=row["end_frame"], label=label,
+        )
+        for row in payload["queries"]
+    ]
+
+
 def _run_benchmark_kis(
     *, index: Path, gt: Path, dataset_root: Path, output: Path,
     refine_top_n: int, refine_frame_radius: int, device: str,
@@ -124,45 +141,36 @@ def _run_benchmark_kis(
     )
     retriever = SemanticRetriever(encoder, faiss_index)
     registry = AicDatasetRegistry(dataset_root)
+    window = RefinementWindowConfig(frame_radius=refine_frame_radius)
 
-    gt_payload = json.loads(Path(gt).read_text(encoding="utf-8"))
-    queries = [
-        KisBenchmarkQuery(
-            query_id=row["query_id"], query_text=row["query_text"],
-            video_id=row["video_id"], start_frame=row["start_frame"],
-            end_frame=row["end_frame"], label=gt_payload.get("label", "internal"),
+    def coarse_search(text: str) -> list[KisCandidate]:
+        return search_kis(
+            text, top_k=KIS_BENCHMARK_TOP_K, semantic_service=retriever,
+            multimodal_service=None, aic_registry=registry,
         )
-        for row in gt_payload["queries"]
-    ]
 
-    records = []
-    for query in queries:
-        def _semantic_search(text: str, _q=query) -> list[KisCandidate]:
-            return search_kis(
-                text, top_k=100, semantic_service=retriever,
-                multimodal_service=None, aic_registry=registry,
+    def refined_search(text: str) -> list[KisCandidate]:
+        return refine_top_candidates(
+            coarse_search(text),
+            query_vector=encoder.encode_text([text.strip()])[0],
+            encoder=encoder,
+            video_path_for=registry.video_path,
+            video_info_for=registry.video_info,
+            window=window,
+            top_n=refine_top_n,
+            enabled=True,
+        )
+
+    records: list[KisBenchmarkRecord] = []
+    for query in _load_kis_benchmark_queries(gt):
+        records.append(
+            run_kis_benchmark_query(query, config_name="semantic", search_fn=coarse_search)
+        )
+        records.append(
+            run_kis_benchmark_query(
+                query, config_name="semantic+refine", search_fn=refined_search
             )
-
-        semantic_record = run_kis_benchmark_query(
-            query, config_name="semantic", search_fn=_semantic_search
         )
-        records.append(semantic_record)
-
-        def _semantic_refined_search(text: str, _q=query) -> list[KisCandidate]:
-            candidates = _semantic_search(text)
-            query_vector = encoder.encode_text([text.strip()])[0]
-            return refine_top_candidates(
-                candidates, query_vector=query_vector, encoder=encoder,
-                video_path_for=registry.video_path,
-                video_info_for=registry.video_info,
-                window=RefinementWindowConfig(frame_radius=refine_frame_radius),
-                top_n=refine_top_n, enabled=True,
-            )
-
-        refined_record = run_kis_benchmark_query(
-            query, config_name="semantic+refine", search_fn=_semantic_refined_search
-        )
-        records.append(refined_record)
 
     summary = summarize_kis_benchmark(records)
     output.mkdir(parents=True, exist_ok=True)

@@ -131,15 +131,26 @@ def build_aic_keyframe_mapping_csv(
     rows: list[dict[str, str]] = []
     for video_id in video_ids:
         csv_path = dataset_root / "map_keyframes" / f"{video_id}.csv"
+        # Index the video's JPEGs by their numeric value rather than assuming a
+        # zero-padding width, matching AicDatasetRegistry.keyframe_path().
+        keyframe_dir = dataset_root / "keyframes" / video_id
+        images_by_number: dict[int, Path] = {}
+        if keyframe_dir.is_dir():
+            for image_path in keyframe_dir.glob("*.jpg"):
+                try:
+                    images_by_number[int(image_path.stem)] = image_path
+                except ValueError:
+                    continue
+
         with csv_path.open(newline="", encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
-                keyframe_id = f"{int(row['n'].strip()):03d}"
-                image_path = dataset_root / "keyframes" / video_id / f"{keyframe_id}.jpg"
-                if not image_path.is_file():
+                number = int(row["n"].strip())
+                image_path = images_by_number.get(number)
+                if image_path is None:
                     continue
                 rows.append(
                     {
-                        "keyframe_id": keyframe_id,
+                        "keyframe_id": image_path.stem,
                         "video_id": video_id,
                         "timestamp": row["pts_time"],
                         "image_path": str(image_path),
