@@ -10,7 +10,9 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
+from ..ingestion.aic_dataset import AicDatasetRegistry
 from ..retrieval.hybrid import rrf_fuse
+from ..retrieval.kis import KeyframeFrameIndexResolver, search_kis
 from ..retrieval.lexical import search_lexical
 from ..retrieval.object_search import parse_object_conditions, search_objects
 from .schemas import (
@@ -18,6 +20,9 @@ from .schemas import (
     HealthResponse,
     HybridSearchRequest,
     HybridSearchResponse,
+    KisHit,
+    KisSearchRequest,
+    KisSearchResponse,
     ObjectSearchRequest,
     SearchHit,
     SearchResponse,
@@ -309,6 +314,23 @@ def _default_multimodal_service() -> tuple[Any | None, bool]:
         return None, True
 
 
+def _default_kis_pipeline_resolver() -> KeyframeFrameIndexResolver | None:
+    raw_path = os.environ.get("MVR_KEYFRAME_MAPPING_CSV", "").strip()
+    if not raw_path:
+        return None
+    path = Path(raw_path).resolve()
+    if not path.is_file():
+        return None
+    return KeyframeFrameIndexResolver.from_csv(path)
+
+
+def _default_aic_registry() -> AicDatasetRegistry | None:
+    raw_path = os.environ.get("MVR_AIC_DATASET_ROOT", "").strip()
+    if not raw_path:
+        return None
+    return AicDatasetRegistry(Path(raw_path).resolve())
+
+
 def _semantic_status(service: Any | None) -> SemanticRuntimeStatus:
     if service is None:
         return SemanticRuntimeStatus(
@@ -329,6 +351,8 @@ def create_app(
     multimodal_service: Any = _UNSET,
     elasticsearch_configured: bool | None = None,
     keyframe_dir: Path | None | object = _UNSET,
+    kis_pipeline_resolver: Any = _UNSET,
+    kis_aic_registry: Any = _UNSET,
 ) -> FastAPI:
     """Build an app with injectable services for lightweight contract tests."""
     if semantic_service is _UNSET:
@@ -342,6 +366,10 @@ def create_app(
     if keyframe_dir is _UNSET:
         raw_keyframes = os.environ.get("MVR_KEYFRAME_DIR", "").strip()
         keyframe_dir = Path(raw_keyframes).resolve() if raw_keyframes else None
+    if kis_pipeline_resolver is _UNSET:
+        kis_pipeline_resolver = _default_kis_pipeline_resolver()
+    if kis_aic_registry is _UNSET:
+        kis_aic_registry = _default_aic_registry()
 
     application = FastAPI(
         title="MVR Competition Search API",
@@ -396,6 +424,37 @@ def create_app(
             query=request.query,
             count=len(results),
             results=[SearchHit(**payload) for payload in payloads],
+        )
+
+    @application.post("/search/kis", response_model=KisSearchResponse)
+    def search_kis_route(request: KisSearchRequest) -> KisSearchResponse:
+        try:
+            candidates = search_kis(
+                request.query,
+                top_k=request.top_k,
+                semantic_service=semantic_service,
+                multimodal_service=multimodal_service,
+                pipeline_resolver=kis_pipeline_resolver,
+                aic_registry=kis_aic_registry,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return KisSearchResponse(
+            query=request.query,
+            count=len(candidates),
+            results=[
+                KisHit(
+                    rank=candidate.rank,
+                    video_id=candidate.video_id,
+                    frame_id=candidate.frame_id,
+                    score=candidate.score,
+                    keyframe_id=candidate.keyframe_id,
+                    timestamp=candidate.timestamp,
+                )
+                for candidate in candidates
+            ],
         )
 
     if multimodal_service is not None:

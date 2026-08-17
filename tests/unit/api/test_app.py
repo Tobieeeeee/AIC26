@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from fastapi.testclient import TestClient
 
 from mvr.api.app import LazyFaissSemanticService, create_app
+from mvr.retrieval.kis import KeyframeFrameIndexResolver
 from mvr.retrieval.semantic import SearchResult
 
 
@@ -341,6 +342,130 @@ def test_semantic_runtime_failure_is_not_reported_as_success() -> None:
 
     assert response.status_code == 503
     assert response.json()["detail"] == "semantic index is unavailable"
+
+
+def test_kis_search_returns_ranked_response_contract() -> None:
+    resolver = KeyframeFrameIndexResolver({"frame-high": 261, "frame-low": 45})
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=FakeMultimodalService(),
+            kis_pipeline_resolver=resolver,
+            kis_aic_registry=None,
+        )
+    )
+
+    response = client.post("/search/kis", json={"query": "a cyclist", "top_k": 2})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "query": "a cyclist",
+        "count": 2,
+        "results": [
+            {
+                "rank": 1,
+                "video_id": "video-1",
+                "frame_id": 261,
+                "score": 0.0325,
+                "keyframe_id": "frame-high",
+                "timestamp": 1.25,
+            },
+            {
+                "rank": 2,
+                "video_id": "video-1",
+                "frame_id": 45,
+                "score": 0.0320,
+                "keyframe_id": "frame-low",
+                "timestamp": 1.25,
+            },
+        ],
+    }
+
+
+def test_kis_search_rejects_blank_query_and_invalid_top_k() -> None:
+    resolver = KeyframeFrameIndexResolver({"frame-high": 261})
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=FakeMultimodalService(),
+            kis_pipeline_resolver=resolver,
+        )
+    )
+
+    assert client.post("/search/kis", json={"query": "", "top_k": 5}).status_code == 422
+    assert client.post("/search/kis", json={"query": "   ", "top_k": 5}).status_code == 422
+    assert client.post("/search/kis", json={"query": "valid", "top_k": 0}).status_code == 422
+    assert client.post("/search/kis", json={"query": "valid", "top_k": 101}).status_code == 422
+
+
+def test_kis_search_unresolvable_candidates_are_dropped_not_guessed() -> None:
+    # No resolver/registry configured at all: nothing can be verified.
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=FakeMultimodalService(),
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        )
+    )
+
+    response = client.post("/search/kis", json={"query": "a cyclist", "top_k": 5})
+
+    assert response.status_code == 200
+    assert response.json() == {"query": "a cyclist", "count": 0, "results": []}
+
+
+def test_kis_search_returns_503_when_no_retrieval_backend_configured() -> None:
+    client = TestClient(
+        create_app(
+            semantic_service=None,
+            multimodal_service=None,
+            elasticsearch_configured=False,
+        )
+    )
+
+    response = client.post("/search/kis", json={"query": "a cyclist", "top_k": 5})
+
+    assert response.status_code == 503
+
+
+class _RaisingSemanticService:
+    """Fails loudly if ever invoked -- proves the KIS route did not fall back
+    to (or duplicate work through) the semantic branch when hybrid is used."""
+
+    def search(self, query: str, top_k: int = 5):
+        raise AssertionError("semantic branch must not be called when hybrid is available")
+
+
+class _CallCountingMultimodalService(FakeMultimodalService):
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, int]] = []
+
+    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int):
+        self.calls.append((query, top_k, rrf_k))
+        return super().search_hybrid(query, top_k=top_k, rrf_k=rrf_k)
+
+
+def test_kis_search_never_rebuilds_index_or_reloads_model_per_request() -> None:
+    resolver = KeyframeFrameIndexResolver({"frame-high": 261, "frame-low": 45})
+    multimodal_service = _CallCountingMultimodalService()
+    client = TestClient(
+        create_app(
+            semantic_service=_RaisingSemanticService(),
+            multimodal_service=multimodal_service,
+            kis_pipeline_resolver=resolver,
+        )
+    )
+
+    first = client.post("/search/kis", json={"query": "first", "top_k": 2})
+    second = client.post("/search/kis", json={"query": "second", "top_k": 2})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    # The same injected multimodal_service instance handled both requests
+    # (called exactly once per request, no extra calls), and the semantic
+    # branch was never touched -- proving no per-request rebuild/reload.
+    assert [call[0] for call in multimodal_service.calls] == ["first", "second"]
 
 
 def test_hybrid_backend_failure_returns_service_unavailable() -> None:

@@ -40,6 +40,28 @@ class HybridSearchRequest(BaseModel):
     _validate_query = field_validator("query")(_require_non_blank)
 
 
+class KisSearchRequest(BaseModel):
+    query: str = Field(min_length=1)
+    top_k: int = Field(default=100, ge=1, le=100)
+
+    _validate_query = field_validator("query")(_require_non_blank)
+
+
+class KisHit(BaseModel):
+    rank: int = Field(ge=1)
+    video_id: str
+    frame_id: int
+    score: float
+    keyframe_id: str | None = None
+    timestamp: float | None = None
+
+
+class KisSearchResponse(BaseModel):
+    query: str
+    count: int = Field(ge=0)
+    results: list[KisHit]
+
+
 class SearchHit(BaseModel):
     rank: int = Field(ge=1)
     frame_id: str
