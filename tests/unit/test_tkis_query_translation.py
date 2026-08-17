@@ -130,21 +130,41 @@ def test_vi_raw_passthrough() -> None:
 
 
 def test_local_backend_mock() -> None:
-    with patch.dict("sys.modules", {"transformers": MagicMock()}):
+    mock_tokenizer = MagicMock()
+    # tokenizer(text, ...) returns a dict-like with .to()
+    mock_inputs = MagicMock()
+    mock_tokenizer.return_value = mock_inputs
+    mock_tokenizer.batch_decode.return_value = [
+        "Three cyclists in white"
+    ]
+
+    mock_model = MagicMock()
+    mock_model.generate.return_value = MagicMock()
+
+    mock_device = MagicMock()
+
+    mock_torch = MagicMock()
+
+    with patch.object(
+        __import__(
+            "query_translation.local", fromlist=["LocalTranslator"]
+        ).LocalTranslator,
+        "_load",
+        return_value=(mock_tokenizer, mock_model),
+    ), patch.object(
+        __import__(
+            "query_translation.local", fromlist=["LocalTranslator"]
+        ).LocalTranslator,
+        "_resolve_device",
+        return_value=mock_device,
+    ), patch.dict("sys.modules", {"torch": mock_torch}):
         from query_translation.local import LocalTranslator
 
-        mock_pipeline = MagicMock()
-        mock_pipeline.return_value = [
-            {"translation_text": "Three cyclists in white"}
-        ]
-
-        with patch.object(
-            LocalTranslator, "_load", return_value=mock_pipeline
-        ):
-            t = LocalTranslator(model_name="test-model", device="cpu")
-            result = t.translate("Ba người đi xe đạp")
-            assert result == "Three cyclists in white"
-            assert t.name == "local_vi2en"
+        t = LocalTranslator(model_name="test-model", device="cpu")
+        result = t.translate("Ba người đi xe đạp")
+        assert result == "Three cyclists in white"
+        assert t.name == "local_vi2en"
+        mock_model.generate.assert_called_once()
 
 
 # ── 6. Google backend can be mocked ──────────────────────────────
