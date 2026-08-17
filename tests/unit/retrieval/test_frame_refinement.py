@@ -233,6 +233,50 @@ def test_refine_top_candidates_respects_top_n_limit(tmp_path) -> None:
     assert encoder.encode_images_calls == 2
 
 
+def test_refine_top_candidates_falls_back_to_coarse_on_transient_extractor_failure(
+    tmp_path,
+) -> None:
+    """A per-candidate decode/subprocess failure (e.g. a flaky FFmpeg pipe
+    under real load) must not abort the whole batch -- the affected
+    candidate keeps its unrefined coarse result and the rest still refine."""
+    from dataclasses import dataclass
+
+    @dataclass
+    class _FakeVideoInfo:
+        fps: float
+        frame_count: int
+
+    candidates = [
+        _candidate("L21_V001", 100, 0),
+        _candidate("L21_V002", 200, 1),
+        _candidate("L21_V003", 300, 2),
+    ]
+    scores = {idx: float(idx) for idx in range(0, 400)}
+    encoder = _FakeEncoder(scores)
+
+    def _flaky_extractor(video_path, keyframes, work_dir):
+        if "L21_V002" in str(video_path):
+            raise RuntimeError("simulated transient FFmpeg pipe failure")
+        return _fake_extractor(video_path, keyframes, work_dir)
+
+    result = refine_top_candidates(
+        candidates,
+        query_vector=np.array([1.0]),
+        encoder=encoder,
+        video_path_for=lambda video_id: Path(f"{video_id}.mp4"),
+        video_info_for=lambda video_id: _FakeVideoInfo(fps=30.0, frame_count=100000),
+        window=RefinementWindowConfig(frame_radius=1),
+        top_n=3,
+        enabled=True,
+        tmp_dir=tmp_path,
+        extractor=_flaky_extractor,
+    )
+
+    assert result[0].frame_id == 101  # refined normally
+    assert result[1] == candidates[1]  # fell back to the untouched coarse candidate
+    assert result[2].frame_id == 301  # refined normally, unaffected by candidate 1's failure
+
+
 def test_refine_top_candidates_empty_input_returns_empty() -> None:
     result = refine_top_candidates(
         [],

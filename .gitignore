@@ -16,6 +16,7 @@ env/
 # IDE / OS
 .vscode/
 .idea/
+.claude/
 .DS_Store
 Thumbs.db
 
@@ -41,6 +42,8 @@ artifacts/indexes/*
 !artifacts/indexes/.gitkeep
 artifacts/metrics/*
 !artifacts/metrics/.gitkeep
+artifacts/verification/*
+!artifacts/verification/.gitkeep
 
 # Model weights / databases / generated outputs
 *.pt

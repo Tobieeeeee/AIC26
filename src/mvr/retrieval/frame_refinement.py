@@ -167,17 +167,24 @@ def refine_top_candidates(
             refined.append(candidate)
             continue
         info = video_info_for(candidate.video_id)
-        result = refine_frame(
-            video_path=video_path_for(candidate.video_id),
-            video_id=candidate.video_id,
-            coarse_frame_id=candidate.frame_id,
-            query_vector=query_vector,
-            encoder=encoder,
-            fps=info.fps,
-            frame_count=info.frame_count,
-            window=window,
-            tmp_dir=tmp_dir,
-            extractor=extractor,
-        )
+        try:
+            result = refine_frame(
+                video_path=video_path_for(candidate.video_id),
+                video_id=candidate.video_id,
+                coarse_frame_id=candidate.frame_id,
+                query_vector=query_vector,
+                encoder=encoder,
+                fps=info.fps,
+                frame_count=info.frame_count,
+                window=window,
+                tmp_dir=tmp_dir,
+                extractor=extractor,
+            )
+        except (OSError, RuntimeError):
+            # A transient decode/subprocess failure for this one candidate
+            # must not abort the whole batch: fall back to its unrefined
+            # coarse result rather than crash or silently guess a frame_id.
+            refined.append(candidate)
+            continue
         refined.append(replace(candidate, frame_id=result.frame_id, score=result.score))
     return refined
