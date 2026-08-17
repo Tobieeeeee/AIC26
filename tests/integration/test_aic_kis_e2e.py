@@ -67,9 +67,11 @@ def test_full_kis_path_end_to_end_on_real_data(tmp_path: Path) -> None:
     assert semantic_service.available, "real FAISS index must be usable, not just present"
 
     # 3. KIS orchestration (Task 04): a real natural-language query, real search.
+    # top_k=20 matches the strongest official cutoff verified for this query
+    # below (recall_at_k[20]) -- the correct answer is at real rank 6.
     query_text = "A geyser of water shooting high into the sky from a dry well in a field"
     candidates = search_kis(
-        query_text, top_k=10, semantic_service=semantic_service,
+        query_text, top_k=20, semantic_service=semantic_service,
         multimodal_service=None, aic_registry=registry,
     )
     assert candidates, "KIS orchestration must return at least one resolved candidate"
@@ -94,10 +96,23 @@ def test_full_kis_path_end_to_end_on_real_data(tmp_path: Path) -> None:
 
     # 5. Official evaluator (Task 03) against the verified real GT interval
     #    for this query (see artifacts/verification/aic_kis/gt_queries.json).
+    #
+    # This must prove actual correctness, not just that scoring executed:
+    # a completely wrong retrieval also satisfies `0.0 <= final_score <= 1.0`.
+    # The real correct answer for this query is verified to appear at rank 6
+    # (see Task 06's records.json and the PR #2 hardening investigation), so
+    # recall_at_k[20] == 1.0 is the strongest official cutoff (1/5/20/50/100)
+    # supported by measured evidence for the current index/model -- do not
+    # tighten this to recall_at_k[5] without re-verifying the real rank.
     gt = KisGroundTruth(video_id="L21_V001", start_frame=5670, end_frame=5850)
     answers = [KisAnswer(video_id=c.video_id, frame_id=c.frame_id) for c in refined]
     score = evaluate_kis(answers, gt)
     assert 0.0 <= score.final_score <= 1.0
+    assert score.recall_at_k[20] == 1.0, (
+        "the known real-data query must retrieve a correct answer "
+        f"(video_id={gt.video_id}, frame in [{gt.start_frame},{gt.end_frame}]) "
+        f"within the top 20; got candidates={[(c.video_id, c.frame_id) for c in refined]}"
+    )
 
     # 6. Prediction/export adapter (Task 07): validate + local round-trip.
     predictions = validate_kis_predictions(refined)
@@ -119,7 +134,7 @@ def test_full_kis_path_end_to_end_on_real_data(tmp_path: Path) -> None:
         kis_pipeline_resolver=None, kis_aic_registry=registry,
     )
     client = TestClient(app)
-    response = client.post("/search/kis", json={"query": query_text, "top_k": 10})
+    response = client.post("/search/kis", json={"query": query_text, "top_k": 20})
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == len(candidates)

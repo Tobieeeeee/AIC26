@@ -197,6 +197,120 @@ def test_refine_top_candidates_disabled_leaves_coarse_result_unchanged() -> None
     assert result == candidates
 
 
+def test_refine_top_candidates_preserves_coarse_score_and_records_refinement_score_separately(
+    tmp_path,
+) -> None:
+    """Hardening Fix 2: refinement must never overwrite the coarse
+    retrieval score (a different, non-comparable score space) -- it must
+    record its own local-window similarity in `refinement_score` instead."""
+    from dataclasses import dataclass
+
+    @dataclass
+    class _FakeVideoInfo:
+        fps: float
+        frame_count: int
+
+    coarse = _candidate("L21_V001", 100, 0)
+    assert coarse.score == pytest.approx(1.0)  # unrefined coarse score baseline
+    scores = {idx: float(idx) for idx in range(0, 300)}
+    encoder = _FakeEncoder(scores)
+
+    result = refine_top_candidates(
+        [coarse],
+        query_vector=np.array([1.0]),
+        encoder=encoder,
+        video_path_for=lambda video_id: Path(f"{video_id}.mp4"),
+        video_info_for=lambda video_id: _FakeVideoInfo(fps=30.0, frame_count=100000),
+        window=RefinementWindowConfig(frame_radius=1),
+        top_n=1,
+        enabled=True,
+        tmp_dir=tmp_path,
+        extractor=_fake_extractor,
+    )
+
+    refined = result[0]
+    assert refined.frame_id == 101  # window max (100,101,102) -> 101 scores highest
+    assert refined.score == coarse.score  # coarse score untouched
+    assert refined.refinement_score == pytest.approx(101.0)  # local window score recorded separately
+    assert refined.refinement_score != refined.score
+
+
+def test_refine_top_candidates_unrefined_candidate_has_no_refinement_score(tmp_path) -> None:
+    from dataclasses import dataclass
+
+    @dataclass
+    class _FakeVideoInfo:
+        fps: float
+        frame_count: int
+
+    candidates = [_candidate("L21_V001", 100, 0), _candidate("L21_V002", 200, 1)]
+    scores = {idx: float(idx) for idx in range(0, 300)}
+    encoder = _FakeEncoder(scores)
+
+    result = refine_top_candidates(
+        candidates,
+        query_vector=np.array([1.0]),
+        encoder=encoder,
+        video_path_for=lambda video_id: Path(f"{video_id}.mp4"),
+        video_info_for=lambda video_id: _FakeVideoInfo(fps=30.0, frame_count=100000),
+        window=RefinementWindowConfig(frame_radius=1),
+        top_n=1,  # only the first candidate gets refined
+        enabled=True,
+        tmp_dir=tmp_path,
+        extractor=_fake_extractor,
+    )
+
+    assert result[0].refinement_score is not None
+    assert result[1].refinement_score is None
+    assert result[1] == candidates[1]  # untouched beyond top_n
+
+
+def test_refine_top_candidates_preserves_rank_and_order(tmp_path) -> None:
+    from dataclasses import dataclass
+
+    @dataclass
+    class _FakeVideoInfo:
+        fps: float
+        frame_count: int
+
+    candidates = [_candidate("L21_V001", 100 + i * 10, i) for i in range(4)]
+    scores = {idx: float(idx) for idx in range(0, 300)}
+    encoder = _FakeEncoder(scores)
+
+    result = refine_top_candidates(
+        candidates,
+        query_vector=np.array([1.0]),
+        encoder=encoder,
+        video_path_for=lambda video_id: Path(f"{video_id}.mp4"),
+        video_info_for=lambda video_id: _FakeVideoInfo(fps=30.0, frame_count=100000),
+        window=RefinementWindowConfig(frame_radius=1),
+        top_n=4,
+        enabled=True,
+        tmp_dir=tmp_path,
+        extractor=_fake_extractor,
+    )
+
+    assert [c.rank for c in result] == [c.rank for c in candidates]
+    assert [c.video_id for c in result] == [c.video_id for c in candidates]
+
+
+def test_refine_top_candidates_disabled_never_sets_refinement_score() -> None:
+    candidates = [_candidate("L21_V001", 100, 0)]
+
+    result = refine_top_candidates(
+        candidates,
+        query_vector=np.array([1.0]),
+        encoder=_FakeEncoder({}),
+        video_path_for=lambda video_id: Path("unused.mp4"),
+        video_info_for=lambda video_id: None,
+        window=RefinementWindowConfig(frame_radius=2),
+        top_n=5,
+        enabled=False,
+    )
+
+    assert result[0].refinement_score is None
+
+
 def test_refine_top_candidates_respects_top_n_limit(tmp_path) -> None:
     from dataclasses import dataclass
 

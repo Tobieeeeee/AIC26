@@ -133,15 +133,51 @@ refinement is turned on in a live setting.
   returned 5 correctly-ranked real predictions; server verified cleanly
   stopped afterward (port confirmed free).
 - normal pytest before Task 08: 163 passed, 4 skipped, 0 failed.
-- normal pytest after Task 08 and the final cleanup pass: **165 passed,
-  5 skipped, 0 failed** (working environment, `semantic` extras installed).
+- normal pytest after Task 08, the final cleanup pass, and the PR #2
+  hardening pass (see below): **171 passed, 5 skipped, 0 failed** (working
+  environment, `semantic` extras installed).
 - **CI-equivalent verification**: in a clean throwaway virtualenv installed
   with only `.[dev,api]` — exactly what `.github/workflows/ci.yml` installs,
   with no torch/faiss/open-clip/elasticsearch present — the suite is
-  **157 passed, 13 skipped, 0 failed**. The 8 extra skips versus the working
+  **163 passed, 13 skipped, 0 failed**. The 8 extra skips versus the working
   environment are the pre-existing faiss-dependent tests, matching the Phase
   06 fresh-clone precedent exactly. No new module introduces a hard
   dependency that would break CI.
+
+## Post-Review Hardening (PR #2)
+
+An independent review of PR #2 (head `50cdc47`) found and required fixing
+three real issues before merge; all three were verified as real against the
+actual code (not assumed from the review alone) before fixing:
+
+1. **Weak E2E correctness assertion** — the real E2E test only asserted
+   `0.0 <= score.final_score <= 1.0`, which a completely wrong retrieval also
+   satisfies. Verified the real rank of the known query's correct answer is
+   **6** (`L21_V001`, frame 5760, within the tested GT interval), so the test
+   now asserts `score.recall_at_k[20] == 1.0` — the strongest official cutoff
+   supported by measured evidence — and would fail if retrieval regressed.
+2. **Coarse and refinement scores were being mixed** — `refine_top_candidates`
+   overwrote a candidate's coarse retrieval `score` with the refinement
+   window's local similarity score, two non-comparable score spaces
+   (dangerous once hybrid/RRF scores are refined). `KisCandidate` gained a
+   separate `refinement_score: float | None` field; `score` is now always
+   preserved unchanged by refinement.
+3. **Top-100 overfetch was capped at exactly 100** — `search_kis`'s default
+   internal fetch pool was `min(top_k*3, 100)`, so at `top_k=100` no
+   overfetching happened at all; unmapped/duplicate hits in the first 100 raw
+   ranks could starve the final result below 100 even when valid candidates
+   existed at raw rank 101+. Confirmed with a test using 200 raw hits (only
+   even-indexed ones resolvable) that failed at `50 == 100` under the old
+   formula and passes at the new `max(top_k*3, 30)` (uncapped, so 300 at
+   `top_k=100`). Only affects the semantic-only path directly; the existing
+   Elasticsearch hybrid branch's own internal `TOP_N_EACH=30` per-branch
+   candidate limit is pre-existing baseline code and was left untouched.
+
+6 new tests added across `test_kis.py` and `test_frame_refinement.py`. Real
+E2E re-verified PASS (72.67s) with the strengthened assertion; real
+frame-refinement decode re-verified PASS (47.67s). Full regression: 171
+passed / 5 skipped / 0 failed; CI-equivalent: 163 passed / 13 skipped / 0
+failed.
 - `git diff --check`: clean at every task boundary (01 through 08) and after
   the final cleanup pass.
 - private/generated data tracked: **no** — verified via `git status` at every

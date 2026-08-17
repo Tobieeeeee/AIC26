@@ -186,5 +186,10 @@ def refine_top_candidates(
             # coarse result rather than crash or silently guess a frame_id.
             refined.append(candidate)
             continue
-        refined.append(replace(candidate, frame_id=result.frame_id, score=result.score))
+        # `score` stays the original coarse retrieval score; the refinement
+        # similarity (a different score space -- see KisCandidate) is
+        # recorded separately rather than overwriting it.
+        refined.append(
+            replace(candidate, frame_id=result.frame_id, refinement_score=result.score)
+        )
     return refined

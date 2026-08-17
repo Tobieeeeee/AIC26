@@ -55,12 +55,21 @@ class KeyframeFrameIndexResolver:
 
 @dataclass(frozen=True)
 class KisCandidate:
+    """``score`` is always the original coarse retrieval score (semantic
+    cosine or hybrid RRF, depending on which branch produced this hit) and
+    must never be overwritten by a different score space. Exact-frame
+    refinement (Task 05) records its own local-window similarity separately
+    in ``refinement_score`` -- the two are not comparable and must not be
+    silently mixed.
+    """
+
     rank: int
     video_id: str
     frame_id: int
     score: float
     keyframe_id: str
     timestamp: float | None = None
+    refinement_score: float | None = None
 
     def to_answer(self):
         """Convert to the Task 03 evaluator's prediction identity type."""
@@ -118,7 +127,10 @@ def search_kis(
 
     # Overfetch beyond top_k so that unresolvable/duplicate hits don't starve
     # the final result count below what the corpus could actually provide.
-    fetch_count = overfetch if overfetch is not None else min(max(top_k * 3, 30), 100)
+    # Deliberately NOT capped at top_k itself (that would defeat overfetch
+    # entirely once top_k reaches its own max of 100); the internal pool may
+    # legitimately exceed the requested output size, up to 300 at top_k=100.
+    fetch_count = overfetch if overfetch is not None else max(top_k * 3, 30)
 
     if multimodal_service is not None:
         raw_hits: Sequence[Mapping[str, Any]] = multimodal_service.search_hybrid(

@@ -172,6 +172,45 @@ def test_search_kis_top_100_works() -> None:
     assert [r.rank for r in results] == list(range(1, 101))
 
 
+def test_search_kis_default_overfetch_fills_top_100_past_unmapped_and_duplicates() -> None:
+    """Hardening Fix 3: at top_k=100, the DEFAULT internal fetch pool (no
+    explicit `overfetch`) must exceed 100, so mapping/dedup losses in the
+    first 100 raw ranks don't starve the final result below 100 when enough
+    valid unique candidates exist further down the raw pool."""
+    # 200 raw hits: only even-indexed ones resolve (100 valid unique total);
+    # odd-indexed ones are unmapped. Half of the first 100 raw ranks are
+    # therefore unusable, exactly the scenario the fix must handle.
+    resolver = KeyframeFrameIndexResolver({f"kf-{i}": i for i in range(0, 200, 2)})
+    hits = [_hit("L21_V001", f"kf-{i}", score=1.0 - i / 1000) for i in range(200)]
+    service = _FakeMultimodalService(hits)
+
+    results = search_kis(
+        "a query", top_k=100, semantic_service=None, multimodal_service=service,
+        pipeline_resolver=resolver,
+        # no explicit overfetch: exercises the real default formula
+    )
+
+    assert len(results) == 100
+    assert [r.rank for r in results] == list(range(1, 101))
+
+
+def test_search_kis_default_overfetch_never_exceeds_top_k_bounds() -> None:
+    resolver = KeyframeFrameIndexResolver({f"kf-{i}": i for i in range(300)})
+    hits = [_hit("L21_V001", f"kf-{i}", score=1.0 - i / 1000) for i in range(300)]
+
+    small = search_kis(
+        "q", top_k=20, semantic_service=None,
+        multimodal_service=_FakeMultimodalService(hits), pipeline_resolver=resolver,
+    )
+    large = search_kis(
+        "q", top_k=100, semantic_service=None,
+        multimodal_service=_FakeMultimodalService(hits), pipeline_resolver=resolver,
+    )
+
+    assert len(small) <= 20
+    assert len(large) <= 100
+
+
 def test_search_kis_stable_ranking_preserves_input_order() -> None:
     resolver = KeyframeFrameIndexResolver({"kf-a": 10, "kf-b": 20, "kf-c": 30})
     hits = [
