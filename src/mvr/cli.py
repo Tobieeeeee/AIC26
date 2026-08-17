@@ -9,6 +9,7 @@ from .enrichment.embeddings.openclip import OpenClipEncoder
 from .evaluation.benchmark import (
     KisBenchmarkQuery,
     KisBenchmarkRecord,
+    build_aic_keyframe_mapping_csv,
     run_kis_benchmark_query,
     summarize_kis_benchmark,
 )
@@ -95,6 +96,59 @@ def _add_search_parser(subparsers: argparse._SubParsersAction) -> None:
         default="auto",
     )
     parser.set_defaults(command="search")
+
+
+def _add_build_aic_index_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "build-aic-index",
+        help="Build a semantic index directly from an AIC organizer dataset root",
+    )
+    parser.add_argument("--dataset-root", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--videos",
+        nargs="+",
+        default=None,
+        help="Video IDs to index; defaults to every video with local keyframes.",
+    )
+    parser.add_argument("--batch-size", type=_positive_int, default=32)
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "cuda", "mps"],
+        default="auto",
+    )
+    parser.set_defaults(command="build-aic-index")
+
+
+def _discover_aic_video_ids(dataset_root: Path) -> list[str]:
+    """Every video that actually has local keyframes, in stable order."""
+    keyframe_root = Path(dataset_root) / "keyframes"
+    if not keyframe_root.is_dir():
+        raise FileNotFoundError(f"no keyframes directory under {dataset_root}")
+    return sorted(
+        directory.name
+        for directory in keyframe_root.iterdir()
+        if directory.is_dir() and (Path(dataset_root) / "map_keyframes" / f"{directory.name}.csv").is_file()
+    )
+
+
+def _run_build_aic_index(
+    *, dataset_root: Path, output: Path, videos: Sequence[str] | None,
+    batch_size: int, device: str,
+) -> None:
+    video_ids = list(videos) if videos else _discover_aic_video_ids(dataset_root)
+    if not video_ids:
+        raise ValueError(
+            f"no indexable videos found under {dataset_root}: each needs both "
+            "keyframes/<video_id>/ and map_keyframes/<video_id>.csv"
+        )
+    staging_root = Path(output).with_name(Path(output).name + "_ingest")
+    build_aic_keyframe_mapping_csv(
+        dataset_root, staging_root / "keyframe_mapping.csv", video_ids
+    )
+    encoder = OpenClipEncoder(device=device)
+    index = build_semantic_index(staging_root, output, encoder, batch_size=batch_size)
+    print(json.dumps(index.manifest, indent=2, ensure_ascii=False))
 
 
 def _add_benchmark_kis_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -200,6 +254,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     _add_ingest_parser(subparsers)
     _add_build_index_parser(subparsers)
     _add_search_parser(subparsers)
+    _add_build_aic_index_parser(subparsers)
     _add_benchmark_kis_parser(subparsers)
     values = vars(parser.parse_args(argv))
     command = values.pop("command")
@@ -217,6 +272,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             batch_size=values.pop("batch_size"),
         )
         print(json.dumps(index.manifest, indent=2, ensure_ascii=False))
+        return
+    if command == "build-aic-index":
+        _run_build_aic_index(**values)
         return
     if command == "benchmark-kis":
         _run_benchmark_kis(**values)

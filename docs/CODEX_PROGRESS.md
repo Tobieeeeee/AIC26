@@ -295,11 +295,11 @@ Completed:
   no organizer transport format was invented.
 - Created `src/mvr/submission/`, which did not previously exist.
 
-Tests:
+Tests (current state, after the PR #2 hardening pass recorded below):
 
-- Working repo (with `semantic` extras installed): 163 passed, 5 skipped, 0 failed.
+- Working repo (with `semantic` extras installed): 173 passed, 5 skipped, 0 failed.
 - CI-equivalent environment (`.[dev,api]` only, matching `.github/workflows/ci.yml`):
-  155 passed, 13 skipped, 0 failed — the 8 extra skips are the existing
+  165 passed, 13 skipped, 0 failed — the 8 extra skips are the existing
   faiss-dependent tests, consistent with the Phase 06 fresh-clone result.
 - Real AIC KIS E2E (`MVR_RUN_AIC_KIS_E2E=1`): PASS in 60.37s.
 - Real exact-frame refinement decode (`MVR_RUN_FRAME_REFINEMENT_REAL_TESTS=1`): PASS,
@@ -317,6 +317,71 @@ Remaining / explicitly out of scope:
 - Ground truth is a small team-curated internal set, not organizer-labeled.
 - Q&A, TRAKE/temporal, Frontend, VLM, and deployment remain untouched per the pack's
   stop gate.
+
+Blockers:
+
+- None.
+
+## PR #2 pre-merge hardening pass
+
+Status: COMPLETE
+
+Commit: `b6c35b1` — `fix: harden KIS correctness and candidate handling`
+
+An independent review of PR #2 (then-head `50cdc47`) identified three issues.
+Each was re-verified as a real defect against the actual code before being
+fixed, rather than accepted on the review's word:
+
+1. **Weak E2E correctness assertion.** The real E2E test asserted only
+   `0.0 <= final_score <= 1.0`, which a completely wrong retrieval also
+   satisfies. The known query's correct answer was measured to sit at real
+   rank 6, so the test now asserts `score.recall_at_k[20] == 1.0` — the
+   strongest official cutoff supported by evidence — and fails on regression.
+2. **Coarse and refinement scores were mixed.** `refine_top_candidates` wrote
+   the refinement window's local similarity into `KisCandidate.score`,
+   discarding the coarse retrieval score and conflating two non-comparable
+   score spaces (harmless while only semantic cosine is used, dangerous once
+   hybrid RRF scores are refined). `KisCandidate` gained a separate
+   `refinement_score: float | None`; `score` is now immutable across refinement.
+3. **Top-100 overfetch was capped at 100.** `search_kis`'s internal pool was
+   `min(top_k * 3, 100)`, so at `top_k=100` no overfetching occurred at all
+   and unmapped/duplicate hits inside the first 100 raw ranks could starve the
+   output below 100. Now `max(top_k * 3, 30)`, uncapped.
+
+Tests: 8 added. Focused suites 49 passed. Real AIC KIS E2E re-verified PASS
+(72.67s) with the strengthened assertion. Real frame-refinement decode
+re-verified PASS (47.67s). Full regression 173 passed / 5 skipped / 0 failed;
+CI-equivalent 165 passed / 13 skipped / 0 failed.
+
+Handoff gap closed in the same pass: the README told a reader to point
+`MVR_SEMANTIC_INDEX` at `artifacts/indexes/aic_l21`, but nothing documented or
+exposed how to *create* that index from an AIC organizer dataset — it had only
+ever been built by an uncommitted ad-hoc script, so no teammate could
+reproduce it. `python -m mvr.cli build-aic-index` now exposes the existing,
+already-tested `build_aic_keyframe_mapping_csv` + `build_semantic_index` path
+(discovering every video that has both local keyframes and a mapping CSV), and
+the README documents it. Verified for real on `L21_V001`: 307 vectors, all
+four index files written.
+
+Deliberate scope decisions (recorded so they are not mistaken for oversights):
+
+- **Fix 3 has no measured effect on the current benchmark.** Re-running all six
+  internal queries against the live code confirmed identical R@k and an
+  identical mean Final Score of `0.6333`, because every query already returned
+  a full 100 candidates under the old formula — the current index is built from
+  organizer keyframes, all of which resolve, so there were no unmapped losses
+  to recover. Fix 3 removes a latent defect; it is not a score improvement, and
+  the benchmark table in `docs/AIC_KIS_FINAL_REPORT.md` remains accurate.
+- **Fix 3 only fully applies to the semantic path.** The Elasticsearch hybrid
+  branch is still bounded by the pre-existing baseline `TOP_N_EACH = 30`
+  per-branch candidate limit in `mvr.api.app`, which caps the fused union at
+  roughly 60 regardless of the KIS overfetch value. That constant is Lab 6
+  baseline code and was intentionally left untouched.
+- **`refinement_score` is intentionally not exposed on `KisHit`.** The
+  `POST /search/kis` route does not run refinement (it is default-off for
+  latency), so no data is lost today. If refinement is ever wired into that
+  route, `KisHit` must be extended at the same time or the field will silently
+  disappear from API responses.
 
 Blockers:
 

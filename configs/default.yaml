@@ -41,6 +41,11 @@ kis:
   top_k_default: 100
   top_k_max: 100
   benchmark_top_k: 100
+  # Internal candidate pool fetched before original-frame mapping and
+  # deduplication: max(top_k * multiplier, floor). Deliberately allowed to
+  # exceed top_k_max so mapping/dedup losses cannot starve a Top-100 request.
+  overfetch_multiplier: 3
+  overfetch_floor: 30
   refinement_enabled: false      # correct but ~205s/query; see AIC_KIS_FINAL_REPORT.md
   refinement_top_n: 3
   refinement_frame_radius: 45

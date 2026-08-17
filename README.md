@@ -179,6 +179,22 @@ KIS returns competition predictions as `<video_id>, <frame_id>` pairs on the
 local AIC dataset root containing `videos/`, `keyframes/<video_id>/`, and
 `map_keyframes/<video_id>.csv`; never commit that data.
 
+Build the searchable index directly from that dataset root first. This encodes
+the organizer keyframes with the same OpenCLIP/FAISS pipeline used elsewhere;
+by default it indexes every video that has both `keyframes/<video_id>/` and
+`map_keyframes/<video_id>.csv` present locally, and `--videos` narrows that:
+
+```powershell
+py -3.12 -m pip install -e ".[dev,api,semantic]"
+py -3.12 -m mvr.cli build-aic-index `
+  --dataset-root "<local AIC dataset root>" `
+  --output "artifacts\indexes\aic_l21" `
+  --device cpu
+```
+
+Encoding is the slow step: roughly 0.055s per keyframe on CPU, so a 29-video /
+7800-keyframe L21 subset takes about 7 minutes plus a one-time model download.
+
 `POST /search/kis` is always registered and needs only the semantic index —
 it resolves each retrieved keyframe to its original frame index and drops any
 candidate it cannot verify rather than guessing:

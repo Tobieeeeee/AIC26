@@ -177,6 +177,84 @@ def test_semantic_commands_reject_non_positive_values_before_model_load(
         )
 
 
+def test_build_aic_index_command_discovers_videos_and_reuses_semantic_builder(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The AIC dataset -> index path must be reproducible from the CLI alone,
+    otherwise a teammate cannot rebuild the index the README points at."""
+    from mvr import cli
+
+    dataset_root = tmp_path / "dataset"
+    for video_id in ("L21_V001", "L21_V002"):
+        keyframe_dir = dataset_root / "keyframes" / video_id
+        keyframe_dir.mkdir(parents=True)
+        (keyframe_dir / "001.jpg").write_bytes(b"")
+        map_dir = dataset_root / "map_keyframes"
+        map_dir.mkdir(exist_ok=True)
+        (map_dir / f"{video_id}.csv").write_text(
+            "n,pts_time,fps,frame_idx\n1,0.0,30.0,0\n", encoding="utf-8"
+        )
+    # A video with keyframes but no mapping CSV must be skipped, not guessed at.
+    (dataset_root / "keyframes" / "L21_V999").mkdir(parents=True)
+
+    calls: list[tuple] = []
+
+    class FakeEncoder:
+        def __init__(self, device: str) -> None:
+            calls.append(("encoder", device))
+
+    def fake_build(input_root, output_root, encoder, batch_size):
+        calls.append(("build", Path(input_root), Path(output_root), batch_size))
+        return type("BuiltIndex", (), {"manifest": {"vector_count": 2}})()
+
+    monkeypatch.setattr(cli, "OpenClipEncoder", FakeEncoder)
+    monkeypatch.setattr(cli, "build_semantic_index", fake_build)
+    output_root = tmp_path / "index"
+
+    cli.main(
+        [
+            "build-aic-index",
+            "--dataset-root", str(dataset_root),
+            "--output", str(output_root),
+            "--device", "cpu",
+        ]
+    )
+
+    assert calls[0] == ("encoder", "cpu")
+    staging_root = calls[1][1]
+    assert calls[1][2] == output_root
+    assert calls[1][3] == 32
+
+    import csv as csv_module
+
+    with (staging_root / "keyframe_mapping.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv_module.DictReader(handle))
+    assert {row["video_id"] for row in rows} == {"L21_V001", "L21_V002"}
+
+
+def test_build_aic_index_command_rejects_dataset_with_no_indexable_videos(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import pytest
+
+    from mvr import cli
+
+    dataset_root = tmp_path / "dataset"
+    (dataset_root / "keyframes").mkdir(parents=True)
+    monkeypatch.setattr(
+        cli, "OpenClipEncoder", lambda **_: pytest.fail("model must not load with no videos")
+    )
+
+    with pytest.raises(ValueError, match="no indexable videos"):
+        cli.main(
+            [
+                "build-aic-index",
+                "--dataset-root", str(dataset_root),
+                "--output", str(tmp_path / "index"),
+            ]
+        )
+
+
 def test_benchmark_kis_command_writes_summary_and_records(monkeypatch, tmp_path: Path) -> None:
     from mvr import cli
     from mvr.retrieval.semantic import SearchResult

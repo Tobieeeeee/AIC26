@@ -4,12 +4,13 @@
 
 - Status: **`COMPLETE`** (per `00_MASTER_PLAN.md`'s "Competition-Ready Complete"
   definition — see Final Decision below for exact scope and caveats)
-- Branch: `feat/kis-competition-ready` (local only as of this report; not yet
-  pushed, per the team's own "push once everything is done" convention)
+- Branch: `feat/kis-competition-ready`, pushed and under review as PR #2
 - Commits (in order):
   `9b373dc` Task 01 docs, `37576a6` Task 02 frame registry, `bfcf125` Task 03
   evaluator, `dc297b1` Task 04 search/API, `9e688c0` Task 05 refinement,
-  `77c89aa` Task 06 benchmark, `47cd694` Task 07 export, `245bda6` Task 08 E2E.
+  `77c89aa` Task 06 benchmark, `47cd694` Task 07 export, `245bda6` Task 08 E2E,
+  `6551e58` Task 09 report, `50cdc47` documentation/cleanup pass,
+  `b6c35b1` PR #2 review hardening, plus the handoff pass described below.
 
 ## Source Contract Audit
 
@@ -134,12 +135,12 @@ refinement is turned on in a live setting.
   stopped afterward (port confirmed free).
 - normal pytest before Task 08: 163 passed, 4 skipped, 0 failed.
 - normal pytest after Task 08, the final cleanup pass, and the PR #2
-  hardening pass (see below): **171 passed, 5 skipped, 0 failed** (working
+  hardening pass (see below): **173 passed, 5 skipped, 0 failed** (working
   environment, `semantic` extras installed).
 - **CI-equivalent verification**: in a clean throwaway virtualenv installed
   with only `.[dev,api]` — exactly what `.github/workflows/ci.yml` installs,
   with no torch/faiss/open-clip/elasticsearch present — the suite is
-  **163 passed, 13 skipped, 0 failed**. The 8 extra skips versus the working
+  **165 passed, 13 skipped, 0 failed**. The 8 extra skips versus the working
   environment are the pre-existing faiss-dependent tests, matching the Phase
   06 fresh-clone precedent exactly. No new module introduces a hard
   dependency that would break CI.
@@ -175,9 +176,31 @@ actual code (not assumed from the review alone) before fixing:
 
 6 new tests added across `test_kis.py` and `test_frame_refinement.py`. Real
 E2E re-verified PASS (72.67s) with the strengthened assertion; real
-frame-refinement decode re-verified PASS (47.67s). Full regression: 171
-passed / 5 skipped / 0 failed; CI-equivalent: 163 passed / 13 skipped / 0
+frame-refinement decode re-verified PASS (47.67s). Full regression: 173
+passed / 5 skipped / 0 failed; CI-equivalent: 165 passed / 13 skipped / 0
 failed.
+
+Three deliberate scope decisions from that pass, recorded so a reviewer does
+not mistake them for oversights:
+
+- **The benchmark table above is still accurate after Fix 3.** All six
+  internal queries were re-run against the hardened code and produced
+  identical R@k values and an identical mean Final Score of `0.6333`. Every
+  query already returned a full 100 candidates under the old formula, because
+  this index is built from organizer keyframes that all resolve — there were
+  no unmapped losses for the larger pool to recover. Fix 3 removes a latent
+  defect that would bite on a corpus with unmappable hits; it is not a score
+  improvement on this data.
+- **Fix 3 fully applies only to the semantic path.** The Elasticsearch hybrid
+  branch remains bounded by the pre-existing baseline `TOP_N_EACH = 30`
+  per-branch limit in `mvr.api.app`, which caps the fused union near 60
+  regardless of the KIS overfetch value. That constant is Lab 6 baseline code
+  and was intentionally not touched by a hardening-only change.
+- **`refinement_score` is intentionally not exposed on the `KisHit` API
+  schema.** `POST /search/kis` does not run refinement (default-off for
+  latency), so no information is lost today. If refinement is later wired into
+  that route, `KisHit` must be extended at the same time, or the new field
+  will silently vanish from API responses.
 - `git diff --check`: clean at every task boundary (01 through 08) and after
   the final cleanup pass.
 - private/generated data tracked: **no** — verified via `git status` at every
