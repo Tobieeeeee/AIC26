@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--clip-pretrained", type=str, default="laion2b_s34b_b79k", help="CLIP pretrained weights")
     parser.add_argument("--rcnn-model", type=str, default="fasterrcnn_resnet50_fpn", help="Faster R-CNN model")
     parser.add_argument("--rcnn-threshold", type=float, default=0.5, help="Faster R-CNN score threshold")
+    parser.add_argument("--rcnn-nms-threshold", type=float, default=0.5, help="Faster R-CNN NMS threshold")
     
     parser.add_argument("--device", type=str, default="auto", help="Device (cpu/cuda/auto)")
 
@@ -39,7 +40,7 @@ def main():
     
     # 2. Faster R-CNN
     print(f"Initializing Faster R-CNN ({args.rcnn_model})...")
-    rcnn_detector = FasterRCNN(model_name=args.rcnn_model, device=args.device, score_threshold=args.rcnn_threshold)
+    rcnn_detector = FasterRCNN(model_name=args.rcnn_model, device=args.device, score_threshold=args.rcnn_threshold, nms_threshold=args.rcnn_nms_threshold)
     extract_objects(dataset_name, keyframes, rcnn_detector, args.output, args.keyframe_root, args.mapping_csv)
     
     print(f"Feature extraction completed. Outputs saved to {args.output}")

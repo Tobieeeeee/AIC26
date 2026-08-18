@@ -6,15 +6,16 @@ from torchvision.transforms import functional as F
 from PIL import Image
 
 class FasterRCNN:
-    def __init__(self, model_name: str = "fasterrcnn_resnet50_fpn", device: str = "auto", score_threshold: float = 0.5):
+    def __init__(self, model_name: str = "fasterrcnn_resnet50_fpn", device: str = "auto", score_threshold: float = 0.5, nms_threshold: float = 0.5):
         self.device = torch.device("cuda" if torch.cuda.is_available() and device in ("auto", "cuda") else "cpu")
         self.score_threshold = score_threshold
+        self.nms_threshold = nms_threshold
         self.model_name = model_name
         
         # Load the model with pretrained weights
         if model_name == "fasterrcnn_resnet50_fpn":
             weights = torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT
-            self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights=weights)
+            self.model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights=weights, box_nms_thresh=self.nms_threshold)
             self.categories = weights.meta["categories"]
         else:
             raise ValueError(f"Unsupported model: {model_name}")
