@@ -21,6 +21,9 @@ def sort_keyframes_deterministically(mapping_csv: Path) -> list[dict]:
     ))
     return keyframes
 
+from collections import defaultdict
+import uuid
+
 def extract_clip_features(
     dataset_name: str,
     keyframes: list[dict],
@@ -32,38 +35,61 @@ def extract_clip_features(
     clip_dir = output_dir / "clip"
     clip_dir.mkdir(parents=True, exist_ok=True)
 
-    if (clip_dir / "clip_features.npy").exists():
-        raise FileExistsError("clip_features.npy already exists. Delete to overwrite.")
+    # Group by video_id
+    video_groups = defaultdict(list)
+    for frame in keyframes:
+        video_groups[frame["video_id"]].append(frame)
 
-    features = []
     mapping_rows = []
+    vector_count_total = 0
+    embedding_dimension = None
 
-    for i, frame in enumerate(tqdm(keyframes, desc="CLIP Features")):
-        img_path = keyframe_root / frame["image_path"]
-        if not img_path.exists():
-            raise FileNotFoundError(f"Keyframe image not found: {img_path}")
+    for video_id, group_frames in tqdm(video_groups.items(), desc="CLIP Features (per video)"):
+        # Deterministic chronological sort: frame_idx ASC, keyframe_id ASC
+        group_frames.sort(key=lambda k: (int(k["frame_idx"]), k["keyframe_id"]))
+        
+        target_npy = clip_dir / f"{video_id}.npy"
+        if target_npy.exists():
+            raise FileExistsError(f"{target_npy.name} already exists. Delete to overwrite.")
+            
+        features = []
+        for i, frame in enumerate(group_frames):
+            img_path = keyframe_root / frame["image_path"]
+            if not img_path.exists():
+                raise FileNotFoundError(f"Keyframe image not found: {img_path}")
 
-        emb = encoder.encode_images([str(img_path)])
-        if np.isnan(emb).any() or np.isinf(emb).any():
-            raise ValueError(f"NaN or Inf encountered in embedding for {img_path}")
+            emb = encoder.encode_images([str(img_path)])
+            if np.isnan(emb).any() or np.isinf(emb).any():
+                raise ValueError(f"NaN or Inf encountered in embedding for {img_path}")
 
-        features.append(emb[0])
-        mapping_rows.append({
-            "feature_index": i,
-            "keyframe_id": frame["keyframe_id"],
-            "video_id": frame["video_id"],
-            "frame_idx": frame["frame_idx"],
-            "timestamp": frame["timestamp"],
-            "image_path": frame["image_path"],
-        })
+            features.append(emb[0])
+            mapping_rows.append({
+                "video_id": video_id,
+                "feature_file": f"{video_id}.npy",
+                "feature_index": i,
+                "keyframe_id": frame["keyframe_id"],
+                "shot_id": int(frame["shot_id"]),
+                "frame_idx": int(frame["frame_idx"]),
+                "timestamp": float(frame["timestamp"]),
+                "image_path": frame["image_path"],
+            })
 
-    feature_matrix = np.array(features, dtype=np.float32)
+        feature_matrix = np.array(features, dtype=np.float32)
+        if embedding_dimension is None:
+            embedding_dimension = feature_matrix.shape[1]
+        
+        # Atomic write
+        temp_npy = clip_dir / f".tmp_{uuid.uuid4().hex}_{video_id}.npy"
+        np.save(temp_npy, feature_matrix)
+        temp_npy.replace(target_npy)
+        
+        vector_count_total += feature_matrix.shape[0]
 
-    # Save the npy array
-    np.save(clip_dir / "clip_features.npy", feature_matrix)
+    # Sort mapping rows deterministically: video_id ASC, feature_index ASC
+    mapping_rows.sort(key=lambda x: (x["video_id"], x["feature_index"]))
 
     # Save mapping
-    mapping_cols = ["feature_index", "keyframe_id", "video_id", "frame_idx", "timestamp", "image_path"]
+    mapping_cols = ["video_id", "feature_file", "feature_index", "keyframe_id", "shot_id", "frame_idx", "timestamp", "image_path"]
     with (clip_dir / "clip_feature_mapping.csv").open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=mapping_cols)
         writer.writeheader()
@@ -71,16 +97,18 @@ def extract_clip_features(
 
     # Save manifest
     manifest = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "feature_type": "clip_image",
+        "storage_format": "one_npy_per_video",
         "model": encoder.model_name,
         "pretrained": encoder.pretrained,
-        "embedding_dimension": feature_matrix.shape[1],
-        "vector_count": feature_matrix.shape[0],
+        "embedding_dimension": embedding_dimension if embedding_dimension is not None else 0,
         "dtype": "float32",
         "normalization": "l2",
-        "ordering": "clip_feature_mapping.csv:feature_index",
-        "mapping_file": "clip_feature_mapping.csv"
+        "video_count": len(video_groups),
+        "vector_count_total": vector_count_total,
+        "mapping_file": "clip_feature_mapping.csv",
+        "ordering_within_video": "frame_idx_asc_then_keyframe_id_asc"
     }
     (clip_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 

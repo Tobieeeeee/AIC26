@@ -31,10 +31,13 @@ class FakeDetector:
 def test_extract_clip_features(tmp_path):
     # Setup fake keyframe images and mapping
     keyframe_root = tmp_path / "keyframes"
-    video_dir = keyframe_root / "video1"
-    video_dir.mkdir(parents=True)
-    img_path = video_dir / "frame1.jpg"
-    img_path.touch()
+    video1_dir = keyframe_root / "video1"
+    video1_dir.mkdir(parents=True)
+    (video1_dir / "frame1.jpg").touch()
+
+    video2_dir = keyframe_root / "video2"
+    video2_dir.mkdir(parents=True)
+    (video2_dir / "frame1.jpg").touch()
 
     keyframes = [
         {
@@ -45,6 +48,15 @@ def test_extract_clip_features(tmp_path):
             "frame_idx": "10",
             "timestamp": "0.5",
             "image_path": "video1/frame1.jpg"
+        },
+        {
+            "keyframe_id": "video2_S0001_K01",
+            "video_id": "video2",
+            "shot_id": "1",
+            "ordinal": "1",
+            "frame_idx": "5",
+            "timestamp": "0.2",
+            "image_path": "video2/frame1.jpg"
         }
     ]
 
@@ -54,16 +66,23 @@ def test_extract_clip_features(tmp_path):
     extract_clip_features("test_dataset", keyframes, encoder, output_dir, keyframe_root)
 
     clip_dir = output_dir / "clip"
-    assert (clip_dir / "clip_features.npy").exists()
+    assert not (clip_dir / "clip_features.npy").exists()
+    assert (clip_dir / "video1.npy").exists()
+    assert (clip_dir / "video2.npy").exists()
     assert (clip_dir / "clip_feature_mapping.csv").exists()
     assert (clip_dir / "manifest.json").exists()
 
-    arr = np.load(clip_dir / "clip_features.npy")
-    assert arr.shape == (1, 10)
+    arr1 = np.load(clip_dir / "video1.npy")
+    assert arr1.shape == (1, 10)
+
+    arr2 = np.load(clip_dir / "video2.npy")
+    assert arr2.shape == (1, 10)
 
     manifest = json.loads((clip_dir / "manifest.json").read_text())
-    assert manifest["vector_count"] == 1
+    assert manifest["vector_count_total"] == 2
+    assert manifest["video_count"] == 2
     assert manifest["embedding_dimension"] == 10
+    assert manifest["storage_format"] == "one_npy_per_video"
 
 def test_extract_objects(tmp_path):
     keyframe_root = tmp_path / "keyframes"
