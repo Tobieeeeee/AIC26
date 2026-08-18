@@ -10,11 +10,13 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
+from ..enrichment.qna_answer import AnswerReasoner, AnswerReasonerUnavailable, HuggingFaceCausalLmBackend
 from ..ingestion.aic_dataset import AicDatasetRegistry
 from ..retrieval.hybrid import rrf_fuse
 from ..retrieval.kis import KeyframeFrameIndexResolver, search_kis
 from ..retrieval.lexical import search_lexical
 from ..retrieval.object_search import parse_object_conditions, search_objects
+from ..retrieval.qna import search_qna
 from .schemas import (
     ElasticsearchRuntimeStatus,
     HealthResponse,
@@ -24,6 +26,9 @@ from .schemas import (
     KisSearchRequest,
     KisSearchResponse,
     ObjectSearchRequest,
+    QnaHit,
+    QnaSearchRequest,
+    QnaSearchResponse,
     SearchHit,
     SearchResponse,
     SemanticRuntimeStatus,
@@ -113,6 +118,51 @@ class LazyFaissSemanticService:
                 self._runtime_error = exc
                 raise RuntimeError("semantic runtime is unavailable") from exc
         return self._retriever.search(query, top_k=top_k)
+
+
+class LazyAnswerReasoner:
+    """Load the local-LLM Q&A backend only on first use, and only once.
+
+    Fails closed via ``HuggingFaceCausalLmBackend`` (Task 03): unless
+    ``MVR_QNA_ALLOW_MODEL_DOWNLOAD`` is explicitly set, the model must
+    already be cached locally or every ``answer()`` call raises
+    ``RuntimeError`` (mapped to HTTP 503 by the route), matching the lazy
+    singleton pattern ``LazyFaissSemanticService`` already uses for the
+    semantic index -- never reloaded per request.
+    """
+
+    def __init__(
+        self, *, model_name: str, allow_model_download: bool, device: str = "auto"
+    ) -> None:
+        self.model_name = model_name
+        self.allow_model_download = allow_model_download
+        self.device = device
+        self._reasoner: AnswerReasoner | None = None
+        self._error: Exception | None = None
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.model_name)
+
+    def _load(self) -> AnswerReasoner:
+        if self._reasoner is not None:
+            return self._reasoner
+        if self._error is not None:
+            raise RuntimeError("answer reasoner is unavailable") from self._error
+        try:
+            backend = HuggingFaceCausalLmBackend(
+                model_name=self.model_name,
+                allow_model_download=self.allow_model_download,
+                device=self.device,
+            )
+        except AnswerReasonerUnavailable as exc:
+            self._error = exc
+            raise RuntimeError("answer reasoner is unavailable") from exc
+        self._reasoner = AnswerReasoner(backend)
+        return self._reasoner
+
+    def answer(self, question: str, context: Any):
+        return self._load().answer(question, context)
 
 
 class ElasticsearchMultimodalService:
@@ -331,6 +381,20 @@ def _default_aic_registry() -> AicDatasetRegistry | None:
     return AicDatasetRegistry(Path(raw_path).resolve())
 
 
+def _default_qna_answer_reasoner() -> LazyAnswerReasoner | None:
+    model_name = os.environ.get("MVR_QNA_MODEL", "").strip()
+    if not model_name:
+        return None
+    allow_download = os.environ.get("MVR_QNA_ALLOW_MODEL_DOWNLOAD", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+    return LazyAnswerReasoner(
+        model_name=model_name,
+        allow_model_download=allow_download,
+        device=os.environ.get("MVR_DEVICE", "auto"),
+    )
+
+
 def _semantic_status(service: Any | None) -> SemanticRuntimeStatus:
     if service is None:
         return SemanticRuntimeStatus(
@@ -353,6 +417,7 @@ def create_app(
     keyframe_dir: Path | None | object = _UNSET,
     kis_pipeline_resolver: Any = _UNSET,
     kis_aic_registry: Any = _UNSET,
+    qna_answer_reasoner: Any = _UNSET,
 ) -> FastAPI:
     """Build an app with injectable services for lightweight contract tests."""
     if semantic_service is _UNSET:
@@ -370,6 +435,8 @@ def create_app(
         kis_pipeline_resolver = _default_kis_pipeline_resolver()
     if kis_aic_registry is _UNSET:
         kis_aic_registry = _default_aic_registry()
+    if qna_answer_reasoner is _UNSET:
+        qna_answer_reasoner = _default_qna_answer_reasoner()
 
     application = FastAPI(
         title="MVR Competition Search API",
@@ -452,6 +519,42 @@ def create_app(
                     score=candidate.score,
                     keyframe_id=candidate.keyframe_id,
                     timestamp=candidate.timestamp,
+                )
+                for candidate in candidates
+            ],
+        )
+
+    @application.post("/search/qna", response_model=QnaSearchResponse)
+    def search_qna_route(request: QnaSearchRequest) -> QnaSearchResponse:
+        try:
+            candidates = search_qna(
+                request.event_description,
+                request.question,
+                top_k=request.top_k,
+                semantic_service=semantic_service,
+                multimodal_service=multimodal_service,
+                pipeline_resolver=kis_pipeline_resolver,
+                aic_registry=kis_aic_registry,
+                answer_reasoner=qna_answer_reasoner,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return QnaSearchResponse(
+            event_description=request.event_description,
+            question=request.question,
+            count=len(candidates),
+            results=[
+                QnaHit(
+                    rank=candidate.rank,
+                    video_id=candidate.video_id,
+                    frame_id=candidate.frame_id,
+                    score=candidate.score,
+                    keyframe_id=candidate.keyframe_id,
+                    timestamp=candidate.timestamp,
+                    answer=candidate.answer,
+                    answer_source=candidate.answer_source,
                 )
                 for candidate in candidates
             ],

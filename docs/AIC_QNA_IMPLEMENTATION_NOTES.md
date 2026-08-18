@@ -269,6 +269,62 @@ KIS-vs-generic-metrics separation precedent):
   (Task 06) shows the current approximation is too conservative on actual
   queries, not speculatively now.
 
+## 3e. Task 05 outcome — orchestration + `POST /search/qna`
+
+- `src/mvr/retrieval/qna.py` — `search_qna(event_description, question, ...)`
+  deliberately duplicates `search_kis()`'s overfetch → resolve original
+  frame → dedupe → rank shape (a `QnaCandidate` needs an extra `answer`
+  field `KisCandidate` has no room for, so it can't just call `search_kis`),
+  but **reuses `resolve_original_frame_id()`/`KeyframeFrameIndexResolver`
+  from `mvr.retrieval.kis` verbatim** per the Task 01 plan — no
+  frame-resolution logic duplicated. Answer reasoning (Task 03) only runs
+  on the final top-`k` resolved candidates, never the overfetch pool, since
+  it is an LLM call per candidate and comparatively expensive versus the
+  coarse retrieval score.
+- `ocr_engine`/`image_loader` are accepted as a matched pair (both or
+  neither — mismatched configuration raises `ValueError` immediately rather
+  than silently running with half-built context).
+  `objects_path_resolver: Callable[[video_id, keyframe_id], Path | None]`
+  is injected per-candidate rather than assumed from a fixed directory
+  layout, since the organizer's real directory structure is still
+  unconfirmed (Task 01 §3).
+- **Object-source-tagging decision applied**: only the organizer's
+  file-based objects (Task 02's `aic_objects` loader, reached through
+  `objects_path_resolver`) are wired into `build_frame_context` here.
+  Falling back to a live COCO detector (YOLO, or PR #4's new
+  `faster_rcnn.py`) when the organizer file is absent is explicitly
+  **not** done in this task — it would require resolving the label-space
+  mixing risk flagged after the mid-pack rebase, which needs its own
+  design decision, not a silent default. Recorded as deferred follow-up,
+  not an oversight.
+- `src/mvr/api/app.py` — `LazyAnswerReasoner` (lazy-loads
+  `HuggingFaceCausalLmBackend` once, only on first `answer()` call, fails
+  closed exactly as Task 03 designed) plus `POST /search/qna`, registered
+  **unconditionally** like `/search/kis` (degrades to 503 via
+  `RuntimeError` when unconfigured, never silently absent from the
+  OpenAPI surface) — per the Task 01 plan. Reuses the *same*
+  `kis_pipeline_resolver`/`kis_aic_registry` injection points as `/search/
+  kis` rather than adding parallel Q&A-specific ones. New env vars:
+  `MVR_QNA_MODEL` (unset ⇒ route always 503s), `MVR_QNA_ALLOW_MODEL_
+  DOWNLOAD` (opt-in only). `ocr_engine`/`image_loader`/
+  `objects_path_resolver` are **not yet wired to real
+  EasyOCR/PaddleOCR/organizer-directory defaults** at the API layer —
+  by default `/search/qna` answers from the question and the LLM's own
+  knowledge only, with empty OCR/object context. Wiring real defaults is
+  deferred to Task 06 (benchmark), once real AIC data is available to
+  verify against, rather than guessed now.
+- `src/mvr/api/schemas.py` — `QnaSearchRequest`
+  (`event_description`/`question`/`top_k`), `QnaHit` (adds
+  `answer`/`answer_source` to the KIS hit shape), `QnaSearchResponse`.
+- Tests: `tests/unit/retrieval/test_qna.py` (13 cases: validation,
+  frame-resolution reuse/dedup/overfetch parity with the KIS suite, OCR/
+  image-loader wiring, objects-path-resolver wiring, evaluator-identity
+  conversion) and 5 new cases appended to `tests/unit/api/test_app.py`
+  (ranked/answered response contract, validation 422s, 503 when reasoner
+  or retrieval backend unconfigured, unresolvable candidates dropped).
+  Full suite: 263 passed, 5 skipped (no regressions from Task 04's 245
+  passed, 5 skipped).
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report

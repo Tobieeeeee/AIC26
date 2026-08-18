@@ -483,3 +483,134 @@ def test_hybrid_backend_failure_returns_service_unavailable() -> None:
     )
 
     assert response.status_code == 503
+
+
+class _FakeAnswerReasoner:
+    def __init__(self, answer: str = "5", source: str = "context-grounded") -> None:
+        self._answer = answer
+        self._source = source
+        self.calls: list[tuple[str, object]] = []
+
+    def answer(self, question: str, context):
+        self.calls.append((question, context))
+        from mvr.enrichment.qna_answer import QnaAnswer
+
+        return QnaAnswer(text=self._answer, source=self._source, raw_output="{}")
+
+
+def test_qna_search_returns_ranked_answered_response_contract() -> None:
+    resolver = KeyframeFrameIndexResolver({"frame-high": 261, "frame-low": 45})
+    reasoner = _FakeAnswerReasoner(answer="blue", source="context-grounded")
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=FakeMultimodalService(),
+            kis_pipeline_resolver=resolver,
+            kis_aic_registry=None,
+            qna_answer_reasoner=reasoner,
+        )
+    )
+
+    response = client.post(
+        "/search/qna",
+        json={"event_description": "a party scene", "question": "what color?", "top_k": 2},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["event_description"] == "a party scene"
+    assert body["question"] == "what color?"
+    assert body["count"] == 2
+    assert body["results"][0] == {
+        "rank": 1,
+        "video_id": "video-1",
+        "frame_id": 261,
+        "score": 0.0325,
+        "keyframe_id": "frame-high",
+        "timestamp": 1.25,
+        "answer": "blue",
+        "answer_source": "context-grounded",
+    }
+    assert reasoner.calls[0][0] == "what color?"
+
+
+def test_qna_search_rejects_blank_fields_and_invalid_top_k() -> None:
+    resolver = KeyframeFrameIndexResolver({"frame-high": 261})
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=FakeMultimodalService(),
+            kis_pipeline_resolver=resolver,
+            qna_answer_reasoner=_FakeAnswerReasoner(),
+        )
+    )
+
+    assert client.post(
+        "/search/qna", json={"event_description": "", "question": "q", "top_k": 5}
+    ).status_code == 422
+    assert client.post(
+        "/search/qna", json={"event_description": "e", "question": "  ", "top_k": 5}
+    ).status_code == 422
+    assert client.post(
+        "/search/qna", json={"event_description": "e", "question": "q", "top_k": 0}
+    ).status_code == 422
+    assert client.post(
+        "/search/qna", json={"event_description": "e", "question": "q", "top_k": 101}
+    ).status_code == 422
+
+
+def test_qna_search_returns_503_when_no_answer_reasoner_configured() -> None:
+    resolver = KeyframeFrameIndexResolver({"frame-high": 261})
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=FakeMultimodalService(),
+            kis_pipeline_resolver=resolver,
+            qna_answer_reasoner=None,
+        )
+    )
+
+    response = client.post(
+        "/search/qna",
+        json={"event_description": "e", "question": "q", "top_k": 5},
+    )
+
+    assert response.status_code == 503
+
+
+def test_qna_search_returns_503_when_no_retrieval_backend_configured() -> None:
+    client = TestClient(
+        create_app(
+            semantic_service=None,
+            multimodal_service=None,
+            elasticsearch_configured=False,
+            qna_answer_reasoner=_FakeAnswerReasoner(),
+        )
+    )
+
+    response = client.post(
+        "/search/qna",
+        json={"event_description": "e", "question": "q", "top_k": 5},
+    )
+
+    assert response.status_code == 503
+
+
+def test_qna_search_unresolvable_candidates_are_dropped_not_guessed() -> None:
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=FakeMultimodalService(),
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+            qna_answer_reasoner=_FakeAnswerReasoner(),
+        )
+    )
+
+    response = client.post(
+        "/search/qna",
+        json={"event_description": "e", "question": "q", "top_k": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 0
