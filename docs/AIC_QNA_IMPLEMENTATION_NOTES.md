@@ -172,6 +172,69 @@ Implemented, no real organizer sample available to validate against (see §3):
   wiring is a call-site concern for Task 05's orchestration, not a change
   to this module).
 
+## 3c. Task 03 outcome — local-LLM answer reasoner
+
+Upstream update since Task 02: `main` (PR #4, `feat/ingestion-enrichment`)
+merged a live torchvision `fasterrcnn_resnet50_fpn` (COCO-pretrained)
+detector at `src/mvr/enrichment/objects/faster_rcnn.py`, plus
+`src/mvr/enrichment/feature_extraction.py` for per-video CLIP feature
+extraction. This is a **different, unrelated component** from Task 02's
+`aic_objects.py` (which reads the organizer's own precomputed
+OpenImages-labeled JSON, not a live COCO detector) — no file conflicts, no
+code changes needed to Task 02's work, but it does mean **two distinct
+object-detection label spaces now exist in the system** (organizer
+OpenImages labels vs. this new COCO labels vs. existing YOLO COCO labels).
+Task 05's orchestration must keep them source-tagged rather than merging
+counts across label spaces — see the branch-strategy note recorded after
+this rebase (organizer file first, this detector or YOLO as fallback when
+the organizer file is absent for a video).
+
+Implemented, mirroring the reference repo's real-provider fail-closed
+policy and this repo's own `QwenDecomposer` retry pattern:
+
+- `src/mvr/enrichment/qna_answer.py` — split into `LlmBackend` (Protocol,
+  swappable) and `AnswerReasoner` (pure prompt/parse/retry logic, backend
+  agnostic, no transformers/torch import at module load time). The prompt
+  explicitly allows `context-grounded` / `knowledge-grounded` / `mixed`
+  answers per the SOICT 2025 winner-paper finding that competition Q&A can
+  require general knowledge, not only visual context; the model self-reports
+  which, recorded as-authored (not independently verified) in `QnaAnswer`.
+  One deterministic retry on malformed JSON output, then raises
+  `MalformedAnswerError` — mirrors `QwenDecomposer`'s existing retry shape.
+- `HuggingFaceCausalLmBackend` — real local-HF-model backend, defaults to
+  `Qwen/Qwen2.5-1.5B-Instruct`, **fails closed**: `local_files_only=True`
+  unless `allow_model_download=True` is passed explicitly, and forces
+  `HF_HUB_OFFLINE=1`/`TRANSFORMERS_OFFLINE=1` in that mode so a missing
+  cache fails fast rather than blocking on a network timeout (measured:
+  without the offline env vars, a cold local-files-only failure against a
+  nonexistent model still attempted network and took ~14s; forcing offline
+  mode is a real, verified mitigation, not a full fix — DNS/socket-level
+  timeout can still add a few seconds depending on the machine's network
+  stack). `manifest_metadata()` records model id, transformers version,
+  device, `local_files_only`, and a `provider_evidence` tag, following the
+  `HCMAIC-SkillPixel-KIS` reference repo's `CrossEncoderReranker` provenance
+  pattern.
+- **`transformers` is now a declared dependency**: added a new `qna` extra
+  (`transformers>=4.40,<5`, `torch>=2.2,<3`) to `pyproject.toml`, closing the
+  undeclared-dependency gap flagged in Task 01 §3. Not added to CI (`.github
+  /workflows/ci.yml` still installs `dev,api,semantic` only) since no test
+  requires it to run — the one real-backend test uses `pytest.importorskip
+  ("transformers")` and self-skips when the extra is absent.
+- Tests: `tests/unit/enrichment/test_qna_answer.py` (9 cases: 8 pure-logic
+  cases against a scripted fake backend, covering valid parse, OCR/object
+  content in the prompt, retry-then-succeed, retry-then-fail, invalid
+  `source` value, blank answer text, blank question, and
+  `knowledge-grounded` acceptance; 1 real, non-mocked verification that
+  `HuggingFaceCausalLmBackend` actually refuses to run against an
+  uncached/nonexistent model rather than hanging or downloading). Full
+  suite with the `qna` extra installed: 230 passed, 5 skipped (no
+  regressions from the post-rebase baseline of 221 passed, 5 skipped).
+- Not yet done: choosing/verifying a specific small model actually runs
+  real inference end-to-end on this machine (no GPU confirmed, no model
+  weights cached) — deferred to whichever later task first needs a real
+  generated answer (Task 05 orchestration or Task 06 benchmark), consistent
+  with "verify real behavior only when the task requires it," not before.
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report

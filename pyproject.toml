@@ -37,6 +37,7 @@ ocr = [
     "paddlepaddle>=2,<4",
 ]
 objects = ["ultralytics>=8,<9"]
+qna = ["transformers>=4.40,<5", "torch>=2.2,<3"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
