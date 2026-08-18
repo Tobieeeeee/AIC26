@@ -75,6 +75,9 @@ class PairwiseComparison:
 
     variant_a: str
     variant_b: str
+    attempted_pairs: int = 0
+    valid_pairs: int = 0
+    excluded_pairs: int = 0
     wins: int = 0
     ties: int = 0
     losses: int = 0
@@ -87,6 +90,9 @@ class PairwiseComparison:
         return {
             "variant_a": self.variant_a,
             "variant_b": self.variant_b,
+            "attempted_pairs": self.attempted_pairs,
+            "valid_pairs": self.valid_pairs,
+            "excluded_pairs": self.excluded_pairs,
             "wins": self.wins,
             "ties": self.ties,
             "losses": self.losses,
@@ -102,26 +108,34 @@ class VariantSummary:
     """Aggregate metrics for a variant."""
 
     variant: str
-    total_queries: int
-    r_at_1: float
-    r_at_5: float
-    r_at_20: float
-    r_at_50: float
-    r_at_100: float
-    final_score: float
-    mean_latency_ms: float
-    median_latency_ms: float
+    attempted_queries: int
+    successful_queries: int
+    failed_queries: int
+    failure_rate: float
+    error_counts: dict[str, int]
+    r_at_1: float | None
+    r_at_5: float | None
+    r_at_20: float | None
+    r_at_50: float | None
+    r_at_100: float | None
+    final_score: float | None
+    mean_latency_ms: float | None
+    median_latency_ms: float | None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "variant": self.variant,
-            "total_queries": self.total_queries,
-            "R@1": round(self.r_at_1, 4),
-            "R@5": round(self.r_at_5, 4),
-            "R@20": round(self.r_at_20, 4),
-            "R@50": round(self.r_at_50, 4),
-            "R@100": round(self.r_at_100, 4),
-            "Final Score": round(self.final_score, 4),
-            "mean_latency_ms": round(self.mean_latency_ms, 2),
-            "median_latency_ms": round(self.median_latency_ms, 2),
+            "attempted_queries": self.attempted_queries,
+            "successful_queries": self.successful_queries,
+            "failed_queries": self.failed_queries,
+            "failure_rate": round(self.failure_rate, 4),
+            "error_counts": self.error_counts,
+            "R@1": round(self.r_at_1, 4) if self.r_at_1 is not None else None,
+            "R@5": round(self.r_at_5, 4) if self.r_at_5 is not None else None,
+            "R@20": round(self.r_at_20, 4) if self.r_at_20 is not None else None,
+            "R@50": round(self.r_at_50, 4) if self.r_at_50 is not None else None,
+            "R@100": round(self.r_at_100, 4) if self.r_at_100 is not None else None,
+            "Final Score": round(self.final_score, 4) if self.final_score is not None else None,
+            "mean_latency_ms": round(self.mean_latency_ms, 2) if self.mean_latency_ms is not None else None,
+            "median_latency_ms": round(self.median_latency_ms, 2) if self.median_latency_ms is not None else None,
         }
