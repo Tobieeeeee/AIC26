@@ -140,6 +140,38 @@ organizer material, not repository source.
   Final Score can be computed; building it is in scope for that task, not
   this one.
 
+## 3b. Task 02 outcome — structured-context builder
+
+Implemented, no real organizer sample available to validate against (see §3):
+
+- `src/mvr/enrichment/objects/aic_objects.py` — `load_frame_objects()` parses
+  the assumed organizer schema (`detection_class_entities`,
+  `detection_scores`, `detection_boxes`) into a validated `FrameObjects`
+  (per-detection `label`/`confidence`/`bbox`, plus a `.counts` property).
+  Raises `InvalidAicObjectsError` on any schema violation (length mismatch,
+  out-of-range confidence, malformed bbox, blank label) rather than
+  coercing bad data — mirrors the strict `__post_init__` validation style
+  used by `ObjectRecord` in the `HCMAIC-SkillPixel-KIS` reference repo.
+  **This schema is unconfirmed against real data; revisit when a real
+  `objects/<video_id>/<frame>.json` sample becomes available.**
+- `src/mvr/enrichment/qna_context.py` — `build_frame_context()` combines
+  objects (optional accelerator, same "missing file → None" policy as
+  `mvr.ingestion.aic_dataset`'s organizer support data) with OCR text from
+  an injected `OcrEngine` Protocol (`.read_text(image) -> str`, matching the
+  existing `EasyOcrEngine`/PaddleOCR adapter method signature) so this
+  module never imports EasyOCR/PaddleOCR itself. A *missing* objects file
+  degrades to `objects=None`; a *malformed* one raises and is not swallowed.
+- Tests: `tests/unit/enrichment/objects/test_aic_objects.py` (8 cases) and
+  `tests/unit/enrichment/test_qna_context.py` (5 cases), all synthetic
+  fixtures/fakes per this repo's "no huge models for lightweight tests"
+  rule. Full suite: 211 passed, 13 skipped (no regressions from Task 01's
+  198 passed, 13 skipped).
+- Not yet done: wiring a *real* EasyOCR/PaddleOCR engine instance through
+  this interface end-to-end (deferred — no real keyframe image is present
+  on this machine right now; the injected-Protocol design means real
+  wiring is a call-site concern for Task 05's orchestration, not a change
+  to this module).
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report
