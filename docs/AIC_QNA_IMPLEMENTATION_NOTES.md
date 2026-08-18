@@ -235,6 +235,40 @@ policy and this repo's own `QwenDecomposer` retry pattern:
   generated answer (Task 05 orchestration or Task 06 benchmark), consistent
   with "verify real behavior only when the task requires it," not before.
 
+## 3d. Task 04 outcome — Q&A evaluator
+
+Implemented as a standalone module mirroring `aic_kis.py`'s shape rather
+than reusing it directly (per Task 01's plan and the repo's existing
+KIS-vs-generic-metrics separation precedent):
+
+- `src/mvr/evaluation/aic_qna.py` — `QnaGroundTruth`/`QnaAnswer` (adds
+  `answer: str` to the KIS shapes), `QNA_CUTOFFS = (1,5,20,50,100)`
+  (redefined locally, not imported from `aic_kis`, so the two tracks don't
+  accidentally couple if either organizer rule changes independently even
+  though the values coincide today), `evaluate_qna()` (identical
+  overfetch/cutoff/mean aggregation to `evaluate_kis()`).
+- `qna_r_score()` ANDs the KIS video+frame-interval check with
+  `qna_answer_matches()` — a **documented approximation** of the
+  organizer's real "semantic match" human-judge rule: case-fold +
+  punctuation/whitespace normalization, plus VI/EN digit↔number-word
+  equivalence (0–20) covering the organizer's own worked example
+  (`"5"` ≡ `"Năm"` ≡ `"năm"`, matched in both GT-direction and either
+  language). Anything else scores 0 — deliberately no embedding/LLM-as-judge
+  broader semantic similarity, since a false "match" would be worse than an
+  honest miss for internal benchmarking. Every scoring surface must label
+  results from this module as an approximate self-evaluation, never the
+  organizer's official judged score (same caveat `aic_kis` already carries).
+- Tests: `tests/unit/evaluation/test_aic_qna.py` (15 cases) covering the
+  organizer's own worked example verbatim, rank-based R@k aggregation
+  (rank 3/after-100 cases mirrored from the KIS test suite), case/whitespace
+  insensitivity, and both VI and EN number-word equivalence plus explicit
+  rejection of unrelated numbers. Full suite: 245 passed, 5 skipped (no
+  regressions from Task 03's 230 passed, 5 skipped).
+- Not yet done / explicitly deferred: broader fuzzy matching (synonyms,
+  paraphrase, non-numeric near-misses) — only add if a real benchmark
+  (Task 06) shows the current approximation is too conservative on actual
+  queries, not speculatively now.
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report
