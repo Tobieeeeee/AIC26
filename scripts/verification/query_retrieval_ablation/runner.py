@@ -33,9 +33,9 @@ class AblationRunner:
             end_frame=query.end_frame,
         )
 
-        def _search(text: str) -> tuple[list[Any], float]:
+        def _search(text: str) -> tuple[list[Any], float, str | None]:
             if not text:
-                return [], 0.0
+                return [], 0.0, None
             start_time = time.perf_counter()
             candidates = search_kis(
                 text,
@@ -45,30 +45,48 @@ class AblationRunner:
                 aic_registry=self.aic_registry,
             )
             elapsed = (time.perf_counter() - start_time) * 1000.0
-            return candidates, elapsed
+            err = "empty_mapped_candidates" if not candidates else None
+            return candidates, elapsed, err
 
         # 1. vi_raw
-        c_vi, lat_vi = _search(variant.query_vi)
-        records.append(evaluate_ablation_variant(query.query_id, "vi_raw", c_vi, gt, lat_vi))
+        if not variant.query_vi:
+            c_vi, lat_vi, err_vi = [], 0.0, "empty_vi_query"
+        else:
+            c_vi, lat_vi, err_vi = _search(variant.query_vi)
+        records.append(evaluate_ablation_variant(query.query_id, "vi_raw", c_vi, gt, lat_vi, err_vi))
 
         # 2. en_full
-        c_en, lat_en = _search(variant.query_en_full)
-        records.append(evaluate_ablation_variant(query.query_id, "en_full", c_en, gt, lat_en))
+        if not variant.translation_success or not variant.query_en_full:
+            c_en, lat_en, err_en = [], 0.0, "translation_failed"
+        else:
+            c_en, lat_en, err_en = _search(variant.query_en_full)
+        records.append(evaluate_ablation_variant(query.query_id, "en_full", c_en, gt, lat_en, err_en))
 
         # 3. qwen_keyword
-        c_qwen, lat_qwen = _search(variant.keyword_query)
-        records.append(evaluate_ablation_variant(query.query_id, "qwen_keyword", c_qwen, gt, lat_qwen))
+        if not variant.decomposition_success or not variant.keyword_query:
+            c_qwen, lat_qwen, err_qwen = [], 0.0, "decomposition_failed"
+        else:
+            c_qwen, lat_qwen, err_qwen = _search(variant.keyword_query)
+        records.append(evaluate_ablation_variant(query.query_id, "qwen_keyword", c_qwen, gt, lat_qwen, err_qwen))
 
         # 4. en_full_qwen_rrf
-        # Timing for RRF includes the fusion time, but we reuse the search results.
-        # Wait, the latency for RRF in a real system might be running both concurrently or sequentially.
-        # We will record the max latency of the two branches + fusion time.
-        start_rrf = time.perf_counter()
-        c_rrf = reciprocal_rank_fusion([c_en, c_qwen], rrf_k=self.rrf_k, top_k=self.top_k)
-        fusion_time = (time.perf_counter() - start_rrf) * 1000.0
-        
-        # Approximate parallel execution latency
-        lat_rrf = max(lat_en, lat_qwen) + fusion_time
-        records.append(evaluate_ablation_variant(query.query_id, "en_full_qwen_rrf", c_rrf, gt, lat_rrf))
+        err_rrf = None
+        if err_en == "translation_failed":
+            err_rrf = "rrf_missing_en_branch"
+        elif err_qwen == "decomposition_failed":
+            err_rrf = "rrf_missing_keyword_branch"
+
+        if err_rrf:
+            c_rrf, lat_rrf = [], 0.0
+        else:
+            start_rrf = time.perf_counter()
+            c_rrf = reciprocal_rank_fusion([c_en, c_qwen], rrf_k=self.rrf_k, top_k=self.top_k)
+            fusion_time = (time.perf_counter() - start_rrf) * 1000.0
+            # Approximate parallel execution latency
+            lat_rrf = max(lat_en, lat_qwen) + fusion_time
+            if not c_rrf:
+                err_rrf = "empty_mapped_candidates"
+
+        records.append(evaluate_ablation_variant(query.query_id, "en_full_qwen_rrf", c_rrf, gt, lat_rrf, err_rrf))
 
         return records

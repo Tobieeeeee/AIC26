@@ -14,6 +14,7 @@ def evaluate_ablation_variant(
     candidates: Sequence[KisCandidate],
     gt: KisGroundTruth,
     latency_ms: float,
+    error: str | None = None,
 ) -> AblationVariantRecord:
     """Evaluate one variant's candidates against the ground truth."""
     answers = [c.to_answer() for c in candidates]
@@ -36,6 +37,7 @@ def evaluate_ablation_variant(
         r_at_100=score.recall_at_k.get(100, 0.0),
         final_score=score.final_score,
         retrieval_latency_ms=latency_ms,
+        error=error,
     )
 
 

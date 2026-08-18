@@ -55,6 +55,13 @@ def freeze_query_variants(
             except Exception:
                 decomposition_success = False
 
+        # Try to get schema version from decomposer module, fallback to "v1"
+        try:
+            from scripts.verification.query_decomposition.qwen import SCHEMA_VERSION
+            qwen_schema_version = SCHEMA_VERSION
+        except ImportError:
+            qwen_schema_version = "v1"
+
         variant = QueryVariant(
             query_id=q.query_id,
             query_vi=q.query_vi,
@@ -62,7 +69,7 @@ def freeze_query_variants(
             keyword_query=keyword_query,
             translation_model=translator.name,
             qwen_model=decomposer.name,
-            qwen_schema_version="v1",  # Hardcoded or fetched from decomposer
+            qwen_schema_version=qwen_schema_version,
             translation_success=translation_success,
             decomposition_success=decomposition_success,
         )

@@ -7,8 +7,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from scripts.verification.query_decomposition.qwen import QwenDecomposer
-from scripts.verification.query_retrieval_ablation.fusion import reciprocal_rank_fusion
+from scripts.verification.query_decomposition.qwen import QwenDecomposer, SCHEMA_VERSION as QWEN_SCHEMA_VERSION
 from scripts.verification.query_retrieval_ablation.inputs import AblationQuery, load_ablation_queries
 from scripts.verification.query_retrieval_ablation.metrics import compute_pairwise_comparison
 from scripts.verification.query_retrieval_ablation.models import VariantSummary
@@ -179,7 +178,12 @@ def main() -> None:
         f"- Representative: {audit['representative']} (DEVELOPMENT-ONLY)",
         f"- Translation Model: {translator.name}",
         f"- Qwen Model: {decomposer.name}",
-        f"- Semantic Model: {faiss_index.manifest['embedding_model']}",
+        f"- Qwen Schema Version: {QWEN_SCHEMA_VERSION}",
+        f"- Semantic Model: {faiss_index.manifest.get('embedding_model', 'unknown')}",
+        f"- Pretrained: {faiss_index.manifest.get('pretrained', 'unknown')}",
+        f"- Embedding Dimension: {faiss_index.manifest.get('dimension', 'unknown')}",
+        f"- Index Path: `{args.index}`",
+        f"- Device: `{args.device}`",
         f"- Refinement: OFF",
         f"- Final top_k: 100",
         f"- RRF k: 60",

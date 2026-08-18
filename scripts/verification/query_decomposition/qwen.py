@@ -4,6 +4,8 @@ from .base import QueryDecomposer
 from .models import QueryConcepts
 from .utils import parse_and_validate_concepts, build_keyword_query
 
+SCHEMA_VERSION = "v1"
+
 SYSTEM_PROMPT = """You are an expert AI visual search assistant. Your task is to extract key visual concepts from the given English query into a strict JSON format.
 Only extract information explicitly supported by the query. Do NOT invent entities, colors, counts, actions, or relationships.
 Do not hallucinate OCR text.
