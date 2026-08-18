@@ -5,7 +5,7 @@ from pathlib import Path
 
 def test_write_metadata_preserves_schema_and_mapping(tmp_path: Path) -> None:
     from mvr.ingestion.metadata import write_metadata
-    from mvr.ingestion.models import Keyframe, Shot
+    from mvr.ingestion.models import Keyframe, Shot, VideoInfo
 
     shots = [Shot("V001", "pyscenedetect", 1, 0, 24, 25.0)]
     keyframes = [
@@ -19,8 +19,9 @@ def test_write_metadata_preserves_schema_and_mapping(tmp_path: Path) -> None:
             "keyframes/V001/V001_S0001_K01.jpg",
         )
     ]
+    videos = [VideoInfo("V001", Path("V001.mp4"), 25.0, 25, 1.0, 1920, 1080)]
 
-    write_metadata(tmp_path, shots, keyframes)
+    write_metadata(tmp_path, videos, shots, keyframes)
 
     payload = json.loads((tmp_path / "shots.json").read_text(encoding="utf-8"))
     assert payload == {

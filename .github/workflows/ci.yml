@@ -17,5 +17,5 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: pip install -e .[dev,api]
+      - run: pip install -e .[dev,api,semantic]
       - run: python -m pytest -q

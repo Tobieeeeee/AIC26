@@ -49,7 +49,7 @@ def test_pipeline_uses_primary_shots_for_keyframes_and_metadata(
     monkeypatch.setattr(
         pipeline,
         "write_metadata",
-        lambda output, shots, frames: metadata.append((shots, frames)),
+        lambda output, videos, shots, frames: metadata.append((shots, frames)),
     )
     monkeypatch.setattr(pipeline, "write_benchmark", lambda *args: None)
 

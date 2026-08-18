@@ -95,5 +95,5 @@ def run_pipeline(
                 by_video[video.video_id],
                 output_root,
             )
-    write_metadata(output_root, primary_shots, keyframes)
+    write_metadata(output_root, videos, primary_shots, keyframes)
     write_benchmark(output_root, benchmark)
