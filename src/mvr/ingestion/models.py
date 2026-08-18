@@ -9,6 +9,8 @@ class VideoInfo:
     fps: float
     frame_count: int
     duration: float
+    width: int = 0
+    height: int = 0
 
 
 @dataclass(frozen=True)

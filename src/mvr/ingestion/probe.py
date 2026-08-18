@@ -9,7 +9,7 @@ from .models import VideoInfo
 def probe_video(path: Path) -> VideoInfo:
     command = [
         "ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
-        "-show_entries", "stream=avg_frame_rate,r_frame_rate,nb_frames,nb_read_frames,duration:format=duration",
+        "-show_entries", "stream=avg_frame_rate,r_frame_rate,nb_frames,nb_read_frames,duration,width,height:format=duration",
         "-of", "json", str(path),
     ]
     payload = json.loads(subprocess.run(command, check=True, capture_output=True, text=True).stdout)
@@ -19,4 +19,6 @@ def probe_video(path: Path) -> VideoInfo:
     duration = float(stream.get("duration") or payload.get("format", {}).get("duration") or 0)
     raw_count = stream.get("nb_read_frames") or stream.get("nb_frames")
     frame_count = int(raw_count) if raw_count and raw_count != "N/A" else round(duration * fps)
-    return VideoInfo(path.stem, path.resolve(), fps, frame_count, duration or frame_count / fps)
+    width = int(stream.get("width") or 0)
+    height = int(stream.get("height") or 0)
+    return VideoInfo(path.stem, path.resolve(), fps, frame_count, duration or frame_count / fps, width, height)

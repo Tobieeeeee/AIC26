@@ -18,6 +18,8 @@ def test_probe_video_preserves_fractional_fps_and_count_fallback(
                 "nb_frames": "N/A",
                 "nb_read_frames": None,
                 "duration": None,
+                "width": 1920,
+                "height": 1080,
             }
         ],
         "format": {"duration": "2.002"},
@@ -36,3 +38,5 @@ def test_probe_video_preserves_fractional_fps_and_count_fallback(
     assert info.fps == 30000 / 1001
     assert info.frame_count == 60
     assert info.duration == 2.002
+    assert info.width == 1920
+    assert info.height == 1080

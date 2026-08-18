@@ -2,10 +2,10 @@ import csv
 import json
 from pathlib import Path
 
-from .models import Keyframe, Shot
+from .models import Keyframe, Shot, VideoInfo
 
 
-def write_metadata(output_root: Path, shots: list[Shot], keyframes: list[Keyframe]) -> None:
+def write_metadata(output_root: Path, videos: list[VideoInfo], shots: list[Shot], keyframes: list[Keyframe]) -> None:
     output_root.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": "1.0",
@@ -20,6 +20,31 @@ def write_metadata(output_root: Path, shots: list[Shot], keyframes: list[Keyfram
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
         writer.writerows(frame.to_dict() for frame in keyframes)
+
+    video_columns = ["video_id", "video_path", "duration_seconds", "fps", "frame_count", "width", "height"]
+    with (output_root / "video_metadata.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=video_columns)
+        writer.writeheader()
+        for v in videos:
+            writer.writerow({
+                "video_id": v.video_id,
+                "video_path": str(v.path),
+                "duration_seconds": round(v.duration, 6),
+                "fps": round(v.fps, 6),
+                "frame_count": v.frame_count,
+                "width": v.width,
+                "height": v.height,
+            })
+    dataset_name = output_root.name.replace("ingest_", "") if output_root.name.startswith("ingest_") else output_root.name
+    manifest = {
+        "schema_version": "1.0",
+        "dataset": dataset_name,
+        "video_count": len(videos),
+        "shot_count": len(shots),
+        "keyframe_count": len(keyframes)
+    }
+    (output_root / "ingest_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
 
 
 def write_benchmark(output_root: Path, rows: list[dict]) -> None:
