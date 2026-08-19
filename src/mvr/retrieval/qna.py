@@ -24,6 +24,12 @@ deliberately wires only the organizer's file-based objects through
 `build_frame_context` for now; falling back to a live COCO detector when
 the organizer file is absent is an explicit, separately-scoped follow-up
 (see `docs/AIC_QNA_IMPLEMENTATION_NOTES.md`), not silently done here.
+
+`min_object_confidence` defaults to `0.0` (no filtering). Choosing a
+detection confidence threshold belongs to the indexing/enrichment layer
+that produces the detections, NOT to Q&A -- this module owns no threshold
+value so the policy has a single owner upstream. Callers feeding raw,
+unfiltered organizer JSON must pass a threshold explicitly.
 """
 from __future__ import annotations
 
@@ -33,11 +39,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from mvr.enrichment.qna_answer import AnswerReasoner, AnswerSource
-from mvr.enrichment.qna_context import (
-    DEFAULT_MIN_OBJECT_CONFIDENCE,
-    OcrEngine,
-    build_frame_context,
-)
+from mvr.enrichment.qna_context import OcrEngine, build_frame_context
 from mvr.retrieval.kis import KeyframeFrameIndexResolver, resolve_original_frame_id
 
 
@@ -95,7 +97,7 @@ def search_qna(
     ocr_engine: OcrEngine | None = None,
     image_loader: ImageLoader | None = None,
     objects_path_resolver: ObjectsPathResolver | None = None,
-    min_object_confidence: float = DEFAULT_MIN_OBJECT_CONFIDENCE,
+    min_object_confidence: float = 0.0,
     overfetch: int | None = None,
 ) -> list[QnaCandidate]:
     """Run one Q&A query against the existing retrieval baseline plus the

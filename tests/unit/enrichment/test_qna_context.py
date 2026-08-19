@@ -48,11 +48,10 @@ def test_build_frame_context_combines_objects_and_ocr(tmp_path) -> None:
     assert engine.calls == [image]
 
 
-def test_build_frame_context_applies_organizer_baseline_threshold_by_default(tmp_path) -> None:
-    """The organizer's own FiftyOne baseline notebook filters detections at
-    0.4; without it a real organizer file contributes ~100 detections down
-    to confidence 0.006, which floods the answer prompt with noise and
-    corrupts counting questions."""
+def test_build_frame_context_does_not_filter_detections_by_default(tmp_path) -> None:
+    """Q&A owns no confidence-threshold policy: choosing one belongs to the
+    indexing/enrichment layer that produces the detections, so this module
+    must pass everything through untouched unless a caller asks otherwise."""
     from mvr.enrichment.qna_context import build_frame_context
 
     objects_path = _write_objects(
@@ -72,7 +71,7 @@ def test_build_frame_context_applies_organizer_baseline_threshold_by_default(tmp
         ocr_engine=None,
     )
 
-    assert context.object_counts == {"Person": 2}
+    assert context.object_counts == {"Person": 2, "Skyscraper": 1, "Tower": 1}
 
 
 def test_build_frame_context_object_threshold_is_configurable(tmp_path) -> None:

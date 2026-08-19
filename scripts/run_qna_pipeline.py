@@ -63,6 +63,15 @@ def main() -> None:
     parser.add_argument("--allow-model-download", action="store_true")
     parser.add_argument("--no-ocr", action="store_true", help="Skip OCR context (faster, less accurate)")
     parser.add_argument(
+        "--min-object-confidence", type=float, default=0.0,
+        help=(
+            "Drop object detections below this confidence. Default 0.0 (no "
+            "filtering): the threshold policy belongs to whoever produces the "
+            "detections, not to Q&A. Pass one when reading raw organizer "
+            "objects JSON, which is unfiltered (~100 detections/frame)."
+        ),
+    )
+    parser.add_argument(
         "--export-prompts", type=Path, default=None,
         help=(
             "Collect prompts to this JSON file instead of generating answers "
@@ -130,6 +139,7 @@ def main() -> None:
         ocr_engine=ocr_engine,
         image_loader=image_loader,
         objects_path_resolver=objects_path_resolver,
+        min_object_confidence=args.min_object_confidence,
     )
 
     if not results:

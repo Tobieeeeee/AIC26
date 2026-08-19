@@ -28,13 +28,6 @@ from typing import Any, Protocol
 
 from mvr.enrichment.objects.aic_objects import FrameObjects, load_frame_objects
 
-# The organizer's own FiftyOne baseline notebook for AIC 2026 filters the
-# provided Faster R-CNN/OpenImages detections at ``score > 0.4`` before
-# using them. Real organizer files carry ~100 detections per frame down to
-# confidence ~0.006; feeding those unfiltered into an answer prompt buries
-# the real objects in noise and makes counting questions unanswerable.
-DEFAULT_MIN_OBJECT_CONFIDENCE = 0.4
-
 
 class OcrEngine(Protocol):
     def read_text(self, image: Any) -> str: ...
@@ -61,8 +54,22 @@ def build_frame_context(
     image: Any,
     objects_path: Path | str | None,
     ocr_engine: OcrEngine | None,
-    min_object_confidence: float = DEFAULT_MIN_OBJECT_CONFIDENCE,
+    min_object_confidence: float = 0.0,
 ) -> FrameContext:
+    """Assemble one frame's structured evidence.
+
+    ``min_object_confidence`` defaults to ``0.0`` (no filtering) on purpose:
+    **choosing a detection confidence threshold is the indexing/enrichment
+    layer's decision, not Q&A's.** This module deliberately owns no
+    threshold value so there is exactly one source of truth for that policy
+    upstream (see ``mvr.enrichment.objects.faster_rcnn`` /
+    ``mvr.enrichment.objects.yolo``, which carry their detector's own).
+
+    Callers that read *raw, unfiltered* organizer objects JSON directly
+    should pass an explicit threshold -- those files carry ~100 detections
+    per frame down to confidence ~0.006, which would otherwise flood the
+    answer prompt with noise.
+    """
     if not video_id.strip():
         raise ValueError("video_id must not be blank")
     if frame_id < 0:
