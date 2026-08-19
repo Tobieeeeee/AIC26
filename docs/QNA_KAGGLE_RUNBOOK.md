@@ -181,21 +181,25 @@ Cách này không cần internet, và tải nhanh hơn.
 
 ## Phụ lục B — Chạy nhiều câu một lượt
 
-Gộp nhiều `prompts.json` vào cùng một dataset rồi lặp:
+Gộp mọi `prompts.json` vào cùng một dataset, rồi **nạp model một lần** và
+lặp qua tất cả (nạp model 7B mất vài phút, không nên lặp lại mỗi file):
 
 ```python
 from pathlib import Path
+
+loaded = load_model("Qwen/Qwen2.5-7B-Instruct")   # nạp DUY NHẤT 1 lần
 
 for p in sorted(Path("/kaggle/input/aic-qna-prompts").glob("*.prompts.json")):
     run_batch(
         prompts_path=p,
         answers_path=f"/kaggle/working/{p.name.replace('.prompts', '.answers')}",
-        model_name="Qwen/Qwen2.5-7B-Instruct",
+        loaded=loaded,
     )
 ```
 
-Model chỉ load một lần cho mỗi lần gọi `run_batch` — với nhiều file nên
-tách `load_model()` ra ngoài vòng lặp để khỏi load lại.
+Xong sẽ có đủ số file `.answers.json` trong `/kaggle/working/`. Tải cả
+thư mục về (nút **Download** ở panel Output) rồi giải nén vào
+`artifacts\qna\`.
 
 ---
 

@@ -88,7 +88,14 @@ def run_batch(
     answers_path: str | Path,
     model_name: str = DEFAULT_MODEL,
     load_in_4bit: bool = False,
+    loaded: tuple | None = None,
 ) -> Path:
+    """Answer one prompt batch.
+
+    Pass ``loaded=load_model(...)`` when processing several batches so the
+    model is loaded once instead of once per file -- loading a 7B model
+    takes minutes, which dominates the run for small batches.
+    """
     batch = json.loads(Path(prompts_path).read_text(encoding="utf-8"))
     if batch.get("format") != PROMPT_BATCH_FORMAT:
         raise ValueError(f"unexpected prompt batch format: {batch.get('format')!r}")
@@ -97,7 +104,7 @@ def run_batch(
     print(f"question : {batch['question']}")
     print(f"prompts  : {len(batch['items'])}")
 
-    tokenizer, model = load_model(model_name, load_in_4bit=load_in_4bit)
+    tokenizer, model = loaded or load_model(model_name, load_in_4bit=load_in_4bit)
 
     items = []
     started = time.time()
