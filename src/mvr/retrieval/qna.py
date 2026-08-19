@@ -33,7 +33,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from mvr.enrichment.qna_answer import AnswerReasoner, AnswerSource
-from mvr.enrichment.qna_context import OcrEngine, build_frame_context
+from mvr.enrichment.qna_context import (
+    DEFAULT_MIN_OBJECT_CONFIDENCE,
+    OcrEngine,
+    build_frame_context,
+)
 from mvr.retrieval.kis import KeyframeFrameIndexResolver, resolve_original_frame_id
 
 
@@ -91,6 +95,7 @@ def search_qna(
     ocr_engine: OcrEngine | None = None,
     image_loader: ImageLoader | None = None,
     objects_path_resolver: ObjectsPathResolver | None = None,
+    min_object_confidence: float = DEFAULT_MIN_OBJECT_CONFIDENCE,
     overfetch: int | None = None,
 ) -> list[QnaCandidate]:
     """Run one Q&A query against the existing retrieval baseline plus the
@@ -159,6 +164,7 @@ def search_qna(
             image=image,
             objects_path=objects_path,
             ocr_engine=ocr_engine,
+            min_object_confidence=min_object_confidence,
         )
         result = answer_reasoner.answer(question, context)
 

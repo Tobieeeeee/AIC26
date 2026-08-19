@@ -189,11 +189,25 @@ class HuggingFaceCausalLmBackend:
             os.environ.setdefault("HF_HUB_OFFLINE", "1")
             os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         try:
+            import torch
+
             self._tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name, trust_remote_code=True, local_files_only=local_files_only
             )
             self._model = AutoModelForCausalLM.from_pretrained(
-                self.model_name, trust_remote_code=True, local_files_only=local_files_only
+                self.model_name,
+                trust_remote_code=True,
+                local_files_only=local_files_only,
+                # Real-machine finding: the default fp32 checkpoint load can
+                # exceed available RAM+pagefile on memory-constrained hosts
+                # (observed: Windows error 1455 "paging file too small" on a
+                # 3.8GB-RAM machine loading a 1.5B-parameter model).
+                # low_cpu_mem_usage avoids materializing a redundant fp32
+                # copy during loading; bfloat16 halves the resident weight
+                # size. Both are standard, documented HF loading options,
+                # not behavior changes to generation logic.
+                low_cpu_mem_usage=True,
+                torch_dtype=torch.bfloat16,
             )
         except Exception as exc:
             mode = "local cache" if local_files_only else "configured model source"

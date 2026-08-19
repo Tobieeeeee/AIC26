@@ -85,12 +85,20 @@ def _require_list(payload: dict[str, Any], key: str) -> list[Any]:
 
 
 def load_frame_objects(
-    path: Path | str, *, video_id: str, frame_ref: str
+    path: Path | str, *, video_id: str, frame_ref: str, min_confidence: float = 0.0
 ) -> FrameObjects:
     """Parse one organizer objects JSON file into a validated ``FrameObjects``.
 
     Raises ``InvalidAicObjectsError`` on any schema violation rather than
     silently dropping or coercing bad detections.
+
+    ``min_confidence`` (inclusive) drops low-confidence detections *after*
+    validating them, so a corrupt entry still raises even when it would
+    have been filtered out. The default of ``0.0`` keeps every detection:
+    this loader is a faithful reader of the organizer artifact, and
+    choosing a threshold is the consuming pipeline's policy decision (see
+    ``mvr.enrichment.qna_context.build_frame_context``, which applies the
+    organizer baseline's own ``0.4``).
     """
     raw_text = Path(path).read_text(encoding="utf-8")
     try:
@@ -120,12 +128,13 @@ def load_frame_objects(
             raise InvalidAicObjectsError(f"{path}: detection label must be a string, got {label!r}")
         if not isinstance(box, list) or len(box) != 4:
             raise InvalidAicObjectsError(f"{path}: detection bbox must have four values, got {box!r}")
-        detections.append(
-            ObjectDetection(
-                label=label,
-                confidence=float(score),
-                bbox=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
-            )
+        detection = ObjectDetection(
+            label=label,
+            confidence=float(score),
+            bbox=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
         )
+        # Filter after construction so validation still runs on every entry.
+        if detection.confidence >= min_confidence:
+            detections.append(detection)
 
     return FrameObjects(video_id=video_id, frame_ref=frame_ref, detections=tuple(detections))

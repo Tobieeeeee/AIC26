@@ -17,7 +17,15 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    # Windows consoles often default to a legacy codepage (e.g. cp1252) that
+    # cannot encode Vietnamese text; force UTF-8 so query/answer output
+    # never crashes on non-ASCII characters regardless of the caller's
+    # console configuration.
+    sys.stdout.reconfigure(encoding="utf-8")
 
 
 def split_event_and_question(text: str) -> tuple[str, str]:

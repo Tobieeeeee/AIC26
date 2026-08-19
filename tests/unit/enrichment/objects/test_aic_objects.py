@@ -97,6 +97,73 @@ def test_load_frame_objects_rejects_missing_required_key(tmp_path) -> None:
         load_frame_objects(path, video_id="L01_V001", frame_ref="0000")
 
 
+def test_load_frame_objects_keeps_every_detection_by_default(tmp_path) -> None:
+    """The loader is a faithful artifact reader: filtering is a consumer
+    policy decision, not something the parser applies on its own."""
+    from mvr.enrichment.objects.aic_objects import load_frame_objects
+
+    path = _write(tmp_path, VALID_PAYLOAD)
+
+    frame_objects = load_frame_objects(path, video_id="L01_V001", frame_ref="0000")
+
+    assert len(frame_objects.detections) == 3
+
+
+def test_load_frame_objects_applies_min_confidence(tmp_path) -> None:
+    from mvr.enrichment.objects.aic_objects import load_frame_objects
+
+    path = _write(tmp_path, VALID_PAYLOAD)  # scores: 0.91, 0.42, 0.35
+
+    frame_objects = load_frame_objects(
+        path, video_id="L01_V001", frame_ref="0000", min_confidence=0.4
+    )
+
+    assert [d.confidence for d in frame_objects.detections] == pytest.approx([0.91, 0.42])
+    assert frame_objects.counts == {"Person": 1, "Car": 1}
+
+
+def test_load_frame_objects_min_confidence_is_inclusive(tmp_path) -> None:
+    from mvr.enrichment.objects.aic_objects import load_frame_objects
+
+    payload = dict(VALID_PAYLOAD)
+    payload["detection_scores"] = [0.4, 0.39999, 0.5]
+    path = _write(tmp_path, payload)
+
+    frame_objects = load_frame_objects(
+        path, video_id="L01_V001", frame_ref="0000", min_confidence=0.4
+    )
+
+    assert [d.confidence for d in frame_objects.detections] == pytest.approx([0.4, 0.5])
+
+
+def test_load_frame_objects_min_confidence_can_filter_everything(tmp_path) -> None:
+    from mvr.enrichment.objects.aic_objects import load_frame_objects
+
+    path = _write(tmp_path, VALID_PAYLOAD)
+
+    frame_objects = load_frame_objects(
+        path, video_id="L01_V001", frame_ref="0000", min_confidence=0.99
+    )
+
+    assert frame_objects.detections == ()
+    assert frame_objects.counts == {}
+
+
+def test_load_frame_objects_still_validates_filtered_out_detections(tmp_path) -> None:
+    """A malformed low-confidence detection must still raise -- filtering is
+    not an excuse to silently accept a corrupt file."""
+    from mvr.enrichment.objects.aic_objects import InvalidAicObjectsError, load_frame_objects
+
+    payload = dict(VALID_PAYLOAD)
+    payload["detection_scores"] = [0.91, 0.42, 1.5]  # last one invalid AND below no threshold
+    path = _write(tmp_path, payload)
+
+    with pytest.raises(InvalidAicObjectsError):
+        load_frame_objects(
+            path, video_id="L01_V001", frame_ref="0000", min_confidence=0.4
+        )
+
+
 def test_load_frame_objects_handles_empty_detections(tmp_path) -> None:
     from mvr.enrichment.objects.aic_objects import load_frame_objects
 

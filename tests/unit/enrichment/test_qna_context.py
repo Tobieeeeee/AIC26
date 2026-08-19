@@ -48,6 +48,57 @@ def test_build_frame_context_combines_objects_and_ocr(tmp_path) -> None:
     assert engine.calls == [image]
 
 
+def test_build_frame_context_applies_organizer_baseline_threshold_by_default(tmp_path) -> None:
+    """The organizer's own FiftyOne baseline notebook filters detections at
+    0.4; without it a real organizer file contributes ~100 detections down
+    to confidence 0.006, which floods the answer prompt with noise and
+    corrupts counting questions."""
+    from mvr.enrichment.qna_context import build_frame_context
+
+    objects_path = _write_objects(
+        tmp_path,
+        {
+            "detection_class_entities": ["Person", "Person", "Skyscraper", "Tower"],
+            "detection_scores": [0.9, 0.5, 0.2, 0.006],
+            "detection_boxes": [[0.0, 0.0, 1.0, 1.0]] * 4,
+        },
+    )
+
+    context = build_frame_context(
+        video_id="L01_V001",
+        frame_id=1500,
+        image=object(),
+        objects_path=objects_path,
+        ocr_engine=None,
+    )
+
+    assert context.object_counts == {"Person": 2}
+
+
+def test_build_frame_context_object_threshold_is_configurable(tmp_path) -> None:
+    from mvr.enrichment.qna_context import build_frame_context
+
+    objects_path = _write_objects(
+        tmp_path,
+        {
+            "detection_class_entities": ["Person", "Skyscraper"],
+            "detection_scores": [0.9, 0.2],
+            "detection_boxes": [[0.0, 0.0, 1.0, 1.0]] * 2,
+        },
+    )
+
+    context = build_frame_context(
+        video_id="L01_V001",
+        frame_id=1500,
+        image=object(),
+        objects_path=objects_path,
+        ocr_engine=None,
+        min_object_confidence=0.1,
+    )
+
+    assert context.object_counts == {"Person": 1, "Skyscraper": 1}
+
+
 def test_build_frame_context_without_objects_file(tmp_path) -> None:
     from mvr.enrichment.qna_context import build_frame_context
 

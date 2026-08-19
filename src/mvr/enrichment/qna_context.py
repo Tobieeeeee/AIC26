@@ -28,6 +28,13 @@ from typing import Any, Protocol
 
 from mvr.enrichment.objects.aic_objects import FrameObjects, load_frame_objects
 
+# The organizer's own FiftyOne baseline notebook for AIC 2026 filters the
+# provided Faster R-CNN/OpenImages detections at ``score > 0.4`` before
+# using them. Real organizer files carry ~100 detections per frame down to
+# confidence ~0.006; feeding those unfiltered into an answer prompt buries
+# the real objects in noise and makes counting questions unanswerable.
+DEFAULT_MIN_OBJECT_CONFIDENCE = 0.4
+
 
 class OcrEngine(Protocol):
     def read_text(self, image: Any) -> str: ...
@@ -54,6 +61,7 @@ def build_frame_context(
     image: Any,
     objects_path: Path | str | None,
     ocr_engine: OcrEngine | None,
+    min_object_confidence: float = DEFAULT_MIN_OBJECT_CONFIDENCE,
 ) -> FrameContext:
     if not video_id.strip():
         raise ValueError("video_id must not be blank")
@@ -63,7 +71,10 @@ def build_frame_context(
     objects: FrameObjects | None = None
     if objects_path is not None and Path(objects_path).exists():
         objects = load_frame_objects(
-            objects_path, video_id=video_id, frame_ref=str(frame_id)
+            objects_path,
+            video_id=video_id,
+            frame_ref=str(frame_id),
+            min_confidence=min_object_confidence,
         )
 
     ocr_text = "" if ocr_engine is None else ocr_engine.read_text(image)
