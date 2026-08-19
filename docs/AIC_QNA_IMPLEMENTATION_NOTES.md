@@ -325,6 +325,90 @@ KIS-vs-generic-metrics separation precedent):
   Full suite: 263 passed, 5 skipped (no regressions from Task 04's 245
   passed, 5 skipped).
 
+## 3f. Post-Task-05 work on real organizer data
+
+Real AIC data became available (`D:\AIC26_data`, `D:\AIC_query`), which
+closed several Task 01 unknowns and changed some priorities.
+
+### Data findings (measured, not assumed)
+
+- **Objects JSON schema confirmed.** The Task 01/02 assumption was correct:
+  `detection_class_entities` / `detection_scores` / `detection_boxes`, with
+  boxes as `[ymin, xmin, ymax, xmax]` normalized to [0,1] (cross-checked
+  against the organizer's own FiftyOne baseline notebook, which converts
+  them to `[x, y, w, h]`). Numeric fields are JSON **strings**, which
+  `float()` already handled. Parsed 500 random real files: 0 errors.
+- **Organizer asset coverage is very uneven** (873 videos total):
+  CLIP features 873/873, map-keyframes 873/873, media-info 873/873,
+  keyframes 850/873, but **objects only 59/873 (6.8%)** — the organizer
+  ships an objects *sample*, not full coverage. Of the 60 videos indexed
+  for testing (L21+L22), only 2 have object files. **Object context is
+  therefore mostly absent at scale; OCR is the dominant per-frame
+  evidence source.**
+- **Query modality analysis** (9 real Q&A queries, inferred from query text,
+  not yet verified against the videos): ~7/9 need OCR (on-screen text,
+  signs, recipe cards, exam questions), ~3/9 may need ASR (spoken-only
+  facts), and only 1/9 truly needs visual counting (a VLM). This is
+  consistent with the SOICT 2025 winner paper, whose Q&A relied on LLM
+  reasoning over OCR/ASR/object evidence rather than a frame-reading VLM.
+- **media-info is an unused free signal**: YouTube title/description/
+  keywords/publish_date at 100% coverage, not yet wired into `FrameContext`.
+
+### Real end-to-end verification
+
+Built a semantic index over L21+L22 (60 videos, 16,896 keyframes) and ran
+the full pipeline on real queries. Retrieval, frame resolution, OCR, and
+answer generation all execute correctly; OCR text demonstrably reaches the
+prompt. **Answer quality is blocked by machine capacity, not by the
+pipeline**: the dev machine has 3.8GB RAM and no GPU, where a 1.5B model
+fails to load (Windows paging-file error) and a 0.5B model echoes the
+question back instead of answering.
+
+### Threshold ownership (deliberate reversal)
+
+An earlier commit applied the organizer baseline's 0.4 detection threshold
+inside the Q&A context builder, measured to cut real files from 100.0 to
+4.7 detections/frame (32.1 → 3.2 distinct labels). That policy was then
+**removed from Q&A** at the user's direction: choosing a confidence
+threshold belongs to the indexing/enrichment layer that produces the
+detections and already carries its own (`yolo.py` 0.4, `faster_rcnn.py`
+0.5). Q&A now owns no threshold value — `build_frame_context` and
+`search_qna` default to `0.0`, and `run_qna_pipeline.py` exposes
+`--min-object-confidence` for the operator. The loader's `min_confidence`
+parameter remains as a *capability*, not a policy. The indexing owner has
+been asked to deliver pre-filtered detections.
+
+### Additions
+
+- `image_path` on `QnaCandidate`/`QnaHit` so the human-review step (and the
+  UI being built by a teammate) can display the candidate frame. The API
+  maps it to a servable `/keyframes/...` URL and returns `null` rather than
+  leaking a local absolute path when it cannot serve the file.
+- `src/mvr/submission/qna_export.py` — validation + local export for the
+  three-field contract. Dedup deliberately differs from KIS: only exact
+  `(video_id, frame_id, answer)` triples are duplicates, because the
+  organizer scores MAX over top-k and hedging one answer across frames (or
+  several answers on one frame) is a legitimate use of the 100-slot budget.
+- `src/mvr/enrichment/qna_batch.py` + `scripts/kaggle_qna_generate.py` +
+  `docs/QNA_KAGGLE_RUNBOOK.md` — text-only offline batch answering on
+  external GPU (Kaggle), since a live inference server is impractical there
+  (~20 min idle timeout) while "Save & Run All" batch mode is not. Only
+  prompts leave the machine; no video or keyframes. Retrieval is not re-run
+  on merge, so the expensive local OCR pass happens once.
+
+### Explicitly out of Q&A scope (team boundaries)
+
+Confirmed by tracing shared code: the **text/image encoder**
+(`enrichment/embeddings/openclip.py`) is used by one shared
+`LazyFaissSemanticService` serving `/search/semantic`, `/search/kis` **and**
+`/search/qna`, and by a teammate's `feature_extraction.py` (PR #4).
+Switching to the organizer's precomputed CLIP features — attractive, since
+they cover all 873 videos and would remove hours of CPU encoding — would
+change KIS and TRAKE retrieval too, and requires matching the OpenAI CLIP
+weights the organizer used (not the `laion2b_s34b_b79k` weights currently
+indexed). **That is a team-level decision, not a Q&A one.** Likewise ASR,
+running detectors over the full corpus, and multi-embedding RRF.
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report
