@@ -80,6 +80,10 @@ class QnaHit(BaseModel):
     timestamp: float | None = None
     answer: str
     answer_source: Literal["context-grounded", "knowledge-grounded", "mixed"]
+    #: Served URL for this candidate's keyframe (e.g. "/keyframes/L21_V001/003.jpg"),
+    #: so a reviewer can see the frame. ``None`` when the API cannot serve it --
+    #: a raw local filesystem path is never exposed here.
+    image_path: str | None = None
 
 
 class QnaSearchResponse(BaseModel):

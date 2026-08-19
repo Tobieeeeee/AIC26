@@ -155,6 +155,7 @@ def test_search_qna_returns_answered_ranked_candidates() -> None:
     assert results[0] == QnaCandidate(
         rank=1, video_id="L21_V001", frame_id=261, score=0.9,
         keyframe_id="kf-1", timestamp=1.0, answer="5", answer_source="context-grounded",
+        image_path="/tmp/kf-1.jpg",
     )
 
 
@@ -191,6 +192,35 @@ def test_search_qna_wires_ocr_and_objects_into_context() -> None:
     assert loaded_images == ["/tmp/kf-1.jpg"]
     assert ocr.calls  # OCR ran on the loaded image
     assert "EXIT 5B" in backend.prompts[0]
+
+
+def test_search_qna_preserves_image_path_for_human_review() -> None:
+    """A human/VLM reviewing a Q&A candidate must be able to see the frame,
+    so the retrieval hit's image path has to survive into the candidate."""
+    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    service = _FakeMultimodalService([_hit("L21_V001", "kf-1", score=0.9)])
+
+    results = search_qna(
+        "event", "question", top_k=5,
+        semantic_service=None, multimodal_service=service,
+        pipeline_resolver=resolver, answer_reasoner=_reasoner("1", "context-grounded"),
+    )
+
+    assert results[0].image_path == "/tmp/kf-1.jpg"
+
+
+def test_search_qna_tolerates_hits_without_an_image_path() -> None:
+    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    hit = {"video_id": "L21_V001", "frame_id": "kf-1", "score": 0.9, "timestamp": 1.0}
+    service = _FakeMultimodalService([hit])
+
+    results = search_qna(
+        "event", "question", top_k=5,
+        semantic_service=None, multimodal_service=service,
+        pipeline_resolver=resolver, answer_reasoner=_reasoner("1", "context-grounded"),
+    )
+
+    assert results[0].image_path is None
 
 
 def test_search_qna_drops_unresolvable_candidates_without_guessing() -> None:

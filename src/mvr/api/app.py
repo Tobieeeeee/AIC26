@@ -298,6 +298,25 @@ def _hit_payload(hit: dict[str, Any], *, rank: int) -> dict[str, Any]:
     }
 
 
+def _servable_keyframe_url(raw_path: str | None, keyframe_dir: Path | None) -> str | None:
+    """Map a local keyframe path to the URL this app actually serves it at.
+
+    Returns ``None`` -- rather than the local path -- whenever the image
+    cannot be served (no mounted directory, or the file lives outside it).
+    Q&A candidates routinely come from an organizer dataset root that is
+    not the mounted keyframe directory, and leaking absolute local paths to
+    an API client would be both useless to them and an unnecessary
+    disclosure of the local filesystem layout.
+    """
+    if raw_path is None or keyframe_dir is None:
+        return None
+    try:
+        relative_path = Path(raw_path).resolve().relative_to(keyframe_dir.resolve())
+    except (ValueError, OSError):
+        return None
+    return f"/keyframes/{relative_path.as_posix()}"
+
+
 def _semantic_payload(result: Any, keyframe_dir: Path | None) -> dict[str, Any]:
     payload = result.to_dict()
     if keyframe_dir is None:
@@ -555,6 +574,10 @@ def create_app(
                     timestamp=candidate.timestamp,
                     answer=candidate.answer,
                     answer_source=candidate.answer_source,
+                    image_path=_servable_keyframe_url(
+                        candidate.image_path,
+                        keyframe_dir if isinstance(keyframe_dir, Path) else None,
+                    ),
                 )
                 for candidate in candidates
             ],

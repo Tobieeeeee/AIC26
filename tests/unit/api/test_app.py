@@ -530,8 +530,65 @@ def test_qna_search_returns_ranked_answered_response_contract() -> None:
         "timestamp": 1.25,
         "answer": "blue",
         "answer_source": "context-grounded",
+        # No keyframe directory configured in this test, so nothing servable.
+        "image_path": None,
     }
     assert reasoner.calls[0][0] == "what color?"
+
+
+def test_qna_search_exposes_servable_image_url_when_keyframes_are_mounted(tmp_path) -> None:
+    """The UI needs a URL it can actually load to show the frame to a human
+    reviewer -- and must never receive a raw local filesystem path."""
+    keyframe_dir = tmp_path / "keyframes"
+    (keyframe_dir / "video-1").mkdir(parents=True)
+    image = keyframe_dir / "video-1" / "frame-high.jpg"
+    image.write_bytes(b"jpeg")
+
+    class _AbsolutePathService(FakeMultimodalService):
+        def search_hybrid(self, query: str, *, top_k: int, rrf_k: int):
+            hits = super().search_hybrid(query, top_k=top_k, rrf_k=rrf_k)
+            hits[0] = {**hits[0], "image_path": str(image)}
+            return hits
+
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=_AbsolutePathService(),
+            kis_pipeline_resolver=KeyframeFrameIndexResolver({"frame-high": 261, "frame-low": 45}),
+            keyframe_dir=keyframe_dir,
+            qna_answer_reasoner=_FakeAnswerReasoner(),
+        )
+    )
+
+    response = client.post(
+        "/search/qna",
+        json={"event_description": "e", "question": "q", "top_k": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["image_path"] == "/keyframes/video-1/frame-high.jpg"
+
+
+def test_qna_search_hides_image_paths_outside_the_served_directory(tmp_path) -> None:
+    """A candidate image that the API cannot serve must degrade to null,
+    never leak the local absolute path of the competition dataset."""
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=FakeMultimodalService(),
+            kis_pipeline_resolver=KeyframeFrameIndexResolver({"frame-high": 261}),
+            keyframe_dir=tmp_path / "somewhere-else",
+            qna_answer_reasoner=_FakeAnswerReasoner(),
+        )
+    )
+
+    response = client.post(
+        "/search/qna",
+        json={"event_description": "e", "question": "q", "top_k": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["image_path"] is None
 
 
 def test_qna_search_rejects_blank_fields_and_invalid_top_k() -> None:

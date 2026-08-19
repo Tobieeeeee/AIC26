@@ -76,6 +76,10 @@ class QnaCandidate:
     answer: str
     answer_source: AnswerSource
     timestamp: float | None = None
+    #: Where the retrieval hit's keyframe image lives, carried through so a
+    #: human or VLM reviewing this candidate can actually see the frame.
+    #: ``None`` when the retrieval backend did not supply one.
+    image_path: str | None = None
 
     def to_answer(self):
         """Convert to the Task 04 evaluator's prediction identity type."""
@@ -154,7 +158,9 @@ def search_qna(
             continue
         seen.add(key)
 
-        image = image_loader(str(hit["image_path"])) if image_loader is not None else None
+        raw_image_path = hit.get("image_path")
+        image_path = None if raw_image_path is None else str(raw_image_path)
+        image = image_loader(image_path) if image_loader is not None and image_path else None
         objects_path = (
             objects_path_resolver(video_id, keyframe_id)
             if objects_path_resolver is not None
@@ -181,6 +187,7 @@ def search_qna(
                 timestamp=None if timestamp is None else float(timestamp),
                 answer=result.text,
                 answer_source=result.source,
+                image_path=image_path,
             )
         )
         if len(candidates) >= top_k:
