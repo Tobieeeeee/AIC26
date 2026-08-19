@@ -63,38 +63,25 @@ def main() -> None:
         )
 
     if args.output is not None:
-        import json
-
-        from mvr.submission.kis_export import MAX_PREDICTIONS_PER_QUERY
-
-        if len(merged) > MAX_PREDICTIONS_PER_QUERY:
-            raise SystemExit(
-                f"{len(merged)} predictions exceeds the {MAX_PREDICTIONS_PER_QUERY}-per-query limit"
-            )
-        payload = {
-            "format": "local_verification_export",
-            "note": (
-                "Local debug export for internal verification only. "
-                "NOT the official organizer submission format."
-            ),
-            "query_id": batch.query_id,
-            "question": batch.question,
-            "predictions": [
-                {
-                    "rank": c.rank,
-                    "video_id": c.video_id,
-                    "frame_id": c.frame_id,
-                    "answer": c.answer,
-                    "answer_source": c.answer_source,
-                }
-                for c in merged
-            ],
-        }
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        from mvr.submission.qna_export import (
+            InvalidQnaPredictionError,
+            export_local_verification_csv,
+            export_local_verification_json,
+            validate_qna_predictions,
         )
-        print(f"wrote {len(merged)} predictions to {args.output}")
+
+        try:
+            predictions = validate_qna_predictions(merged)
+        except InvalidQnaPredictionError as exc:
+            raise SystemExit(f"predictions failed contract validation: {exc}") from exc
+
+        exporter = (
+            export_local_verification_csv
+            if args.output.suffix.lower() == ".csv"
+            else export_local_verification_json
+        )
+        exporter(predictions, args.output, query_id=batch.query_id)
+        print(f"wrote {len(predictions)} validated predictions to {args.output}")
 
 
 if __name__ == "__main__":
