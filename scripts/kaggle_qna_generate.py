@@ -1,21 +1,3 @@
-"""Generate Q&A answers from a prompt batch on GPU hardware (Kaggle/Colab).
-
-Copy the body of this file into a Kaggle notebook cell, or add it as a
-Kaggle *utility script* and call ``main()``. It is intentionally
-dependency-light (transformers + torch only) and does NOT import ``mvr`` --
-the GPU host only needs the prompt batch JSON, never the repository or any
-competition media.
-
-Input : prompts.json  (format "mvr-qna-prompt-batch-v1", from
-        `python scripts/run_qna_pipeline.py --export-prompts ...`)
-Output: answers.json  (format "mvr-qna-answer-batch-v1", consumed by
-        `python scripts/import_qna_answers.py`)
-
-The output stores each model reply verbatim as ``raw_output``. Parsing and
-validation happen locally in ``mvr.enrichment.qna_batch`` so there is one
-source of truth for the answer schema, and so a bad reply can be inspected
-rather than silently reshaped here.
-"""
 from __future__ import annotations
 
 import json

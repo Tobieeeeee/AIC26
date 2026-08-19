@@ -64,7 +64,10 @@ py -3.12 -c "import json; b=json.load(open(r'artifacts\qna\query-p1-15-qa.prompt
    - Kéo file `query-p1-15-qa.prompts.json` vào
    - Đặt tên dataset, ví dụ `aic-qna-prompts`
    - **Create**
-   - File sẽ nằm ở `/kaggle/input/aic-qna-prompts/query-p1-15-qa.prompts.json`
+   - ⚠️ **Đường dẫn thật không phải `/kaggle/input/aic-qna-prompts`.**
+     Kaggle lồng thêm username, ví dụ
+     `/kaggle/input/datasets/<username>/aic-qna-prompts`. Luôn kiểm tra
+     bằng cell `os.walk` ở Phụ lục B.1 thay vì đoán.
 
 ---
 
@@ -182,20 +185,52 @@ Cách này không cần internet, và tải nhanh hơn.
 ## Phụ lục B — Chạy nhiều câu một lượt
 
 Gộp mọi `prompts.json` vào cùng một dataset, rồi **nạp model một lần** và
-lặp qua tất cả (nạp model 7B mất vài phút, không nên lặp lại mỗi file):
+lặp qua tất cả (nạp model 7B mất vài phút, không nên lặp lại mỗi file).
+
+### B.1 — Tìm đúng đường dẫn dataset (ĐỪNG ĐOÁN)
+
+Kaggle **không** đặt dataset ở `/kaggle/input/<tên-bạn-gõ>`. Đường dẫn thật
+thường có dạng `/kaggle/input/datasets/<username>/<slug>`. Đoán sai thì
+`glob` trả về rỗng và vòng lặp **chạy xong mà không làm gì, không báo lỗi**.
+
+Chạy cell này trước để lấy đường dẫn thật:
+
+```python
+import os
+for root, dirs, files in os.walk("/kaggle/input"):
+    print(root)
+    for f in files[:5]:
+        print("   ", f)
+```
+
+### B.2 — Cell xử lý
 
 ```python
 from pathlib import Path
 
-loaded = load_model("Qwen/Qwen2.5-7B-Instruct")   # nạp DUY NHẤT 1 lần
+SRC = Path("/kaggle/input/datasets/<username>/<slug>")   # từ B.1
 
-for p in sorted(Path("/kaggle/input/aic-qna-prompts").glob("*.prompts.json")):
+files = sorted(SRC.glob("*.prompts.json"))
+print(f"tim thay {len(files)} file")
+assert files, f"khong tim thay file nao trong {SRC}"     # fail sớm, đừng im lặng
+
+loaded = load_model("Qwen/Qwen2.5-7B-Instruct")          # nạp DUY NHẤT 1 lần
+
+for p in files:
     run_batch(
         prompts_path=p,
         answers_path=f"/kaggle/working/{p.name.replace('.prompts', '.answers')}",
         loaded=loaded,
     )
+
+print("=== XONG ===")
 ```
+
+> **Mỗi cell phải tự chứa đủ biến nó cần.** "Save & Run All" chạy lại
+> notebook **từ đầu trong kernel mới** — biến còn sót trong RAM từ lần chạy
+> interactive trước đó sẽ không tồn tại. Bỏ dòng `loaded = load_model(...)`
+> vì "model đã nạp rồi" là lỗi thường gặp, kết quả là
+> `NameError: name 'loaded' is not defined` và version Failed.
 
 Xong sẽ có đủ số file `.answers.json` trong `/kaggle/working/`. Tải cả
 thư mục về (nút **Download** ở panel Output) rồi giải nén vào
