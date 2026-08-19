@@ -62,11 +62,20 @@ def main() -> None:
     parser.add_argument("--qna-model", type=str, default=None, help="Defaults to HuggingFaceCausalLmBackend's default model")
     parser.add_argument("--allow-model-download", action="store_true")
     parser.add_argument("--no-ocr", action="store_true", help="Skip OCR context (faster, less accurate)")
+    parser.add_argument(
+        "--export-prompts", type=Path, default=None,
+        help=(
+            "Collect prompts to this JSON file instead of generating answers "
+            "locally. No LLM is loaded. Feed the file to a GPU host, then "
+            "merge the results with scripts/import_qna_answers.py."
+        ),
+    )
     args = parser.parse_args()
 
     from mvr.enrichment.embeddings.openclip import OpenClipEncoder
     from mvr.enrichment.ocr.easyocr_engine import EasyOcrEngine
     from mvr.enrichment.qna_answer import AnswerReasoner, HuggingFaceCausalLmBackend
+    from mvr.enrichment.qna_batch import CollectingBackend, write_prompt_batch
     from mvr.indexing.faiss_index import FaissIndex
     from mvr.ingestion.aic_dataset import AicDatasetRegistry
     from mvr.retrieval.qna import search_qna
@@ -100,10 +109,15 @@ def main() -> None:
         ocr_engine = EasyOcrEngine()
         image_loader = lambda path: Image.open(path).convert("RGB")  # noqa: E731
 
-    backend_kwargs = {"allow_model_download": args.allow_model_download, "device": args.device}
-    if args.qna_model:
-        backend_kwargs["model_name"] = args.qna_model
-    answer_reasoner = AnswerReasoner(HuggingFaceCausalLmBackend(**backend_kwargs))
+    if args.export_prompts is not None:
+        collector = CollectingBackend()
+        answer_reasoner = AnswerReasoner(collector)
+    else:
+        collector = None
+        backend_kwargs = {"allow_model_download": args.allow_model_download, "device": args.device}
+        if args.qna_model:
+            backend_kwargs["model_name"] = args.qna_model
+        answer_reasoner = AnswerReasoner(HuggingFaceCausalLmBackend(**backend_kwargs))
 
     results = search_qna(
         event_description,
@@ -121,6 +135,20 @@ def main() -> None:
     if not results:
         print("(no candidates resolved to an original-video frame)")
         return
+
+    if collector is not None:
+        out = write_prompt_batch(
+            args.export_prompts,
+            query_id=args.query_file.stem,
+            event_description=event_description,
+            question=question,
+            candidates=results,
+            prompts=collector.prompts,
+        )
+        print(f"wrote {len(results)} prompts to {out}")
+        print("next: generate answers on GPU, then run scripts/import_qna_answers.py")
+        return
+
     for r in results:
         print(
             f"#{r.rank} {r.video_id} frame={r.frame_id} score={r.score:.4f} "

@@ -44,6 +44,9 @@ artifacts/metrics/*
 !artifacts/metrics/.gitkeep
 artifacts/verification/*
 !artifacts/verification/.gitkeep
+# Q&A prompt/answer batches: derived from competition data, never committed.
+artifacts/qna/*
+!artifacts/qna/.gitkeep
 
 # Model weights / databases / generated outputs
 *.pt
