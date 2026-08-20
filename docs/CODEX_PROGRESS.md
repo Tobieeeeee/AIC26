@@ -837,13 +837,41 @@ Blockers:
 
 - None. Full-corpus index construction remains Task 15 and was not run.
 
+# Multi-Embedding Task 11 — Provider Query Encoders
+
+Status: COMPLETE (real-weight smoke unavailable locally)
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added lazy, cached online text adapters for the exact paired BEiT-3,
+  MetaCLIP-2, and PE Core checkpoints/tokenizers.
+- Added a typed `QueryEmbedding` contract carrying provider identity, vector,
+  dimension, dtype, and normalized state.
+- Added explicit empty-query policy, disabled/unavailable provider errors,
+  dimension checks, and pre-encoding cross-model routing rejection.
+- Added adapter-call contract tests, cache/failure isolation tests, and one
+  query-to-three-matching-contract acceptance coverage.
+
+Verification:
+
+- Focused query encoder suite: 12 passed.
+- Python compilation and `git diff --check`: passed.
+
+Limitations:
+
+- Locked BEiT-3, MetaCLIP-2, and PE weights/tokenizers are not all available
+  locally, so real-weight three-provider query inference was not run. No model
+  downloads were initiated.
+
 # Current active phase
 
-Multi-Embedding Task 10 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 11 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 11 provider query encoders.
+Next action: begin Task 12 independent semantic retrieval.
 
 The user explicitly approved automatic continuation through Task 16 for this
 task pack. Expensive full-corpus execution remains separately approval-gated.
