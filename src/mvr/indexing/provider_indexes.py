@@ -171,17 +171,27 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def _load_documents(processed_root: Path) -> dict[str, dict[str, Any]]:
-    documents: dict[str, dict[str, Any]] = {}
+def _load_documents(processed_root: Path) -> dict[tuple[str, str], dict[str, Any]]:
+    """Processed documents, keyed on (video_id, keyframe_id).
+
+    On `keyframe_id` alone this raised on the second video of the
+    organizer's corpus: 166,550 keyframes carry 632 distinct ids, so "034"
+    is in 842 videos and every one after the first looked like a duplicate.
+    The documents are already stored as
+    `documents/<video_id>/<keyframe_id>.json` -- the layout says the key.
+    """
+    documents: dict[tuple[str, str], dict[str, Any]] = {}
     for path in sorted((processed_root / "documents").rglob("*.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ProviderIndexError(f"processed document must be an object: {path}")
         validate_task05a_document(payload)
-        keyframe_id = str(payload["keyframe_id"])
-        if keyframe_id in documents:
-            raise ProviderIndexError(f"duplicate processed keyframe_id: {keyframe_id}")
-        documents[keyframe_id] = payload
+        identity = (str(payload["video_id"]), str(payload["keyframe_id"]))
+        if identity in documents:
+            raise ProviderIndexError(
+                f"duplicate processed keyframe: {identity[0]}/{identity[1]}"
+            )
+        documents[identity] = payload
     if not documents:
         raise ProviderIndexError("no processed documents found")
     return documents
@@ -297,7 +307,10 @@ def build_provider_index(
         processed_manifest, provider_id, provider_root
     )
     documents = _load_documents(processed_root)
-    record_by_id = {record.keyframe_id: record for record in records}
+    # Same identity as the documents, or the two sides cannot be compared:
+    # on keyframe_id alone both collapse to 632 entries and the mismatch
+    # check below would compare two wrong sets and find them equal.
+    record_by_id = {(record.video_id, record.keyframe_id): record for record in records}
     if len(record_by_id) != len(records):
         raise ProviderIndexError(f"duplicate provider mapping IDs for {provider_id}")
     missing = sorted(set(documents) - set(record_by_id))
@@ -320,18 +333,21 @@ def build_provider_index(
 
     vectors: list[np.ndarray] = []
     metadata: list[dict[str, Any]] = []
-    for keyframe_id in sorted(documents):
-        document = documents[keyframe_id]
+    for identity in sorted(documents):
+        video_id, keyframe_id = identity
+        document = documents[identity]
         flags = document["indexability"].get("embeddings", {})
         if flags.get(provider_id) is not True:
             continue
         locator = document.get("embeddings", {}).get(provider_id)
-        record = record_by_id[keyframe_id]
+        record = record_by_id[identity]
         if not isinstance(locator, Mapping) or (
             locator.get("feature_file") != record.feature_file
             or int(locator.get("row_idx", -1)) != record.feature_index
         ):
-            raise ProviderIndexError(f"processed locator mismatch for {provider_id}/{keyframe_id}")
+            raise ProviderIndexError(
+                f"processed locator mismatch for {provider_id}/{video_id}/{keyframe_id}"
+            )
         matrix = np.load(
             artifact.resolve_vector_path(record.feature_file),
             mmap_mode="r",
