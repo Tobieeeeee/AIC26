@@ -84,7 +84,12 @@ def build_frame_context(
             min_confidence=min_object_confidence,
         )
 
-    ocr_text = "" if ocr_engine is None else ocr_engine.read_text(image)
+    # No image means no observed text. Guarding here rather than in each
+    # engine: EasyOCR answers a None image with an UnboundLocalError from
+    # inside its own input reformatting, which would kill the whole query.
+    # Temporally-expanded neighbours routinely have no image, since no
+    # retrieval backend returned one for them.
+    ocr_text = "" if ocr_engine is None or image is None else ocr_engine.read_text(image)
 
     return FrameContext(
         video_id=video_id,

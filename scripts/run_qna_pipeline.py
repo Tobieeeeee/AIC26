@@ -162,7 +162,23 @@ def main() -> None:
     # Temporally-expanded neighbours are not retrieval hits, so the index
     # supplied no image for them. Without this the neighbour reaches the
     # reasoner with no OCR and no objects -- for Q&A, almost no signal.
-    def keyframe_path_resolver(video_id: str, keyframe_id: str) -> Path | None:
+    #
+    # The index's own metadata is the exact answer: it already stores an
+    # image path for every keyframe it holds, which is precisely the set
+    # neighbours are drawn from. Consulting it beats the registry, whose
+    # root may be a different (smaller) normalized tree than the one the
+    # index was built from -- that mismatch silently starved every
+    # neighbour of its image. The registry stays as a fallback.
+    image_paths = {
+        (str(entry["video_id"]), str(entry["frame_id"])): entry["image_path"]
+        for entry in index.metadata
+        if entry.get("image_path")
+    }
+
+    def keyframe_path_resolver(video_id: str, keyframe_id: str) -> Path | str | None:
+        known = image_paths.get((video_id, keyframe_id))
+        if known is not None:
+            return known
         return aic_registry.keyframe_path(video_id, keyframe_id)
 
     ocr_engine = None
