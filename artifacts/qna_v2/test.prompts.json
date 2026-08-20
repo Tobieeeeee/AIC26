@@ -1,0 +1,53 @@
+{
+  "format": "mvr-qna-prompt-batch-v1",
+  "query_id": "query-p1-19-qa",
+  "event_description": "Trong đoạn video có 2 câu thơ của một nhà thơ ca ngợi anh hùng Nguyễn Trung Trực trong đình thần Nguyễn Trung Trực tại Kiên Giang.",
+  "question": "Hai câu thơ đó là gì?",
+  "items": [
+    {
+      "index": 0,
+      "video_id": "L28_V015",
+      "frame_id": 9848,
+      "keyframe_id": "150",
+      "score": 0.35454297065734863,
+      "timestamp": 393.92,
+      "prompt": "You are an expert visual question-answering assistant for a video retrieval competition. You are given OCR text and object-detection counts observed on one specific video frame, plus a question about that frame's event.\n\nAnswer using the given context when it is sufficient (e.g. counting detected objects, reading OCR text). If the question requires general knowledge not present in the context (e.g. identifying a country, person, or fact referenced by the scene), use your own knowledge instead. If you used both, say so.\n\nThe answer may be in Vietnamese or English, matching the question's language. Keep the answer short (a word, number, or short phrase) -- do not write a full sentence.\n\nOutput JSON ONLY, no markdown fences, no explanation, exactly this schema:\n{\"answer\": \"<short answer>\", \"source\": \"context-grounded\" | \"knowledge-grounded\" | \"mixed\"}\n\n\nDetected on-screen text (OCR): (no OCR text detected)\nDetected objects (label: count): (no object detections available)\nQuestion: Hai câu thơ đó là gì?\n"
+    },
+    {
+      "index": 1,
+      "video_id": "L28_V007",
+      "frame_id": 13822,
+      "keyframe_id": "241",
+      "score": 0.34915250539779663,
+      "timestamp": 552.88,
+      "prompt": "You are an expert visual question-answering assistant for a video retrieval competition. You are given OCR text and object-detection counts observed on one specific video frame, plus a question about that frame's event.\n\nAnswer using the given context when it is sufficient (e.g. counting detected objects, reading OCR text). If the question requires general knowledge not present in the context (e.g. identifying a country, person, or fact referenced by the scene), use your own knowledge instead. If you used both, say so.\n\nThe answer may be in Vietnamese or English, matching the question's language. Keep the answer short (a word, number, or short phrase) -- do not write a full sentence.\n\nOutput JSON ONLY, no markdown fences, no explanation, exactly this schema:\n{\"answer\": \"<short answer>\", \"source\": \"context-grounded\" | \"knowledge-grounded\" | \"mixed\"}\n\n\nDetected on-screen text (OCR): (no OCR text detected)\nDetected objects (label: count): (no object detections available)\nQuestion: Hai câu thơ đó là gì?\n"
+    },
+    {
+      "index": 2,
+      "video_id": "L21_V018",
+      "frame_id": 24992,
+      "keyframe_id": "254",
+      "score": 0.343650221824646,
+      "timestamp": 999.68,
+      "prompt": "You are an expert visual question-answering assistant for a video retrieval competition. You are given OCR text and object-detection counts observed on one specific video frame, plus a question about that frame's event.\n\nAnswer using the given context when it is sufficient (e.g. counting detected objects, reading OCR text). If the question requires general knowledge not present in the context (e.g. identifying a country, person, or fact referenced by the scene), use your own knowledge instead. If you used both, say so.\n\nThe answer may be in Vietnamese or English, matching the question's language. Keep the answer short (a word, number, or short phrase) -- do not write a full sentence.\n\nOutput JSON ONLY, no markdown fences, no explanation, exactly this schema:\n{\"answer\": \"<short answer>\", \"source\": \"context-grounded\" | \"knowledge-grounded\" | \"mixed\"}\n\n\nDetected on-screen text (OCR): (no OCR text detected)\nDetected objects (label: count): (no object detections available)\nQuestion: Hai câu thơ đó là gì?\n"
+    },
+    {
+      "index": 3,
+      "video_id": "L22_V016",
+      "frame_id": 30355,
+      "keyframe_id": "306",
+      "score": 0.34109604358673096,
+      "timestamp": 1214.2,
+      "prompt": "You are an expert visual question-answering assistant for a video retrieval competition. You are given OCR text and object-detection counts observed on one specific video frame, plus a question about that frame's event.\n\nAnswer using the given context when it is sufficient (e.g. counting detected objects, reading OCR text). If the question requires general knowledge not present in the context (e.g. identifying a country, person, or fact referenced by the scene), use your own knowledge instead. If you used both, say so.\n\nThe answer may be in Vietnamese or English, matching the question's language. Keep the answer short (a word, number, or short phrase) -- do not write a full sentence.\n\nOutput JSON ONLY, no markdown fences, no explanation, exactly this schema:\n{\"answer\": \"<short answer>\", \"source\": \"context-grounded\" | \"knowledge-grounded\" | \"mixed\"}\n\n\nDetected on-screen text (OCR): (no OCR text detected)\nDetected objects (label: count): (no object detections available)\nQuestion: Hai câu thơ đó là gì?\n"
+    },
+    {
+      "index": 4,
+      "video_id": "L28_V007",
+      "frame_id": 13905,
+      "keyframe_id": "242",
+      "score": 0.3396640717983246,
+      "timestamp": 556.2,
+      "prompt": "You are an expert visual question-answering assistant for a video retrieval competition. You are given OCR text and object-detection counts observed on one specific video frame, plus a question about that frame's event.\n\nAnswer using the given context when it is sufficient (e.g. counting detected objects, reading OCR text). If the question requires general knowledge not present in the context (e.g. identifying a country, person, or fact referenced by the scene), use your own knowledge instead. If you used both, say so.\n\nThe answer may be in Vietnamese or English, matching the question's language. Keep the answer short (a word, number, or short phrase) -- do not write a full sentence.\n\nOutput JSON ONLY, no markdown fences, no explanation, exactly this schema:\n{\"answer\": \"<short answer>\", \"source\": \"context-grounded\" | \"knowledge-grounded\" | \"mixed\"}\n\n\nDetected on-screen text (OCR): (no OCR text detected)\nDetected objects (label: count): (no object detections available)\nQuestion: Hai câu thơ đó là gì?\n"
+    }
+  ]
+}
