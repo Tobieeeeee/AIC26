@@ -560,17 +560,66 @@ Blockers:
 
 - None for Task05B v1.
 
+## Multi-Embedding Task 03 — Frozen Five-Keyframe Fasttest Baseline
+
+Status: COMPLETE
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added a deterministic structural validator for the existing five-keyframe
+  fasttest under `src/mvr/evaluation/fasttest_baseline.py` and a reproducible
+  CLI at `scripts/indexing/verify_fasttest_baseline.py`.
+- Added `configs/fasttest_baseline.json` with repository-relative paths only;
+  generated manifests containing developer-machine paths remain ignored and
+  are not committed.
+- Frozen the acceptance contract at 5 canonical mapping rows, 5 unique
+  `keyframe_id` values, 5 valid Task05A documents, zero identity/schema
+  issues, and—when the backend manifest is required—5 Task05B indexed
+  documents with zero failed/missing/extra/duplicate IDs.
+- Reused the existing Task05A document validator. Identity comparison is set
+  based on authoritative `keyframe_id`; the validator never derives identity
+  from filenames or positional row joins.
+- Kept the structural gate independent of Elasticsearch. The optional
+  `--require-lexical` flag turns the Task05B manifest from a documented skip
+  into a hard gate.
+- Added deterministic, negative, optional-backend, and path-safety tests plus
+  `docs/FASTTEST_BASELINE.md` with the exact rerun commands.
+
+Verification:
+
+- Real ignored fasttest:
+  `python scripts/indexing/verify_fasttest_baseline.py --require-lexical` —
+  PASS; canonical 5/5, Task05A 5 with `invalid_schema=0`, Task05B indexed 5,
+  and all failed/missing/extra/duplicate counts 0.
+- Focused Task03 plus Task05A/Task05B regression suites: 51 passed.
+- Full regression in the verified Python 3.11 Docker environment: 296 passed,
+  14 skipped, 0 failed.
+- Python compilation and `git diff --check`: passed.
+
+Artifacts:
+
+- `artifacts/fasttest/` remains local/ignored and was neither modified for
+  the implementation nor staged. No vectors, model weights, index data, OCR
+  runtime output, or generated Task05A documents are part of this task diff.
+
+Blockers:
+
+- None for Task 03. The five-keyframe baseline is a structural regression
+  gate, not retrieval-quality evidence.
+
 # Current active phase
 
-Task05B v1 is COMPLETE on `feat/lexical`. Phases 01–06 (reuse baseline) are
-COMPLETE and merged via PR #1. The
-Textual KIS competition-ready task pack (Tasks 01–09) is also COMPLETE on
-`feat/kis-competition-ready`.
+Multi-Embedding Task 03 is COMPLETE on `feat/rebuild-embedding-models`.
+Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
+baseline) and the Textual KIS task pack are also complete.
 
-Next action: human review of `feat/lexical`.
+Next action: review Task 03, then begin Task 04 (multi-embedding artifact
+schema/provider discovery) only after the task boundary is approved.
 
-Stop gate: do not begin Task05C/D, Q&A, TRAKE, Frontend, VLM, advanced
-reranking, or deployment without explicit approval.
+Stop gate: do not automatically begin Task 04 or later multi-embedding tasks,
+Task05C/D, Q&A, TRAKE, Frontend, VLM, advanced reranking, or deployment.
 
 # Resume instruction
 
