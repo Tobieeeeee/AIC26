@@ -45,7 +45,9 @@ artifacts/metrics/*
 artifacts/verification/*
 !artifacts/verification/.gitkeep
 # Q&A prompt/answer batches: derived from competition data, never committed.
-artifacts/qna/*
+# Glob the whole family so a new run directory (qna_v2, qna_2026-08-20, ...)
+# cannot silently start tracking competition-derived prompts.
+artifacts/qna*/*
 !artifacts/qna/.gitkeep
 
 # Model weights / databases / generated outputs
