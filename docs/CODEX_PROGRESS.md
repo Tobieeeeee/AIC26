@@ -609,17 +609,52 @@ Blockers:
 - None for Task 03. The five-keyframe baseline is a structural regression
   gate, not retrieval-quality evidence.
 
+# Multi-Embedding Task 04 — Provider Artifact Schema
+
+Status: COMPLETE
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added a provider-neutral manifest and feature-mapping contract under
+  `src/mvr/enrichment/embeddings/artifacts.py`.
+- Added deterministic discovery for independent provider directories under
+  `features/embeddings/<model_id>/`, with no branches for BEiT-3,
+  MetaCLIP-2, or Perception Encoder.
+- Validation rejects unsafe IDs/paths, missing fields, unsupported dtypes,
+  invalid dimensions, duplicate IDs, directory mismatches, malformed
+  mappings, and optional checksum mismatches.
+- Added a comma-separated provider-list contract to the unified feature CLI
+  and default configuration. Providers that are not implemented yet fail
+  explicitly and never fall back to CLIP.
+- Documented the artifact tree, identity rules, and validation behavior in
+  `docs/MULTI_EMBEDDING_ARTIFACTS.md`.
+
+Verification:
+
+- Tasks 01–03 baseline before edits: 51 passed.
+- Provider schema plus Tasks 01–03 regression: 65 passed.
+- Task 04 focused suite including the unified runner: 20 passed.
+- Full regression: 314 passed, 14 skipped, 0 failed.
+- Python compilation and `git diff --check`: passed.
+
+Blockers:
+
+- None for the schema/discovery layer. Provider model specifications and
+  inference remain deliberately deferred to Tasks 05–08.
+
 # Current active phase
 
-Multi-Embedding Task 03 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 04 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: review Task 03, then begin Task 04 (multi-embedding artifact
-schema/provider discovery) only after the task boundary is approved.
+Next action: begin Task 05 provider specification locking using authoritative
+upstream sources.
 
-Stop gate: do not automatically begin Task 04 or later multi-embedding tasks,
-Task05C/D, Q&A, TRAKE, Frontend, VLM, advanced reranking, or deployment.
+The user explicitly approved automatic continuation through Task 16 for this
+task pack. Expensive full-corpus execution remains separately approval-gated.
 
 # Resume instruction
 
