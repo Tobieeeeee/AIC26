@@ -309,7 +309,6 @@ def extract_keyframes(
         for source, frame_idx in zip(
             extracted_files,
             target_indices,
-            strict=True,
         ):
             for keyframe in by_frame_idx[frame_idx]:
                 destination = output_root / keyframe.image_path

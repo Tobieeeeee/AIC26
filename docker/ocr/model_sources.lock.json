@@ -1,0 +1,12 @@
+{
+  "deepsolo": {
+    "filename": "deepsolo_r50_totaltext_textocr.pth",
+    "url": "https://huggingface.co/ViTAE-Transformer/DeepSolo/resolve/main/deepsolo_res50_finetune_synth.pth",
+    "dir": "deepsolo"
+  },
+  "parseq_vi": {
+    "filename": "best-parseq.ckpt",
+    "url": "https://huggingface.co/Bao-Minh/PARSeq-Vietnamese/resolve/main/parseq_vi.ckpt",
+    "dir": "parseq_vi"
+  }
+}
