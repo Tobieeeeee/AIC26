@@ -73,19 +73,35 @@ def load_fasttest_config(path: Path | str) -> FasttestBaselineConfig:
         raise FasttestBaselineError(f"invalid fasttest config: {exc}") from exc
 
 
-def _canonical_ids(path: Path) -> list[str]:
+def _canonical_ids(path: Path) -> list[tuple[str, str]]:
+    """Canonical identities as (video_id, keyframe_id).
+
+    This returned bare keyframe ids, and the caller counts
+    ``len(ids) - len(set(ids))`` as duplicates. Against the organizer's
+    corpus that reports 165,918 duplicates and zero real ones: 166,550
+    keyframes carry 632 distinct ids because every video numbers its own
+    from 001.
+    """
     try:
         with path.open(newline="", encoding="utf-8-sig") as handle:
             reader = csv.DictReader(handle)
-            if reader.fieldnames is None or "keyframe_id" not in reader.fieldnames:
+            fields = set(reader.fieldnames or ())
+            missing = {"keyframe_id", "video_id"} - fields
+            if missing:
                 raise FasttestBaselineError(
-                    "canonical mapping must contain keyframe_id"
+                    f"canonical mapping must contain {sorted(missing)}"
                 )
-            ids = [str(row.get("keyframe_id", "")).strip() for row in reader]
+            ids = [
+                (
+                    str(row.get("video_id", "")).strip(),
+                    str(row.get("keyframe_id", "")).strip(),
+                )
+                for row in reader
+            ]
     except OSError as exc:
         raise FasttestBaselineError(f"cannot read canonical mapping {path}: {exc}") from exc
-    if any(not keyframe_id for keyframe_id in ids):
-        raise FasttestBaselineError("canonical mapping contains an empty keyframe_id")
+    if any(not video_id or not keyframe_id for video_id, keyframe_id in ids):
+        raise FasttestBaselineError("canonical mapping contains an empty identity")
     return ids
 
 
@@ -109,7 +125,7 @@ def verify_fasttest_baseline(
     canonical_set = set(canonical_ids)
     canonical_duplicates = len(canonical_ids) - len(canonical_set)
 
-    document_ids: list[str] = []
+    document_ids: list[tuple[str, str]] = []
     invalid_documents = 0
     if documents_root.is_dir():
         for path in sorted(documents_root.rglob("*.json")):
@@ -119,7 +135,12 @@ def verify_fasttest_baseline(
             except (FasttestBaselineError, Task05AValidationError):
                 invalid_documents += 1
                 continue
-            document_ids.append(str(payload["keyframe_id"]).strip())
+            document_ids.append(
+                (
+                    str(payload["video_id"]).strip(),
+                    str(payload["keyframe_id"]).strip(),
+                )
+            )
     document_set = set(document_ids)
     document_duplicates = len(document_ids) - len(document_set)
     missing_ids = sorted(canonical_set - document_set)

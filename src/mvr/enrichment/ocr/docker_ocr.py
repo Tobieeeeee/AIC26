@@ -13,7 +13,8 @@ from mvr.enrichment.ocr.scene_text import (
     group_candidates,
     load_keyframes,
     get_shot_boundaries,
-    generate_sampling_frames
+    generate_sampling_frames,
+    resolve_video_path,
 )
 
 
@@ -22,7 +23,19 @@ def _get_field(obj, name):
 
 
 def _build_anchor_lookup(keyframes: list) -> dict:
-    return {_get_field(kf, "keyframe_id"): kf for kf in keyframes}
+    """Anchor metadata per keyframe, keyed on (video_id, keyframe_id).
+
+    Built over the whole corpus at once -- `process_dataset_docker_ocr`
+    passes every video's keyframes -- so on `keyframe_id` alone the entry
+    for "034" was whichever of 842 videos was read last. Every other
+    video's OCR request then carried that video's `anchor_frame_idx` and
+    `anchor_timestamp`: wrong numbers, written confidently, and the frame
+    index is the one the competition scores on.
+    """
+    return {
+        (_get_field(kf, "video_id"), _get_field(kf, "keyframe_id")): kf
+        for kf in keyframes
+    }
 
 
 def _build_request_payload(sample, anchor, temp_dir_abs: Path, workspace_root: Path) -> dict:
@@ -188,9 +201,11 @@ def run_docker_pipeline(
     for kf in frames_to_extract:
         req_path = requests_dir / kf.video_id / kf.keyframe_id / f"{kf.frame_idx}.json"
         req_path.parent.mkdir(parents=True, exist_ok=True)
-        anchor = anchor_by_keyframe.get(kf.keyframe_id)
+        anchor = anchor_by_keyframe.get((kf.video_id, kf.keyframe_id))
         if anchor is None:
-            raise KeyError(f"Missing anchor keyframe metadata for {kf.keyframe_id}")
+            raise KeyError(
+                f"Missing anchor keyframe metadata for {kf.video_id}/{kf.keyframe_id}"
+            )
         req = _build_request_payload(kf, anchor, temp_dir_abs, workspace_root)
         with req_path.open("w", encoding="utf-8") as f:
             json.dump(req, f, ensure_ascii=False)
@@ -292,23 +307,30 @@ def process_candidates_to_canonical(
     for frame_candidates in by_source_frame.values():
         merged_candidates.extend(_merge_frame_candidates(frame_candidates))
 
-    # Group by keyframe for temporal consolidation.
+    # Group by keyframe for temporal consolidation, on the full identity.
+    #
+    # On keyframe_id alone this merged the OCR of every video that numbers a
+    # keyframe the same way -- 842 videos have a "034" -- into one group,
+    # then took video_id from an anchor that was itself the wrong video's,
+    # and wrote a single output/<that video>/034.json for all of them. Text
+    # read off one broadcast would have been filed against another.
     by_kf = defaultdict(list)
     for c in merged_candidates:
-        by_kf[c.keyframe_id].append(c)
+        by_kf[(c.video_id, c.keyframe_id)].append(c)
 
     canonical_text_count = 0
     json_file_count = 0
     anchor_lookup = _build_anchor_lookup(keyframes)
 
-    for keyframe_id, cands in by_kf.items():
+    for (video_id, keyframe_id), cands in by_kf.items():
         canonical_groups = group_candidates(cands, similarity_threshold, iou_threshold)
 
-        anchor_meta = anchor_lookup.get(keyframe_id)
+        anchor_meta = anchor_lookup.get((video_id, keyframe_id))
         if anchor_meta is None:
-            raise KeyError(f"Missing anchor keyframe metadata for {keyframe_id}")
+            raise KeyError(
+                f"Missing anchor keyframe metadata for {video_id}/{keyframe_id}"
+            )
 
-        video_id = _get_field(anchor_meta, "video_id")
         shot_id = _get_field(anchor_meta, "shot_id")
         anchor_idx = _get_field(anchor_meta, "frame_idx")
         anchor_timestamp = _get_field(anchor_meta, "timestamp")
@@ -344,7 +366,10 @@ def process_candidates_to_canonical(
         f_idx = kf["frame_idx"] if isinstance(kf, dict) else kf.frame_idx
         t_stamp = kf["timestamp"] if isinstance(kf, dict) else kf.timestamp
 
-        if k_id not in by_kf:
+        # Membership must use the same key `by_kf` is built with. Checking
+        # the bare id against a tuple-keyed dict is always a miss, so this
+        # pass would rewrite every keyframe's real OCR as an empty file.
+        if (v_id, k_id) not in by_kf:
             video_out_dir = output_dir / v_id
             video_out_dir.mkdir(parents=True, exist_ok=True)
             out_json_path = video_out_dir / f"{k_id}.json"
@@ -376,7 +401,7 @@ def process_dataset_docker_ocr(
 
     keyframes = load_keyframes(mapping_csv)
     shots_json = mapping_csv.with_name("shots.json")
-    shot_boundaries = get_shot_boundaries(shots_json) if shots_json.exists() else {}
+    shot_boundaries = get_shot_boundaries(shots_json)
 
     frames_to_extract, samples_by_keyframe = generate_sampling_frames(keyframes, shot_boundaries)
 
@@ -392,11 +417,16 @@ def process_dataset_docker_ocr(
         by_video[kf.video_id].append(kf)
 
     for video_id, v_frames in by_video.items():
-        video_path = video_root / f"{video_id}.mp4"
+        # Searches the raw organizer layout too, where videos are nested as
+        # Videos_L21_a/video/<video_id>.mp4 across 14 directories. Raising
+        # here was already right -- unlike scene_text, which warned and
+        # continued -- but the flat-only lookup meant it raised on the real
+        # download for every video.
+        video_path = resolve_video_path(video_root, video_id)
 
-        if not video_path.exists():
+        if video_path is None:
             raise FileNotFoundError(
-                f"Missing source video: {video_path}"
+                f"Missing source video: {video_id}.mp4 under {video_root}"
             )
 
         video_frames_dir = frames_dir / video_id
