@@ -166,12 +166,48 @@ def group_candidates(
     return representatives
 
 
-def get_shot_boundaries(shots_json_path: Path) -> dict[int, tuple[int, int]]:
-    boundaries = {}
+def resolve_video_path(video_root: Path, video_id: str) -> Path | None:
+    """The video's file under either layout, or None.
+
+    A normalized root holds `<root>/<video_id>.mp4`. The raw organizer
+    download nests them two levels and splits them across 14 directories:
+    `<root>/Videos_L21_a/video/L21_V001.mp4`. Only the flat shape was
+    searched, so pointing this at the real download matched nothing --
+    and the caller merely warned and continued, so the run reported
+    success having processed zero frames.
+    """
+    video_root = Path(video_root)
+    direct = video_root / f"{video_id}.mp4"
+    if direct.is_file():
+        return direct
+    for nested in sorted(video_root.glob("Videos_*")):
+        candidate = nested / "video" / f"{video_id}.mp4"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def get_shot_boundaries(shots_json_path: Path) -> dict[tuple[str, int], tuple[int, int]]:
+    """Frame range of each shot, keyed on (video_id, shot_id).
+
+    Returns ``{}`` when the file does not exist. Having no shot detection is
+    an ordinary state -- the organizer ships keyframes and no shots.json --
+    and `process_dataset_ocr` called this unguarded, so a run over organizer
+    data died with `FileNotFoundError` before reading a single frame.
+
+    `shot_id` alone is not a key. Every video numbers its shots from 1, so
+    ``boundaries[1]`` held whichever video was parsed last, and every other
+    video's keyframes were then clipped against a range belonging to an
+    unrelated video.
+    """
+    if not shots_json_path.is_file():
+        return {}
+    boundaries: dict[tuple[str, int], tuple[int, int]] = {}
     with shots_json_path.open("r", encoding="utf-8") as f:
         data = json.load(f)
         for shot in data.get("shots", []):
-            boundaries[shot["shot_id"]] = (shot["start_frame"], shot["end_frame"])
+            identity = (str(shot["video_id"]), int(shot["shot_id"]))
+            boundaries[identity] = (shot["start_frame"], shot["end_frame"])
     return boundaries
 
 
@@ -193,19 +229,35 @@ def load_keyframes(mapping_csv: Path) -> list[dict]:
 
 def generate_sampling_frames(
     keyframes: list[dict],
-    shot_boundaries: dict[int, tuple[int, int]],
+    shot_boundaries: dict[tuple[str, int], tuple[int, int]],
     offsets: list[int] = [-1, 0, 1]
-) -> tuple[list[Keyframe], dict[str, list[Keyframe]]]:
-    """Generates a list of all Keyframe objects needed to extract from video, and a mapping from keyframe_id to its sampled frames."""
+) -> tuple[list[Keyframe], dict[tuple[str, str], list[Keyframe]]]:
+    """Frames to extract, and the samples belonging to each keyframe.
+
+    The **boundary lookup** is the live fix: `shot_boundaries` is built once
+    from the whole `shots.json` and handed to every video, so on `shot_id`
+    alone `boundaries[1]` was one arbitrary video's first shot and every
+    other video's keyframes were clipped against a range that had nothing to
+    do with them.
+
+    The **returned mapping** being keyed on `(video_id, keyframe_id)` is
+    hardening, not a bug report: today both callers pass one video's
+    keyframes at a time -- `process_dataset_ocr` groups by video, and
+    `docker_ocr` never reads this mapping at all -- so nothing was merging.
+    It is keyed correctly so that stops being a thing anyone must remember.
+    """
     all_frames_to_extract = []
-    keyframe_id_to_samples = defaultdict(list)
+    keyframe_to_samples = defaultdict(list)
 
     fps = 25.0 # We approximate fps from timestamp or use 25.0 as default, or fetch from shot boundaries
 
     for kf in keyframes:
         anchor_idx = kf["frame_idx"]
         shot_id = kf["shot_id"]
-        start_frame, end_frame = shot_boundaries.get(shot_id, (0, float("inf")))
+        identity = (kf["video_id"], kf["keyframe_id"])
+        start_frame, end_frame = shot_boundaries.get(
+            (kf["video_id"], shot_id), (0, float("inf"))
+        )
 
         # Approximate FPS from one of the frames if not 0
         if anchor_idx > 0 and kf["timestamp"] > 0:
@@ -214,7 +266,13 @@ def generate_sampling_frames(
         for offset in offsets:
             source_idx = anchor_idx + offset
             if start_frame <= source_idx <= end_frame:
-                image_path_offset = f"temp/{kf['keyframe_id']}_{source_idx}.jpg"
+                # video_id in the filename is hardening too. Both callers
+                # extract into a per-video directory today, so "034_1745.jpg"
+                # never collided; naming it fully means a caller that batches
+                # videos cannot make it collide either.
+                image_path_offset = (
+                    f"temp/{kf['video_id']}_{kf['keyframe_id']}_{source_idx}.jpg"
+                )
                 sample = Keyframe(
                     keyframe_id=kf["keyframe_id"],
                     video_id=kf["video_id"],
@@ -225,9 +283,9 @@ def generate_sampling_frames(
                     image_path=image_path_offset,
                 )
                 all_frames_to_extract.append(sample)
-                keyframe_id_to_samples[kf["keyframe_id"]].append(sample)
+                keyframe_to_samples[identity].append(sample)
 
-    return all_frames_to_extract, dict(keyframe_id_to_samples)
+    return all_frames_to_extract, dict(keyframe_to_samples)
 
 
 def process_video_ocr(
@@ -273,7 +331,7 @@ def process_video_ocr(
             anchor_timestamp = kf["timestamp"]
             keyframe_id = kf["keyframe_id"]
 
-            samples = samples_by_keyframe.get(keyframe_id, [])
+            samples = samples_by_keyframe.get((kf["video_id"], keyframe_id), [])
 
             raw_candidates = []
 
@@ -378,10 +436,12 @@ def process_dataset_ocr(
     shots_json = mapping_csv.with_name("shots.json")
     shot_boundaries = get_shot_boundaries(shots_json)
 
+    missing_videos: list[str] = []
     for video_id, video_kfs in by_video.items():
-        video_path = video_root / f"{video_id}.mp4"
-        if not video_path.exists():
-            print(f"Warning: Video {video_path} not found. Skipping.")
+        video_path = resolve_video_path(video_root, video_id)
+        if video_path is None:
+            print(f"Warning: Video {video_id}.mp4 not found under {video_root}. Skipping.")
+            missing_videos.append(video_id)
             continue
 
         res = process_video_ocr(
@@ -397,6 +457,19 @@ def process_dataset_ocr(
         total_json_count += res["json_file_count"]
         total_canonical_text += res["canonical_text_count"]
         backend_name = res["backend"]
+
+    # Finding no video at all means the root is wrong, and the old code
+    # reported that as success: it warned once per video and returned a
+    # manifest saying zero keyframes were processed, which every downstream
+    # step accepts as "the data". Against the raw organizer download -- where
+    # videos are nested as Videos_L21_a/video/ -- that is what would have
+    # happened for all 873.
+    if by_video and len(missing_videos) == len(by_video):
+        raise FileNotFoundError(
+            f"no video found under {video_root} for any of {len(by_video)} "
+            f"video(s); expected <root>/<video_id>.mp4 or "
+            f"<root>/Videos_*/video/<video_id>.mp4"
+        )
 
     manifest = {
       "schema_version": "1.0",

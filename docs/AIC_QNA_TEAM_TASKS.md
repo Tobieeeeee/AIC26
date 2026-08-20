@@ -83,7 +83,7 @@ tổng    : ___ giây
 
 ---
 
-## T1 — OCR toàn corpus  ⚠️ CHƯA CHẠY ĐƯỢC, xem phần chặn
+## T1 — OCR toàn corpus  ✅ code đã sẵn sàng, chờ con số T0
 
 ### Dùng đường nào
 
@@ -117,23 +117,39 @@ python -m mvr.cli enrich-ocr `
     --device cuda
 ```
 
-### ⚠️ Ba thứ làm lệnh trên hỏng ngay — tôi đang sửa, đừng chạy trước khi tôi báo xong
+### ✅ Ba thứ từng làm lệnh trên hỏng ngay — đã sửa xong
 
-1. **Thiếu `shots.json` → crash.** `process_dataset_ocr` gọi
-   `get_shot_boundaries()` không kiểm tra file có tồn tại không
-   (`scene_text.py:378`), nên `FileNotFoundError` ngay dòng đầu.
+Chạy được rồi. Ghi lại để các bạn biết chuyện gì đã xảy ra, vì cả ba đều
+hỏng *không báo lỗi*.
 
-2. **`--video-root` bắt buộc phẳng.** Code tìm `video_root/<video_id>.mp4`
-   (`scene_text.py:382`). Data gốc lồng hai cấp:
-   `D:/AIC26_data/Videos_L21_a/video/L21_V001.mp4` — 14 thư mục.
-   Không khớp thì nó **in warning rồi bỏ qua**, chạy xong báo thành công
-   với 0 file. `D:/AIC26_test_root/videos/` phẳng nhưng chỉ có **60/873** video.
+1. **Thiếu `shots.json` → crash.** `get_shot_boundaries()` mở file mà không
+   kiểm tra tồn tại, nên `FileNotFoundError` trước khi đọc frame nào. BTC
+   không cấp shot detection, nên đây là trạng thái bình thường — giờ trả về
+   `{}`.
 
-3. **`shot_boundaries` khoá theo `shot_id` trần** (`scene_text.py:174`).
-   `shot_id` 1 của video A và của video B đè nhau.
+2. **`--video-root` bắt buộc phẳng.** Chỉ tìm `video_root/<video_id>.mp4`,
+   trong khi data gốc lồng hai cấp qua 14 thư mục
+   (`Videos_L21_a/video/L21_V001.mp4`). Không khớp thì nó **in warning rồi
+   bỏ qua**, chạy xong trả manifest báo 0 keyframe — mà mọi bước sau đều
+   nhận số 0 đó như là dữ liệu thật. Giờ tìm cả hai layout, và **không tìm
+   thấy video nào thì raise** thay vì báo thành công.
 
-Tôi sửa cả ba. **Sẽ nhắn khi xong** — chạy T1 trước đó thì kết quả sai mà
-không báo lỗi.
+3. **`shot_boundaries` khoá theo `shot_id` trần.** `shot_boundaries` dựng
+   một lần từ cả `shots.json` rồi đưa cho mọi video, mà video nào cũng đánh
+   số shot từ 1 — nên `boundaries[1]` là của video được parse *sau cùng*, và
+   mọi video khác bị cắt theo khoảng của một video không liên quan. Đo thử:
+
+   ```
+   keyframe của L21_V002 tại frame 5050; shot thật của nó: 5000-5099
+
+   code CŨ : boundaries[1] = (0, 99)   ← của L21_V001
+             giữ lại 0/3 frame
+   code MỚI: boundaries[('L21_V002',1)] = (5000, 5099)
+             giữ lại 3/3 frame
+   ```
+
+   Với 873 video, chỉ **1 video "thắng"** — 872 video còn lại bị cắt sạch,
+   OCR ra rỗng, không một dòng cảnh báo.
 
 ---
 
@@ -185,9 +201,9 @@ docker run -d --name es -p 9200:9200 `
 Chỉ cần **URL** (`http://localhost:9200` hoặc IP nội bộ). Phần build index
 và nối vào Q&A tôi làm.
 
-### ⚠️ Đừng build index trước khi tôi sửa xong — sẽ mất dữ liệu im lặng
+### ✅ Hai chỗ từng chặn build index — đã sửa xong
 
-Đã dựng 2 document (`L21_V001/001`, `L21_V002/001`) chạy thử:
+Dựng 2 document (`L21_V001/001`, `L21_V002/001`) chạy thử, trước khi sửa:
 
 ```
 CHẶN 1 — load_task05a_lexical_source: Task05BValidationError
@@ -197,8 +213,18 @@ CHẶN 2 — _id của Elasticsearch: ['001', '001']
    2 tài liệu → 1 _id phân biệt
 ```
 
-Chặn 2 nguy hơn: nếu ai gỡ chặn 1, Elasticsearch **ghi đè im lặng** —
-166.550 document co lại còn **632**, không một dòng báo lỗi.
+Chặn 2 nguy hơn nhiều: nếu ai gỡ chặn 1, Elasticsearch **ghi đè im lặng** —
+166.550 document co lại còn **632**. Và bước kiểm tra sau đó cũng không bắt
+được, vì nó so `expected_ids` dựng từ chính `keyframe_id` ấy: 632 kỳ vọng
+khớp 632 thực tế, cả hai đều sai.
+
+Giờ `_id = "<video_id>/<keyframe_id>"` — đọc lên đúng bằng đường dẫn file
+sinh ra nó. Chạy lại probe: **2 tài liệu → 2 `_id`, không chặn gì.**
+
+Sửa kèm một thứ chỉ lộ ra ở quy mô thật: bước kiểm tra dùng
+`ids.count(item)` trong vòng lặp trên chính list đó — với 166.550 document
+là **~2,8×10¹⁰ phép so sánh**, treo máy. Trên 5 document nghiệm thu thì
+không ai thấy.
 
 ---
 
@@ -237,6 +263,20 @@ document rồi lưu lại **632** — mỗi cái bị ghi đè 263 lần, không
 **Từ giờ: mọi khoá phải là `(video_id, keyframe_id)`.** Nếu các bạn viết
 thêm code đụng tới keyframe, đây là quy tắc duy nhất cần nhớ.
 
+### Hai chỗ tôi tưởng hỏng nhưng không
+
+Kiểm lại thì hai chỗ này **chưa từng sai chạy thật**, nên tôi ghi rõ để
+không ai đi tìm một lỗi không có:
+
+- `samples_by_keyframe` trong `docker_ocr` — biến này **gán rồi không ai
+  đọc**.
+- Tên file tạm `{keyframe_id}_{frame}.jpg` — cả hai đường OCR đều trích vào
+  thư mục riêng theo video, nên chưa bao giờ đụng nhau.
+
+Tôi vẫn đổi cả hai sang khoá đầy đủ, nhưng đó là *phòng xa*, không phải sửa
+lỗi. Cùng lý do: để sau này không ai phải nhớ rằng "chỗ này an toàn nhờ
+caller tình cờ gom theo video".
+
 ---
 
 ## Không cần các bạn làm — bên Q&A đang lo
@@ -245,11 +285,14 @@ thêm code đụng tới keyframe, đây là quy tắc duy nhất cần nhớ.
 |---|---|
 | `keyframe_mapping.csv` từ data BTC (166.550 dòng, 11 giây) | ✅ xong |
 | `ocr/validator.py` — khoá `(video_id, keyframe_id)` | ✅ xong, kèm 4 test |
-| `lexical_index.py` — 2 chỗ định danh | 🔧 đang làm |
-| `scene_text.py` — 3 chỗ (shots.json, video-root, shot_boundaries) | 🔧 đang làm |
-| `docker_ocr.py` — gộp sample sai video | 🔧 đang làm |
+| `lexical_index.py` — `_id`, kiểm trùng, audit, `_scan_ids` O(n²) | ✅ xong |
+| `scene_text.py` — shots.json, video-root, shot_boundaries | ✅ xong, kèm 10 test |
+| `docker_ocr.py` — tìm video ở cả hai layout | ✅ xong |
 | Task05A build documents | ⏳ chờ T1+T2 |
 | Build lexical index + nối fusion | ⏳ chờ T3 |
+
+**Toàn bộ 590 test pass.** Không chỗ nào trong ba file trên có test trước
+đó, nên phần lớn lỗi ở trên là lỗi chưa từng có gì canh.
 
 ---
 
@@ -271,6 +314,7 @@ bạn chạy OCR.
 
 1. **T0 ngay** — 15 phút, quyết định mọi thứ còn lại.
 2. **T3 song song** — dựng Elasticsearch, không phụ thuộc gì.
-3. **T1/T2 chờ** hai điều kiện: T0 cho số khả thi, **và** tôi báo đã sửa xong.
+3. **T1/T2 chờ đúng một điều kiện**: T0 cho ra con số khả thi.
+   Phần code đã sửa xong hết, chạy được ngay.
 
 Báo lại con số T0 sớm nhất có thể — còn ~10 giờ.

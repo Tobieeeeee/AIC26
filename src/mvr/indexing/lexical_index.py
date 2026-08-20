@@ -9,10 +9,13 @@ import hashlib
 import json
 import math
 import os
+from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .validation import identity_key
 from typing import Any
 
 
@@ -53,6 +56,24 @@ class LexicalIndexDocument:
     timestamp: float
     ocr_text: str
     asr_text: str
+
+    @property
+    def document_id(self) -> str:
+        """The Elasticsearch `_id`: video and keyframe, never the keyframe alone.
+
+        A keyframe_id does not identify a keyframe. The organizer's 166,550
+        keyframes carry 632 distinct ids -- "034" is in 842 videos, one per
+        video -- so `_id = keyframe_id` made the index accept every document
+        and keep 632, each overwritten ~263 times, with no error anywhere.
+
+        The team's own ids (`L21_V001_S0007_K01`) spelled the video into the
+        id, which is why keying on it alone was correct until the organizer's
+        keyframes were adopted.
+
+        Formatted as a path so an `_id` reads like the file it came from,
+        `documents/<video_id>/<keyframe_id>.json`.
+        """
+        return f"{self.video_id}/{self.keyframe_id}"
 
     def to_source(self) -> dict[str, Any]:
         return {
@@ -239,25 +260,33 @@ def load_task05a_lexical_source(processed_root: Path) -> Task05ASource:
         )
 
     projected: list[LexicalIndexDocument] = []
-    seen_ids: set[str] = set()
-    duplicate_ids: set[str] = set()
+    # Keyed on (video_id, keyframe_id). On keyframe_id alone this rejected
+    # the organizer's corpus outright -- 166,550 keyframes share 632 ids, so
+    # the second video already looked like a duplicate.
+    seen_ids: set[tuple[str, str]] = set()
+    duplicate_ids: set[tuple[str, str]] = set()
     for path in paths:
         payload = _read_json(path)
         if not isinstance(payload, Mapping):
             raise Task05BValidationError(f"{path}: document must be an object")
-        keyframe_id = _required_nonblank_string(payload, "keyframe_id", path=path)
-        if keyframe_id in seen_ids:
-            duplicate_ids.add(keyframe_id)
-        seen_ids.add(keyframe_id)
+        identity = identity_key(
+            _required_nonblank_string(payload, "video_id", path=path),
+            _required_nonblank_string(payload, "keyframe_id", path=path),
+        )
+        if identity in seen_ids:
+            duplicate_ids.add(identity)
+        seen_ids.add(identity)
         item = project_task05a_lexical_document(payload, path=path)
         if item is not None:
             projected.append(item)
     if duplicate_ids:
-        raise Task05BValidationError(
-            f"duplicate Task05A keyframe IDs: {sorted(duplicate_ids)}"
-        )
+        listed = ", ".join(f"{video}/{keyframe}" for video, keyframe in sorted(duplicate_ids))
+        raise Task05BValidationError(f"duplicate Task05A keyframes: {listed}")
 
-    projected.sort(key=lambda item: item.keyframe_id)
+    # Sorted on the full identity too: keyframe_id alone is not a total order
+    # over the corpus, so the bulk stream's order depended on filesystem
+    # traversal and was not reproducible between runs.
+    projected.sort(key=lambda item: (item.video_id, item.keyframe_id))
     declared_lexical = manifest.get("indexability_counts", {}).get("lexical")
     if (
         isinstance(declared_lexical, bool)
@@ -286,7 +315,7 @@ def lexical_bulk_actions(
     for document in documents:
         yield {
             "_index": index_name,
-            "_id": document.keyframe_id,
+            "_id": document.document_id,
             "_source": document.to_source(),
         }
 
@@ -363,7 +392,12 @@ def _scan_ids(
         if not isinstance(raw_id, str) or not raw_id:
             raise RuntimeError("Elasticsearch identity scan hit is missing _id")
         ids.append(raw_id)
-    duplicates = tuple(sorted({item for item in ids if ids.count(item) > 1}))
+    # Counter, not `ids.count(item)` per item: that is a full scan inside a
+    # loop over the same list, so verifying the organizer's 166,550
+    # documents would have been ~2.8e10 comparisons. Invisible on the
+    # five-document acceptance run, and effectively a hang at real scale.
+    counts = Counter(ids)
+    duplicates = tuple(sorted(item for item, count in counts.items() if count > 1))
     return set(ids), duplicates
 
 
@@ -400,7 +434,12 @@ def build_lexical_index(
 
     client.indices.refresh(index=index_name)
     indexed_count = int(client.count(index=index_name)["count"])
-    expected_ids = {document.keyframe_id for document in source.documents}
+    # Compared against what was actually sent, so this must be document_id.
+    # On keyframe_id the audit was also the thing that would have hidden the
+    # collapse: 166,550 documents reduce to 632 expected ids, matching the
+    # 632 Elasticsearch kept, and the count check compares against
+    # lexical_indexable_count, which the bulk call reports as success.
+    expected_ids = {document.document_id for document in source.documents}
     actual_ids, duplicate_ids = _scan_ids(
         client,
         index_name=index_name,
