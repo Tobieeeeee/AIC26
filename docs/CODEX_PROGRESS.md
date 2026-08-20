@@ -951,13 +951,44 @@ Limitations:
 - Real three-provider artifacts are unavailable locally, so this is structural
   E2E with injected deterministic encoders/backends, not a model-quality run.
 
+# Multi-Embedding Task 15 — Full-Corpus Build Workflow
+
+Status: IMPLEMENTATION COMPLETE; EXPENSIVE EXECUTION BLOCKED BY HARD GATES
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added an approval-gated, resumable, hash-bound stage state machine enforcing
+  provider extraction followed immediately by its identity audit.
+- Added ZIP-only source identity audit, full dry-run plan, resource/artifact/
+  index impact report, provider artifact auditor, failed-ID output, and CLIs.
+- Added path safety (output outside Git), explicit create/rebuild policy,
+  config-hash resume checks, and fail-stop audit criteria.
+- Added a dataset-specific config and detailed runbook without changing model,
+  schema, index, or ranking contracts.
+
+Verification:
+
+- Full-corpus orchestration suite: 5 passed.
+- Real read-only L21 dry-run: PASS; 29 videos, 7,800 expected/unique identities,
+  zero missing/extra/duplicates, archive hashes recorded.
+- Python compilation and `git diff --check`: passed.
+
+Execution blockers:
+
+- Full canonical mapping/extracted keyframe root and exact commands are not yet
+  prepared; embedding model assets are not all local; GPU/resource estimates
+  are not measured. No extraction or index construction was launched.
+
 # Current active phase
 
-Multi-Embedding Task 14 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 15 implementation is COMPLETE on
+`feat/rebuild-embedding-models`; full execution remains approval-gated.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 15 full-corpus build orchestration and dry run.
+Next action: begin Task 16 final release gate.
 
 The user explicitly approved automatic continuation through Task 16 for this
 task pack. Expensive full-corpus execution remains separately approval-gated.

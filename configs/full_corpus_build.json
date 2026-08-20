@@ -1,0 +1,32 @@
+{
+  "dataset_root": "../dataset_aic",
+  "mapping_archive": "map-keyframes-aic25-b1.zip",
+  "keyframes_archive": "Keyframes_L21.zip",
+  "canonical_mapping": "full_l21/keyframe_mapping.csv",
+  "keyframe_root": "full_l21/keyframes",
+  "output_root": "../dataset_aic/output/multi_embedding_full",
+  "dataset_prefix": "L21_",
+  "providers": ["beit3", "metaclip2", "perception_encoder"],
+  "artifact_policy": "resume",
+  "index_policy": "create",
+  "resource_estimates": {
+    "gpu": "Run one provider at a time; confirm provider-specific VRAM with a five-keyframe real-weight smoke before approval",
+    "ram": "16 GB host RAM minimum preliminary estimate; verify before execution",
+    "disk": "Allow at least 15 GB free for extracted inputs, three float32 embedding sets, indexes, staging copies, and logs",
+    "time": "Unknown until real-weight per-provider throughput is measured; potentially multiple GPU-hours",
+    "model_access": "BEiT-3 checkpoint+beit3.spm, pinned MetaCLIP-2 cache/access, and pinned PE 2.68 GB checkpoint are all required"
+  },
+  "commands": {
+    "canonical_mapping": ["<configure canonical mapping command after archive extraction; do not invent shot_id>"],
+    "extract_beit3": ["powershell", "-File", "scripts/run_all_features.ps1", "-EmbeddingProviders", "beit3", "<resolved paths and checkpoint>"],
+    "audit_beit3": ["<configure BEiT-3 artifact identity audit command>"],
+    "extract_metaclip2": ["powershell", "-File", "scripts/run_all_features.ps1", "-EmbeddingProviders", "metaclip2", "<resolved paths and pinned cache>"],
+    "audit_metaclip2": ["<configure MetaCLIP-2 artifact identity audit command>"],
+    "extract_perception_encoder": ["powershell", "-File", "scripts/run_all_features.ps1", "-EmbeddingProviders", "perception_encoder", "<resolved paths and checkpoint>"],
+    "audit_perception_encoder": ["<configure PE artifact identity audit command>"],
+    "task05a_validation": ["python", "scripts/indexing/build_index_documents.py", "<resolved canonical/features/output paths>"],
+    "provider_indexes": ["python", "scripts/indexing/build_provider_indexes.py", "<resolved paths; policy=create>"],
+    "online_smoke": ["<configure provider-matched online smoke command>"],
+    "benchmark": ["python", "scripts/verification/run_multi_embedding_ablation.py", "<full benchmark config with representative GT if available>"]
+  }
+}
