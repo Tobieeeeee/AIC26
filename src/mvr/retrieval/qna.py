@@ -44,7 +44,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from mvr.enrichment.qna_answer import AnswerReasoner, AnswerSource
-from mvr.enrichment.qna_context import OcrEngine, build_frame_context
+from mvr.enrichment.qna_context import (
+    OcrEngine,
+    build_frame_context,
+    frame_context_from_record,
+)
 from mvr.enrichment.qna_translation import QueryTranslator, translate_for_retrieval
 from mvr.retrieval.kis import KeyframeFrameIndexResolver, resolve_original_frame_id
 
@@ -61,6 +65,9 @@ class _MultimodalService(Protocol):
 
 ObjectsPathResolver = Callable[[str, str], "Path | str | None"]
 KeyframePathResolver = Callable[[str, str], "Path | str | None"]
+#: Returns one Task05A document for a keyframe -- a mapping, a path to
+#: one, or None when that keyframe has not been processed yet.
+RecordResolver = Callable[[str, str], "Mapping[str, Any] | Path | str | None"]
 ImageLoader = Callable[[str], Any]
 
 _TRAILING_NUMBER = re.compile(r"^(.*?)(\d+)$")
@@ -286,6 +293,7 @@ def search_qna(
     image_loader: ImageLoader | None = None,
     objects_path_resolver: ObjectsPathResolver | None = None,
     keyframe_path_resolver: KeyframePathResolver | None = None,
+    record_resolver: RecordResolver | None = None,
     min_object_confidence: float = 0.0,
     query_translator: QueryTranslator | None = None,
     temporal_radius: int = 0,
@@ -387,20 +395,40 @@ def search_qna(
             resolved_path = keyframe_path_resolver(video_id, keyframe_id)
             image_path = None if resolved_path is None else str(resolved_path)
 
-        image = image_loader(image_path) if image_loader is not None and image_path else None
-        objects_path = (
-            objects_path_resolver(video_id, keyframe_id)
-            if objects_path_resolver is not None
-            else None
-        )
-        context = build_frame_context(
-            video_id=video_id,
-            frame_id=frame_id,
-            image=image,
-            objects_path=objects_path,
-            ocr_engine=ocr_engine,
-            min_object_confidence=min_object_confidence,
-        )
+        record = record_resolver(video_id, keyframe_id) if record_resolver is not None else None
+        if record is not None:
+            # A record supersedes the live path entirely -- no image load, no
+            # OCR call. That is the whole point: the enrichment already ran
+            # offline, and repeating it per candidate cost ~6.7s on CPU.
+            context = frame_context_from_record(record)
+            if context.frame_id != frame_id:
+                # Both the record and the frame resolver claim to know this
+                # keyframe's competition frame_id. Disagreement means one of
+                # the two mappings is wrong; picking a winner would bury a
+                # real defect behind a prediction that silently scores 0.
+                raise ValueError(
+                    f"frame_id disagreement for ({video_id!r}, {keyframe_id!r}): "
+                    f"record says {context.frame_id}, resolver says {frame_id}"
+                )
+            if context.image_path:
+                image_path = context.image_path
+        else:
+            image = (
+                image_loader(image_path) if image_loader is not None and image_path else None
+            )
+            objects_path = (
+                objects_path_resolver(video_id, keyframe_id)
+                if objects_path_resolver is not None
+                else None
+            )
+            context = build_frame_context(
+                video_id=video_id,
+                frame_id=frame_id,
+                image=image,
+                objects_path=objects_path,
+                ocr_engine=ocr_engine,
+                min_object_confidence=min_object_confidence,
+            )
         result = answer_reasoner.answer(question, context)
 
         # A neighbour has no timestamp of its own: the hit's belongs to a

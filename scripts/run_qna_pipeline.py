@@ -121,6 +121,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--records", type=Path, default=None,
+        help=(
+            "Directory of Task05A documents (<root>/<video_id>/<keyframe_id>.json). "
+            "When a candidate's document exists it supplies OCR, ASR and object "
+            "counts directly, skipping the live OCR pass entirely -- that pass "
+            "costs ~6.7s per candidate on CPU, and it reaches no speech at all. "
+            "Candidates with no document fall back to the live path, so partial "
+            "coverage is fine."
+        ),
+    )
+    parser.add_argument(
         "--export-prompts", type=Path, default=None,
         help=(
             "Collect prompts to this JSON file instead of generating answers "
@@ -188,6 +199,14 @@ def main() -> None:
     # "<video>_S0007_K01", which this repo's own ingestion produces.
     neighbour_index = KeyframeNeighbourIndex.from_records(index.metadata)
 
+    record_resolver = None
+    if args.records is not None:
+        records_root = args.records
+
+        def record_resolver(video_id: str, keyframe_id: str) -> Path | None:  # noqa: F811
+            path = records_root / video_id / f"{keyframe_id}.json"
+            return path if path.is_file() else None
+
     ocr_engine = None
     image_loader = None
     if not args.no_ocr:
@@ -228,6 +247,7 @@ def main() -> None:
         image_loader=image_loader,
         objects_path_resolver=objects_path_resolver,
         keyframe_path_resolver=keyframe_path_resolver,
+        record_resolver=record_resolver,
         min_object_confidence=args.min_object_confidence,
         query_translator=query_translator,
         temporal_radius=args.temporal_radius,
