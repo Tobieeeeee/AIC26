@@ -66,6 +66,7 @@ output/
 output_*/
 tmp/
 temp/
+reports/data_readiness/
 /keyframes/
 lab6_metrics.json
 keyframe_docs.json
