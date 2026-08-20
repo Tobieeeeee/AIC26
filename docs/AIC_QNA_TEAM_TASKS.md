@@ -210,13 +210,29 @@ Chặn 2 nguy hơn: nếu ai gỡ chặn 1, Elasticsearch **ghi đè im lặng**
 f"{video_id}_S{shot_id:04d}_K{ordinal:02d}"     # → L21_V001_S0007_K01
 ```
 
-**Duy nhất trên toàn corpus.** Nên mọi chỗ dùng `keyframe_id` làm khoá đều
-đúng, suốt từ đầu.
+Tên này **nhắc lại `video_id` bên trong nó**, nên không bao giờ đụng nhau
+trên toàn corpus. Mọi chỗ dùng `keyframe_id` một mình làm khoá vì thế đều
+đúng — suốt từ đầu.
 
-`keyframe_id` của BTC là `034` — chỉ duy nhất **trong một video**.
+`keyframe_id` của BTC là `034`. Nó **không phải tên, mà là số thứ tự bên
+trong video**, và không nhắc gì tới video cả. Đếm trên mapping thật:
+
+```
+166.550 keyframe  →  chỉ 632 tên phân biệt   (mỗi tên dùng lại ~263 lần)
+'034' xuất hiện ở 842 video
+trong một video, không tên nào lặp lại       (0 trường hợp)
+```
+
+Nói cho gọn: `L21_V001/034` và `L21_V002/034` là **hai frame hoàn toàn khác
+nhau, cùng tên**. Giống "nhà số 12" — mỗi phố chỉ có một, nhưng cả thành
+phố có hàng nghìn; muốn gửi thư phải ghi cả tên phố.
+
 Chuyển sang keyframe BTC đã phá vỡ bất biến mà cả codebase dựa vào, và
 chưa ai tuyên bố điều đó. Đây là lý do cùng một lỗi xuất hiện ở sáu chỗ,
 không phải sáu lỗi rời rạc.
+
+Hệ quả cụ thể nhất: Elasticsearch dùng `_id = keyframe_id` sẽ nhận 166.550
+document rồi lưu lại **632** — mỗi cái bị ghi đè 263 lần, không báo lỗi.
 
 **Từ giờ: mọi khoá phải là `(video_id, keyframe_id)`.** Nếu các bạn viết
 thêm code đụng tới keyframe, đây là quy tắc duy nhất cần nhớ.
