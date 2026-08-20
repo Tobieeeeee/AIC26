@@ -79,10 +79,17 @@ class AtlasAlignment:
     full-length chain produces an empty result (never a guess).
     """
 
-    def __init__(self, alpha: float = 0.01, beta: float = 0.01, min_sim: float = 0.0) -> None:
+    def __init__(
+        self,
+        alpha: float = 0.01,
+        beta: float = 0.01,
+        min_sim: float = 0.0,
+        top_n: int = 5,
+    ) -> None:
         self.alpha = alpha
         self.beta = beta
         self.min_sim = min_sim
+        self.top_n = top_n
 
     def align(
         self, matrix: TrakeVideoScoreMatrix, gaps: Sequence[TrakeGapConstraint]
@@ -112,19 +119,30 @@ class AtlasAlignment:
             back[event_index] = trans.argmax(axis=1)
             dp = np.where(ok[event_index], scores[event_index] + best_prev, neg)
 
-        best_column = int(dp.argmax())
-        if dp[best_column] <= neg / 2:
-            return []
-
-        hits = [0] * n_events
-        hits[n_events - 1] = best_column
-        for event_index in range(n_events - 1, 0, -1):
-            best_column = int(back[event_index, best_column])
-            hits[event_index - 1] = best_column
-
-        chain_score = float(dp[hits[n_events - 1]])
-        frames = tuple(matrix.original_frame_ids[column] for column in hits)
-        return [TrakeChainPrediction(video_id=matrix.video_id, frames=frames, score=chain_score)]
+        # N-best by final-event column: the lab reference keeps only argmax
+        # (one chain per video), which wastes the competition's 100-prediction
+        # budget and gives the correct video exactly one attempt. Backtracking
+        # from each of the top-N end columns yields N distinct chains (they
+        # differ at least in their final frame), best first.
+        predictions: list[TrakeChainPrediction] = []
+        for best_column in np.argsort(-dp)[: self.top_n]:
+            end_column = int(best_column)
+            if dp[end_column] <= neg / 2:
+                continue
+            chain_score = float(dp[end_column])
+            hits = [0] * n_events
+            hits[n_events - 1] = end_column
+            column = end_column
+            for event_index in range(n_events - 1, 0, -1):
+                column = int(back[event_index, column])
+                hits[event_index - 1] = column
+            frames = tuple(matrix.original_frame_ids[c] for c in hits)
+            predictions.append(
+                TrakeChainPrediction(
+                    video_id=matrix.video_id, frames=frames, score=chain_score
+                )
+            )
+        return predictions
 
 
 class LuciferAlignment:
@@ -160,6 +178,24 @@ class LuciferAlignment:
        This port sums the bounds of every gap spanned since the last MATCHED
        event, so the constraint matches the real elapsed interval. The lab's
        own self-check passes gaps=None and therefore never exercises this.
+
+    3. **``min_sim`` default raised from ``0.05`` to ``0.20``.** Measured real
+       CLIP cosine scores on the AIC L21 index span roughly -0.05..0.31, with
+       correct target frames scoring 0.21..0.31, so a 0.05 floor sits below
+       essentially every frame and the skip mechanism -- this strategy's
+       entire reason to exist -- can never trigger. At 0.05 this class
+       produced output byte-identical to ``AtlasAlignment`` on all five real
+       benchmark queries, i.e. it was not being measured at all.
+
+    **WARNING -- ``min_sim`` is a cliff, not a plateau.** Measured on the real
+    benchmark: 0.05 -> 0.660, 0.15 -> 0.660 (both identical to ATLAS: no skip
+    ever fires), 0.20 -> 0.670, 0.22 -> 0.530, 0.25 -> 0.473, 0.28 -> 0.403.
+    The single good value sits immediately next to a sharp drop, and it was
+    tuned on only five queries, so treat 0.20 as fragile rather than
+    validated. This sensitivity is the main reason ``AtlasAlignment`` -- whose
+    own ``top_n`` plateau is flat from 5 to 20 -- is the recommended
+    production default despite Lucifer's marginally higher peak. See
+    docs/AIC_TRAKE_BENCHMARK_RESULTS.md.
     """
 
     def __init__(
@@ -167,12 +203,14 @@ class LuciferAlignment:
         alpha: float = 0.01,
         beta: float = 0.01,
         lam: float = 0.8,
-        min_sim: float = 0.05,
+        min_sim: float = 0.20,
+        top_n: int = 5,
     ) -> None:
         self.alpha = alpha
         self.beta = beta
         self.lam = lam
         self.min_sim = min_sim
+        self.top_n = top_n
 
     def _state_key(self, total: float, skipped: int) -> float:
         return total * (self.lam**skipped)
@@ -248,17 +286,29 @@ class LuciferAlignment:
                         next_states[column] = match_candidate
             states = next_states
 
-        best_total, best_skipped, best_trail, _ = max(
-            states.values(), key=lambda state: self._state_key(state[0], state[1])
+        # N-best over surviving DP states (see AtlasAlignment for why one
+        # chain per video is not enough). States that skipped every event are
+        # dropped, as in the lab reference.
+        ranked_states = sorted(
+            states.values(), key=lambda state: self._state_key(state[0], state[1]), reverse=True
         )
-        if best_skipped == n_events:
-            return []
-
-        chain_score = best_total * (self.lam**best_skipped)
-        frames = tuple(
-            None if column is None else matrix.original_frame_ids[column] for column in best_trail
-        )
-        return [TrakeChainPrediction(video_id=matrix.video_id, frames=frames, score=chain_score)]
+        predictions: list[TrakeChainPrediction] = []
+        for total, skipped, trail, _ in ranked_states:
+            if skipped == n_events:
+                continue
+            frames = tuple(
+                None if column is None else matrix.original_frame_ids[column] for column in trail
+            )
+            predictions.append(
+                TrakeChainPrediction(
+                    video_id=matrix.video_id,
+                    frames=frames,
+                    score=total * (self.lam**skipped),
+                )
+            )
+            if len(predictions) >= self.top_n:
+                break
+        return predictions
 
 
 class UceseAlignment:
@@ -272,11 +322,26 @@ class UceseAlignment:
 
     An event never covered by the winning window is left ``None`` (never a
     guess).
+
+    ``topk`` default lowered from the lab's ``300`` to ``5``: in the lab,
+    ``topk`` selected an event's strongest frames across the WHOLE corpus,
+    but this port is per-video (see the module docstring), where a typical
+    AIC video contributes only ~200-320 indexed frames. At ``topk=300``
+    essentially every frame of the video qualifies as a "hit" for every
+    event, so the first-touch rule collapses to "earliest frame in the
+    window" and the strategy returns the SAME frame for all k events --
+    measured on real data: ``(8820, 8820, 8820, 8820)``, scoring 0.000,
+    while a small ``topk`` on the identical input scores 0.500. The lab's own
+    value is therefore not transferable to per-video scope. The default 10 is
+    the measured best across the real benchmark (topk 1 -> 0.190, 3 -> 0.300,
+    5 -> 0.380, 10 -> 0.413, 20 -> 0.253). See
+    docs/AIC_TRAKE_BENCHMARK_RESULTS.md.
     """
 
-    def __init__(self, t_win: float = 20.0, topk: int = 300) -> None:
+    def __init__(self, t_win: float = 20.0, topk: int = 10, top_n: int = 5) -> None:
         self.t_win = t_win
         self.topk = topk
+        self.top_n = top_n
 
     def align(
         self, matrix: TrakeVideoScoreMatrix, gaps: Sequence[TrakeGapConstraint]
@@ -300,7 +365,12 @@ class UceseAlignment:
         if not frames_with_hits:
             return []
 
-        best: tuple[tuple[int, float], dict[int, int]] | None = None
+        # Collect every window's chain, then keep the N best distinct ones
+        # (adjacent windows frequently yield an identical first-touch chain,
+        # so dedupe before truncating -- see AtlasAlignment for why one chain
+        # per video is not enough).
+        seen: set[tuple[int | None, ...]] = set()
+        candidates: list[tuple[float, tuple[int | None, ...]]] = []
         low = 0
         for high in range(len(frames_with_hits)):
             while timestamps[frames_with_hits[high]] - timestamps[frames_with_hits[low]] > self.t_win:
@@ -313,16 +383,28 @@ class UceseAlignment:
                         first_hit[event_index] = column
             covered = len(first_hit)
             total = sum(matrix.scores[event_index, column] for event_index, column in first_hit.items())
-            key = (covered, total)
-            if best is None or key > best[0]:
-                best = (key, dict(first_hit))
+            frames = tuple(
+                None
+                if event_index not in first_hit
+                else matrix.original_frame_ids[first_hit[event_index]]
+                for event_index in range(n_events)
+            )
+            if frames in seen:
+                continue
+            seen.add(frames)
+            candidates.append((covered + 0.001 * total, frames))
 
-        if best is None:  # unreachable while frames_with_hits is non-empty
-            return []
-        (covered, total), first_hit = best
-        chain_score = covered + 0.001 * total
-        frames = tuple(
-            None if event_index not in first_hit else matrix.original_frame_ids[first_hit[event_index]]
-            for event_index in range(n_events)
+        # Tie-break deterministically by frame tuple, mapping an unresolved
+        # (None) marker to -1 so mixed None/int tuples stay comparable --
+        # sorting raw tuples raises TypeError as soon as two tied chains
+        # differ at a position where one skipped the event.
+        candidates.sort(
+            key=lambda item: (
+                -item[0],
+                tuple(-1 if frame is None else frame for frame in item[1]),
+            )
         )
-        return [TrakeChainPrediction(video_id=matrix.video_id, frames=frames, score=chain_score)]
+        return [
+            TrakeChainPrediction(video_id=matrix.video_id, frames=frames, score=score)
+            for score, frames in candidates[: self.top_n]
+        ]

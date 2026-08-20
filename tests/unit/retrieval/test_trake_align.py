@@ -59,7 +59,9 @@ def test_atlas_order_only_reproduces_lab_reference_winner_and_video0_chain() -> 
     result1 = strategy.align(matrices["1"], gaps=())
     result2 = strategy.align(matrices["2"], gaps=())
 
-    assert len(result0) == len(result1) == len(result2) == 1
+    # Each strategy now returns up to top_n chains per video; result[0] is the
+    # best one, which is what the lab reference's single return value equals.
+    assert result0 and result1 and result2
     # video 0's own valid chain, exact score (no penalty applied, gaps=()).
     assert result0[0].frames == (1001, 1003, 1005)
     assert result0[0].score == pytest.approx(2.1)
@@ -218,8 +220,8 @@ def test_ucese_produces_out_of_order_winning_chain() -> None:
 
     result = strategy.align(matrices["1"], gaps=())
 
-    assert len(result) == 1
-    prediction = result[0]
+    assert result
+    prediction = result[0]  # best chain; the strategy now returns up to top_n
     # event0's frame (offset+3, ts=6) is chronologically AFTER event1's frame
     # (offset+1, ts=2) -- the chain covers all 3 events but is NOT time-ordered.
     assert prediction.frames == (2003, 2001, 2005)
@@ -240,6 +242,26 @@ def test_ucese_leaves_uncovered_event_as_none() -> None:
 
     assert result[0].frames[0] == 500  # event0 covered
     assert result[0].frames[1] is None  # event1 left uncovered, not guessed
+
+
+def test_ucese_sorts_tied_chains_containing_none_without_crashing() -> None:
+    """Regression (found on real data, not by the earlier unit tests): the
+    tie-break sort compared raw frame tuples, so two chains tied on score
+    that differ where one skipped an event raised
+    `TypeError: '<' not supported between instances of 'NoneType' and 'int'`."""
+    # event0 peaks at column 0, event1 at column 3, 30s apart. With t_win=1
+    # no window can hold both, so one chain is (frame0, None) and the other
+    # (None, frame3) -- identical scores (1 event covered, 0.9 similarity
+    # each), so the tie-break compares 100 against None directly.
+    scores = np.array([[0.9, 0.1, 0.1, 0.1], [0.1, 0.1, 0.1, 0.9]])
+    matrix = _matrix("v", scores, (0.0, 10.0, 20.0, 30.0), frame_id_offset=100)
+    strategy = UceseAlignment(t_win=1.0, topk=1, top_n=5)
+
+    result = strategy.align(matrix, gaps=())  # must not raise
+
+    assert len(result) == 2
+    assert {chain.frames for chain in result} == {(100, None), (None, 103)}
+    assert result[0].score == pytest.approx(result[1].score), "scenario must be a real tie"
 
 
 def test_ucese_returns_empty_when_topk_is_zero() -> None:
@@ -305,12 +327,58 @@ def test_strategies_translate_column_position_to_real_frame_id(strategy_factory)
 
     result = strategy.align(matrix, gaps=(TrakeGapConstraint(0.0, 300.0),))
 
+    assert result
+    # EVERY returned chain must be translated, not just the best one.
+    for prediction in result:
+        for frame in prediction.frames:
+            if frame is not None:
+                assert frame in (7000, 7004, 7009), (
+                    f"got raw column position {frame} instead of a real frame_id"
+                )
+
+
+# -- multi-chain (top_n) behavior ----------------------------------------------
+
+
+@pytest.mark.parametrize("strategy_factory", [
+    lambda n: AtlasAlignment(top_n=n),
+    lambda n: LuciferAlignment(min_sim=0.0, top_n=n),
+    lambda n: UceseAlignment(t_win=100.0, topk=3, top_n=n),
+])
+def test_strategies_return_multiple_ranked_chains_per_video(strategy_factory) -> None:
+    """The lab reference keeps only the single best chain per video, which
+    wastes the competition's 100-prediction budget and gives the correct
+    video exactly one attempt. Every strategy must now surface up to `top_n`
+    distinct chains, best first."""
+    scores = np.array(
+        [[0.9, 0.6, 0.1, 0.1, 0.1], [0.1, 0.1, 0.8, 0.7, 0.5]]
+    )
+    matrix = _matrix("v", scores, (0.0, 1.0, 2.0, 3.0, 4.0), frame_id_offset=500)
+    gaps = (TrakeGapConstraint(0.0, 300.0),)
+
+    result = strategy_factory(3).align(matrix, gaps)
+
+    assert len(result) > 1, "strategy still collapses to a single chain per video"
+    assert len(result) <= 3, "top_n must cap the number of chains returned"
+    scores_returned = [chain.score for chain in result]
+    assert scores_returned == sorted(scores_returned, reverse=True), "chains must be ranked"
+    assert len({chain.frames for chain in result}) == len(result), "chains must be distinct"
+
+
+@pytest.mark.parametrize("strategy_factory", [
+    lambda: AtlasAlignment(top_n=1),
+    lambda: LuciferAlignment(min_sim=0.0, top_n=1),
+    lambda: UceseAlignment(t_win=100.0, topk=3, top_n=1),
+])
+def test_top_n_of_one_reproduces_single_best_chain(strategy_factory) -> None:
+    """top_n=1 must behave exactly like the lab reference's single-chain
+    return, so the multi-chain change is opt-out, not a forced behavior."""
+    scores = np.array([[0.9, 0.6, 0.1], [0.1, 0.1, 0.8]])
+    matrix = _matrix("v", scores, (0.0, 1.0, 2.0), frame_id_offset=500)
+
+    result = strategy_factory().align(matrix, gaps=(TrakeGapConstraint(0.0, 300.0),))
+
     assert len(result) == 1
-    for frame in result[0].frames:
-        if frame is not None:
-            assert frame in (7000, 7004, 7009), (
-                f"got raw column position {frame} instead of a real frame_id"
-            )
 
 
 # -- deterministic tie-breaking ------------------------------------------------
