@@ -915,6 +915,100 @@ This cannot be scored until Elasticsearch is running with the Task05B
 documents indexed, which needs `build_index_documents` over the corpus
 first. The adapter and its 14 tests are ready; the measurement is not.
 
+## 3m. A synthetic set, because n=3 is permanent
+
+The p2/p3 queries are reference queries whose answers lie outside the data
+we hold, so three verified queries is the ceiling -- forever. Only one of
+the three is currently scorable, which means every decision about *answering*
+is being made on **n=1**.
+
+### Inverting the direction
+
+Real ground truth runs query -> search -> frame -> a human confirms, and the
+confirmation is the expensive, error-prone step. It already went wrong once:
+an early verification picked L26 for p1-22 before the user corrected it.
+
+This runs the other way: **choose the frame, then derive the question.**
+`video_id` and `frame_id` are the *input*, so they cannot be wrong. No
+search, no human confirmation, nothing to get wrong about identity.
+
+| | guaranteed? |
+|---|---|
+| `video_id`, `frame_id` | **yes** -- they are the input |
+| the answer appears on that frame | **yes** -- enforced in `__post_init__` |
+| the answer is what a *human* reads | no -- OCR mangles text |
+| the answer is unique to that frame | no -- filtered, not guaranteed |
+
+So it measures **answer extraction**: given context X and question Q, does
+the model return span S? OCR errors cancel, because expectation and model
+see the same X. It does **not** measure retrieval -- any query derived from
+a frame's own text leaks the answer -- and it does not measure human-judged
+correctness. Scores are never comparable with `benchmark_qna.py`.
+
+Questions come from deterministic rules, not an LLM: an instrument has to be
+reproducible and inspectable, and a question whose provenance nobody can
+reconstruct is not a measurement.
+
+### Probing 60 real frames caught a serious flaw
+
+The first run produced three cases and **all three were false positives**:
+
+```
+"Hỏi quận này có tên là gì?"  ->  'SỰ CỦA TA TRONG KHÁNG CHlẾN CHỐNG PHÁP'
+"Hỏi tỉnh này có tên là gì?"  ->  'Pskov'
+```
+
+Cause: the generator folded diacritics away so OCR tone damage would not
+defeat the rule. But **Vietnamese diacritics carry meaning** -- `quân`
+(army) folds onto `quận` (district), `tính`/`tình` onto `tỉnh` (province).
+The rule was firing on unrelated words.
+
+For a ground-truth generator a false positive is far worse than a miss: it
+writes a wrong expectation into the benchmark, where a miss only makes the
+benchmark smaller. Two fixes, both accepting lower yield for precision:
+
+1. **Match unit words with diacritics intact.** The OCR-damaged p1-15 case
+   ("huyên" for "huyện") is now lost. Correct trade.
+2. **Reject names containing a Vietnamese function word** (`của`, `và`,
+   `trong`, `ta`, ...). Capping the name at four words was not enough on its
+   own: it shortened the seven-word headline to "SỰ CỦA TA TRONG", equally
+   wrong and merely less obvious.
+
+Re-running the same 60 frames left exactly one case -- and inspecting it
+showed the generator was right and the earlier read was wrong:
+
+```
+OCR: "... Việt Nam Hàn Quốc Tỉnh Pskov của Nga mời các già gọi"
+     -> "Hỏi tỉnh này có tên là gì?" -> "Pskov"
+```
+
+Pskov *is* a Russian oblast. A true case, not a false one.
+
+### Yield, and why that is acceptable
+
+Roughly 2% of sampled frames produce a case: most keyframes carry no text
+matching a rule. Reaching n≈20-50 needs ~900-2000 frames at ~6.7s of CPU OCR
+each. That is slow but it is a one-off, and n=20 against n=1 is the whole
+point.
+
+`drop_ambiguous_cases` then removes answers seen on more than a few frames.
+A banner like "THỜI SỰ" appears everywhere, and since scoring requires
+`frame_id` inside the interval, such a case would mark a *right* answer
+wrong -- understating performance, which is the more dangerous direction: it
+sends you chasing problems that are not there.
+
+### What it unlocks
+
+Three things that are currently unmeasurable at n=1:
+
+- **Answer formatting.** "Xã Giang Ly" vs "Giang Ly" was a single data point
+  that cost a whole query until the matcher was widened. With n=20+ the
+  frequency of that class is visible instead of guessed.
+- **`qna_answer_matches` calibration** -- where the approximation is too
+  strict or too loose, measured rather than argued.
+- **Prompt and model changes**, which currently have no way to show whether
+  they helped.
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report
