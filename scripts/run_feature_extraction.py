@@ -6,6 +6,13 @@ from mvr.enrichment.feature_extraction import (
     extract_objects
 )
 from mvr.enrichment.embeddings.openclip import OpenClipEncoder
+from mvr.enrichment.embeddings.beit3 import Beit3ImageEncoder
+from mvr.enrichment.embeddings.artifacts import sha256_file
+from mvr.enrichment.embeddings.offline import (
+    extract_embedding_artifacts,
+    run_selected_embedding_providers,
+)
+from mvr.enrichment.embeddings.provider_specs import load_provider_specs
 from mvr.enrichment.objects.faster_rcnn import FasterRCNN
 
 
@@ -16,6 +23,7 @@ def parse_embedding_providers(value: str) -> tuple[str, ...]:
     if len(set(providers)) != len(providers):
         raise argparse.ArgumentTypeError("embedding providers must be unique")
     return providers
+
 
 def main():
     parser = argparse.ArgumentParser(description="Run Offline Feature Extraction (Stage 2)")
@@ -29,22 +37,32 @@ def main():
         "--embedding-providers",
         type=parse_embedding_providers,
         default=("clip",),
-        help="Comma-separated provider IDs; provider implementations are registered by later tasks",
+        help="Comma-separated image embedding provider IDs (currently clip, beit3)",
+    )
+    parser.add_argument(
+        "--provider-specs",
+        type=Path,
+        default=Path("configs/embedding_providers.json"),
+        help="Locked provider specification JSON",
+    )
+    parser.add_argument(
+        "--beit3-checkpoint",
+        type=Path,
+        help="Local locked BEiT-3 checkpoint; never downloaded implicitly",
     )
     parser.add_argument("--rcnn-model", type=str, default="fasterrcnn_resnet50_fpn", help="Faster R-CNN model")
     parser.add_argument("--rcnn-threshold", type=float, default=0.5, help="Faster R-CNN score threshold")
     parser.add_argument("--rcnn-nms-threshold", type=float, default=0.5, help="Faster R-CNN NMS threshold")
     
     parser.add_argument("--device", type=str, default="auto", help="Device (cpu/cuda/auto)")
+    parser.add_argument(
+        "--embedding-batch-size",
+        type=int,
+        default=32,
+        help="Image embedding batch size",
+    )
 
     args = parser.parse_args()
-
-    unavailable = [provider for provider in args.embedding_providers if provider != "clip"]
-    if unavailable:
-        parser.error(
-            "embedding provider implementation is not available yet: "
-            + ", ".join(unavailable)
-        )
 
     if not args.mapping_csv.exists():
         raise FileNotFoundError(f"Mapping CSV not found: {args.mapping_csv}")
@@ -55,10 +73,41 @@ def main():
     
     dataset_name = args.output.name.replace("features_", "") if args.output.name.startswith("features_") else args.output.name
     
-    # 1. CLIP
-    print(f"Initializing OpenClipEncoder ({args.clip_model})...")
-    clip_encoder = OpenClipEncoder(model_name=args.clip_model, pretrained=args.clip_pretrained, device=args.device)
-    extract_clip_features(dataset_name, keyframes, clip_encoder, args.output, args.keyframe_root)
+    def run_clip():
+        print(f"Initializing OpenClipEncoder ({args.clip_model})...")
+        clip_encoder = OpenClipEncoder(
+            model_name=args.clip_model,
+            pretrained=args.clip_pretrained,
+            device=args.device,
+        )
+        extract_clip_features(
+            dataset_name, keyframes, clip_encoder, args.output, args.keyframe_root
+        )
+
+    def run_beit3():
+        if args.beit3_checkpoint is None:
+            parser.error("--beit3-checkpoint is required when selecting beit3")
+        specs = load_provider_specs(args.provider_specs)
+        spec = specs.get("beit3")
+        encoder = Beit3ImageEncoder(
+            spec=spec,
+            checkpoint_path=args.beit3_checkpoint,
+            device=args.device,
+        )
+        extract_embedding_artifacts(
+            keyframes,
+            keyframe_root=args.keyframe_root,
+            embeddings_root=args.output / "embeddings",
+            spec=spec,
+            encoder=encoder,
+            batch_size=args.embedding_batch_size,
+            checkpoint_sha256=sha256_file(args.beit3_checkpoint),
+        )
+
+    run_selected_embedding_providers(
+        args.embedding_providers,
+        {"clip": run_clip, "beit3": run_beit3},
+    )
     
     # 2. Faster R-CNN
     print(f"Initializing Faster R-CNN ({args.rcnn_model})...")

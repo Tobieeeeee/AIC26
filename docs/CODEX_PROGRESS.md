@@ -676,13 +676,49 @@ Risks:
 - PE's official source omits a `huggingface-hub` pin. Task 08 must record the
   resolved isolated environment.
 
+# Multi-Embedding Task 06 — BEiT-3 Offline Extraction
+
+Status: COMPLETE (real-weight fasttest unavailable locally)
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added a lazy BEiT-3 image adapter for the locked Microsoft UniLM retrieval
+  checkpoint, official 224-pixel preprocessing, eval mode, and inference mode.
+- Added a provider-neutral atomic offline writer that validates identities and
+  images before inference; writes per-video shards plus deterministic mapping;
+  validates shape/dtype/finiteness/normalization; and publishes the manifest
+  last via an atomic directory rename.
+- Added checkpoint/mapping SHA256 and source/checkpoint provenance to emitted
+  manifests, plus an identity/vector artifact auditor.
+- Wired `beit3` into the unified feature CLI with explicit local checkpoint,
+  provider spec, batch size, and device arguments. No fallback or implicit
+  model download is allowed.
+- Added optional dependencies, unit/negative/deterministic coverage, an
+  external-weight five-keyframe target, and an operator guide.
+
+Verification:
+
+- Task 06 focused: 11 passed, 1 skipped (external checkpoint); relevant
+  Tasks 01–05 regression: 77 passed.
+- Unified runner focused tests: 16 passed.
+- Full regression: 336 passed, 15 skipped, 0 failed.
+- CLI help/import smoke, Python compilation, and `git diff --check`: passed.
+
+Limitations:
+
+- The local dataset contains no locked BEiT-3 checkpoint or tokenizer, so the
+  real five-keyframe target is correctly skipped. Mocked extraction exercises
+  the complete artifact writer and audit contract without fake model weights.
+
 # Current active phase
 
-Multi-Embedding Task 05 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 06 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 06 BEiT-3 offline extraction using only the locked
+Next action: begin Task 07 MetaCLIP-2 offline extraction using only the locked
 provider contract.
 
 The user explicitly approved automatic continuation through Task 16 for this
