@@ -90,6 +90,27 @@ def main() -> None:
         help="Permit downloading the translation model (fails closed otherwise)",
     )
     parser.add_argument(
+        "--temporal-radius", type=int, default=0,
+        help=(
+            "Also predict each hit's neighbouring keyframes, up to this many "
+            "positions either side. Default 0 (retrieval's ranking untouched). "
+            "Targets the measured failure mode: on p1-15 the correct video "
+            "ranked #1 and #2 while the answer sat four keyframes further on, "
+            "which scores exactly zero. Neighbours are resolved through the "
+            "same frame map as the hits, so non-existent ones are dropped."
+        ),
+    )
+    parser.add_argument(
+        "--neighbour-cost", type=float, default=1.0,
+        help=(
+            "How the answer budget splits between more videos and more frames "
+            "of the same video. High (e.g. 50) submits every retrieval hit "
+            "before any neighbour; low (e.g. 0.1) exhausts the top hit's "
+            "neighbourhood first; 1.0 treats one rank down and one keyframe "
+            "aside as equally speculative."
+        ),
+    )
+    parser.add_argument(
         "--export-prompts", type=Path, default=None,
         help=(
             "Collect prompts to this JSON file instead of generating answers "
@@ -127,6 +148,12 @@ def main() -> None:
     def objects_path_resolver(video_id: str, keyframe_id: str) -> Path | None:
         path = objects_root / video_id / f"{keyframe_id}.json"
         return path if path.is_file() else None
+
+    # Temporally-expanded neighbours are not retrieval hits, so the index
+    # supplied no image for them. Without this the neighbour reaches the
+    # reasoner with no OCR and no objects -- for Q&A, almost no signal.
+    def keyframe_path_resolver(video_id: str, keyframe_id: str) -> Path | None:
+        return aic_registry.keyframe_path(video_id, keyframe_id)
 
     ocr_engine = None
     image_loader = None
@@ -167,8 +194,11 @@ def main() -> None:
         ocr_engine=ocr_engine,
         image_loader=image_loader,
         objects_path_resolver=objects_path_resolver,
+        keyframe_path_resolver=keyframe_path_resolver,
         min_object_confidence=args.min_object_confidence,
         query_translator=query_translator,
+        temporal_radius=args.temporal_radius,
+        neighbour_cost=args.neighbour_cost,
     )
 
     if not results:
@@ -189,9 +219,13 @@ def main() -> None:
         return
 
     for r in results:
+        origin = (
+            "" if r.expanded_from is None
+            else f" [{r.temporal_offset:+d} from {r.expanded_from}]"
+        )
         print(
             f"#{r.rank} {r.video_id} frame={r.frame_id} score={r.score:.4f} "
-            f"answer={r.answer!r} source={r.answer_source}"
+            f"answer={r.answer!r} source={r.answer_source}{origin}"
         )
 
 

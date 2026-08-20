@@ -473,7 +473,7 @@ failure.** The organizer requires `frame_id` inside the interval, so a
 
 1. **Temporal expansion.** When a video ranks highly, submit its
    neighbouring keyframes too. This is what converts p1-15's near-miss
-   into a hit.
+   into a hit. -- **done, see 3h.**
 2. **Use the full 100-answer budget.** Runs currently use `--top-k 20`,
    spending the budget on 20 *different* videos while the top video gets
    two slots.
@@ -502,6 +502,85 @@ ground truth    artifacts/qna/ground_truth.json       (3 p1 queries, human-verif
 
 Machine limit: 3.8GB RAM, no GPU — answer generation runs on Kaggle via
 `docs/QNA_KAGGLE_RUNBOOK.md`.
+
+## 3h. Temporal expansion (step 1 of the 3g next steps)
+
+`search_qna(temporal_radius=..., neighbour_cost=...)`, opt-in, default
+`0` — retrieval's ranking untouched. When a video ranks highly the
+neighbouring keyframes are predicted too, resolved through the *same*
+frame map as the hits, so a neighbour that does not exist is dropped
+rather than guessed.
+
+Neighbour ids come from `shift_keyframe_id()`, which shifts the trailing
+number of the id *string* so zero-padding and any prefix survive
+(`"0027"` → `"0028"`); resolvers key on the exact string, so a rebuilt
+`"28"` would silently find nothing.
+
+A neighbour is a hedge, not a hit: it inherits the parent's `score`
+because it has none of its own, and carries `temporal_offset` +
+`expanded_from` so that borrowing is explicit. Its `timestamp` is `None` —
+the parent's belongs to a different frame and interpolating one would
+invent data. Each neighbour is re-answered against its own OCR/object
+context; copying the parent's answer would defeat the point.
+
+### Sharing the 100-answer budget
+
+The budget funds two different bets — *more videos* (retrieval picked the
+wrong one) and *more frames of the same video* (right video, wrong
+moment). Each `(hit index, offset)` pair costs
+`hit_index + neighbour_cost * abs(offset)`, and the submission order is
+that cost ascending. One knob spans the whole range: high (50) submits
+every retrieval hit before any neighbour, low (0.1) exhausts the top
+hit's neighbourhood first, `1.0` treats one rank down and one keyframe
+aside as equally speculative. Ties break toward the smaller `abs(offset)`,
+so a real retrieval hit always beats a hedge landing on the same cost —
+and `R@1`, one fifth of the final score, is untouched at any setting.
+
+### Measured (retrieval reachability, top-k 100, translated query)
+
+p1-15 was the whole motivation: right video at ranks #1/#2, answer four
+keyframes further on, scoring zero.
+
+| | rank of a correct frame |
+|---|---|
+| baseline (`radius 0`) | **absent from all 100** |
+| `radius 5, cost 1.0` | #28 |
+| `radius 5, cost 0.5` | #19 |
+| `radius 5, cost 0.2` | #13 |
+
+Radius sweep at `cost 0.5`: radius 2 → absent, 3 → absent, **4 → #18**,
+5 → #19, 8 → #19. The first radius that works is exactly the 4-keyframe
+gap 3g measured, which is mechanical confirmation rather than a
+coincidence — and a radius past the gap costs nothing, because the cost
+ordering submits far neighbours late.
+
+**Caveat, and it is a large one: n=1.** Only p1-15 can move — p1-19's
+video sits at rank 153 and p1-22's is absent from the top 20, so no
+expansion reaches either. The sweep numbers above are therefore a
+mechanism check, not a tuned hyperparameter, and the library default
+stays at the neutral `1.0`. Fitting `0.2` to a single query would be
+overfitting: a low cost also means burning ~11 slots per video, covering
+only ~9 videos out of 100 answers, which is a real loss whenever the top
+video is wrong. Choosing a value honestly needs more verified ground
+truth.
+
+Final Score is still 0.000 across all three, because these runs use
+`--export-prompts` (no LLM, placeholder answers). This step fixed the
+*retrieval* half of p1-15 only; the answer half still has to land.
+
+### Neighbour images
+
+Neighbours are not retrieval hits, so the index supplied no `image_path`
+for them — and OCR is the dominant Q&A signal, so an unresolved neighbour
+reaches the reasoner with almost nothing. `search_qna` takes a
+`keyframe_path_resolver` (wired to `AicDatasetRegistry.keyframe_path` in
+`run_qna_pipeline.py`) which also backfills any primary hit whose backend
+returned no image.
+
+### Still open from 3g
+
+2. **Use the full 100-answer budget.** Partly done: the runs above use
+   `--top-k 100`. The pipeline's own default is still 5.
 
 ## 4. Branch / task-pack plan (confirmed with the user)
 
