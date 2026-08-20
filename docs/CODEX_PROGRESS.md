@@ -389,16 +389,73 @@ Blockers:
 
 ---
 
+## Task05A v1 — Feature Filtering & Index Document Preparation
+
+Status: COMPLETE
+
+Branch: `feat/filtering`
+
+Completed:
+
+- Added reusable NFC text normalization, OCR/ASR filtering and intra-keyframe
+  deduplication, Task04 object projection, CLIP vector/mapping validation, and
+  Task05A document validation under `src/mvr/indexing/`.
+- Added `scripts/indexing/build_index_documents.py` with configurable Task04
+  branch roots and filter thresholds; it performs no model inference and does
+  not create an Elasticsearch/Milvus index.
+- Preserved one output document per canonical mapping keyframe even when OCR,
+  ASR, Object, or CLIP content is absent or invalid.
+- Added deterministic UTF-8 atomic JSON output, `manifest.json`, bounded
+  `filtering_report.json`, independent lexical/vector/object flags, and no
+  JSONL output.
+- Audited the real current Task04 artifacts. The selected canonical mapping has
+  677 keyframes and OCR has 677 matching files. CLIP/Object artifacts were
+  produced from a different 643-keyframe TransNetV2 mapping, so incompatible
+  rows are reported rather than silently joined. No ASR artifact or confidence
+  field exists in the current artifact set.
+- Executed the real run into ignored
+  `artifacts/processed_real_task04_test/`: 677 documents, 365 lexical-indexable,
+  55 vector-indexable, and 55 object-indexable.
+- Verified exact set cardinality (677 expected/actual/unique, zero missing,
+  extra, or duplicate documents), filtering arithmetic, schema validation,
+  UTF-8 decoding, and deterministic rerun content.
+- Verified Task04 immutability using aggregate SHA-256 hashes across the
+  canonical mapping and the CLIP/Object/OCR source trees; all pre/post hashes
+  matched.
+
+Tests:
+
+- Focused Task05A tests: 16 passed.
+- All indexing unit tests: 21 passed, 7 skipped.
+- Full regression: 246 passed, 13 skipped, 0 failed.
+- `python -m compileall -q src/mvr/indexing scripts/indexing`: passed.
+- CLI help, `git diff --check`, no-JSONL, artifact staging, and scope audits:
+  passed.
+
+Known input limitation:
+
+- The real Task04 corpus is not currently a single identity-compatible feature
+  package: CLIP/Object use the 643-row TransNetV2 mapping while OCR/canonical
+  ingestion use the 677-row mapping. Task05A correctly isolates those branch
+  mismatches; upstream Task04 artifacts must be regenerated against one
+  canonical mapping to make all 677 documents vector/object indexable.
+
+Blockers:
+
+- None for Task05A v1 implementation. The upstream branch identity mismatch and
+  absent ASR artifact are recorded limitations, not silently repaired.
+
 # Current active phase
 
-None. Phases 01–06 (reuse baseline) are COMPLETE and merged via PR #1. The
+Task05A v1 is COMPLETE on `feat/filtering`. Phases 01–06 (reuse baseline) are
+COMPLETE and merged via PR #1. The
 Textual KIS competition-ready task pack (Tasks 01–09) is also COMPLETE on
 `feat/kis-competition-ready`.
 
-Next action: human review of `feat/kis-competition-ready`.
+Next action: human review of `feat/filtering`.
 
-Stop gate: do not begin Q&A, TRAKE, Frontend, VLM, advanced reranking, or
-deployment without explicit approval.
+Stop gate: do not begin Task05B/C/D, Q&A, TRAKE, Frontend, VLM, advanced
+reranking, or deployment without explicit approval.
 
 # Resume instruction
 
