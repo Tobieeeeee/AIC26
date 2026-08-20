@@ -13,6 +13,8 @@ enrichment:
   embedding_model: ViT-B-32
   embedding_pretrained: laion2b_s34b_b79k
   embedding_batch_size: 32
+  embedding_providers:
+    - clip
   lab6_embedding_model: RN50
   lab6_embedding_pretrained: openai
   lab6_embedding_batch_size: 64

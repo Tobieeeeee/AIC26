@@ -1,0 +1,44 @@
+{
+  "run_id": "multi-embedding-fasttest-structural-v1",
+  "output_root": "artifacts/verification/multi_embedding_fasttest",
+  "expected_keyframes": 5,
+  "canonical_ids": ["K1", "K2", "K3", "K4", "K5"],
+  "rrf_k": 60,
+  "top_k": 5,
+  "warmup_runs": 1,
+  "measured_runs": 3,
+  "query_set_version": "synthetic-structural-smoke-v1",
+  "ground_truth_version": null,
+  "representative_ground_truth": false,
+  "queries": [{"id": "Q1", "text": "a red bus"}],
+  "provider_provenance": {
+    "beit3": {"checkpoint": "beit3_base_itc_patch16_224.pth", "revision": null, "artifact_manifest_sha256": null, "index_manifest_sha256": null, "status": "synthetic fixture; real artifacts unavailable"},
+    "metaclip2": {"checkpoint": "facebook/metaclip-2-worldwide-b16", "revision": "8cc8591f32b43a809f3325192d3b77aa56968ddb", "artifact_manifest_sha256": null, "index_manifest_sha256": null, "status": "synthetic fixture; real artifacts unavailable"},
+    "perception_encoder": {"checkpoint": "facebook/PE-Core-L14-336", "revision": "ee1fdb467ab42497fa2e60e94a79e9d7383c1cbd", "artifact_manifest_sha256": null, "index_manifest_sha256": null, "status": "synthetic fixture; real artifacts unavailable"}
+  },
+  "fixture_rankings": {
+    "Q1": {
+      "beit3": [
+        {"rank": 1, "score": 0.9, "keyframe_id": "K1", "video_id": "V1", "frame_id": 10, "shot_id": 1, "timestamp": 0.4},
+        {"rank": 2, "score": 0.8, "keyframe_id": "K2", "video_id": "V1", "frame_id": 20, "shot_id": 2, "timestamp": 0.8},
+        {"rank": 3, "score": 0.7, "keyframe_id": "K3", "video_id": "V1", "frame_id": 30, "shot_id": 3, "timestamp": 1.2},
+        {"rank": 4, "score": 0.6, "keyframe_id": "K4", "video_id": "V1", "frame_id": 40, "shot_id": 4, "timestamp": 1.6},
+        {"rank": 5, "score": 0.5, "keyframe_id": "K5", "video_id": "V1", "frame_id": 50, "shot_id": 5, "timestamp": 2.0}
+      ],
+      "metaclip2": [
+        {"rank": 1, "score": 0.9, "keyframe_id": "K2", "video_id": "V1", "frame_id": 20, "shot_id": 2, "timestamp": 0.8},
+        {"rank": 2, "score": 0.8, "keyframe_id": "K1", "video_id": "V1", "frame_id": 10, "shot_id": 1, "timestamp": 0.4},
+        {"rank": 3, "score": 0.7, "keyframe_id": "K4", "video_id": "V1", "frame_id": 40, "shot_id": 4, "timestamp": 1.6},
+        {"rank": 4, "score": 0.6, "keyframe_id": "K3", "video_id": "V1", "frame_id": 30, "shot_id": 3, "timestamp": 1.2},
+        {"rank": 5, "score": 0.5, "keyframe_id": "K5", "video_id": "V1", "frame_id": 50, "shot_id": 5, "timestamp": 2.0}
+      ],
+      "perception_encoder": [
+        {"rank": 1, "score": 0.9, "keyframe_id": "K3", "video_id": "V1", "frame_id": 30, "shot_id": 3, "timestamp": 1.2},
+        {"rank": 2, "score": 0.8, "keyframe_id": "K2", "video_id": "V1", "frame_id": 20, "shot_id": 2, "timestamp": 0.8},
+        {"rank": 3, "score": 0.7, "keyframe_id": "K1", "video_id": "V1", "frame_id": 10, "shot_id": 1, "timestamp": 0.4},
+        {"rank": 4, "score": 0.6, "keyframe_id": "K5", "video_id": "V1", "frame_id": 50, "shot_id": 5, "timestamp": 2.0},
+        {"rank": 5, "score": 0.5, "keyframe_id": "K4", "video_id": "V1", "frame_id": 40, "shot_id": 4, "timestamp": 1.6}
+      ]
+    }
+  }
+}

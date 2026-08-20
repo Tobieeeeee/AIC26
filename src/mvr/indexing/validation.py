@@ -74,6 +74,8 @@ def validate_task05a_document(document: Mapping[str, Any]) -> None:
     for section in ("ocr", "asr", "objects", "clip", "indexability"):
         if not isinstance(document[section], Mapping):
             raise Task05AValidationError(f"{section} must be an object")
+    if "embeddings" in document and not isinstance(document["embeddings"], Mapping):
+        raise Task05AValidationError("embeddings must be an object")
     for text_section in ("ocr", "asr"):
         if not isinstance(document[text_section].get("texts"), list):
             raise Task05AValidationError(f"{text_section}.texts must be a list")
@@ -100,6 +102,35 @@ def validate_task05a_document(document: Mapping[str, Any]) -> None:
     for key in ("lexical", "vector", "object"):
         if not isinstance(indexability.get(key), bool):
             raise Task05AValidationError(f"indexability.{key} must be boolean")
+    embedding_flags = indexability.get("embeddings")
+    if embedding_flags is not None:
+        if not isinstance(embedding_flags, Mapping):
+            raise Task05AValidationError("indexability.embeddings must be an object")
+        if not all(
+            isinstance(provider_id, str) and isinstance(enabled, bool)
+            for provider_id, enabled in embedding_flags.items()
+        ):
+            raise Task05AValidationError(
+                "indexability.embeddings values must be booleans"
+            )
+        if indexability["vector"] != any(embedding_flags.values()):
+            raise Task05AValidationError(
+                "indexability.vector must equal any(indexability.embeddings.values())"
+            )
+        locators = document.get("embeddings", {})
+        if set(locators) != set(embedding_flags):
+            raise Task05AValidationError(
+                "embeddings and indexability.embeddings provider sets must match"
+            )
+        for provider_id, locator in locators.items():
+            if locator is not None and not isinstance(locator, Mapping):
+                raise Task05AValidationError(
+                    f"embeddings.{provider_id} must be an object or null"
+                )
+            if embedding_flags[provider_id] != (locator is not None):
+                raise Task05AValidationError(
+                    f"embeddings.{provider_id} locator/indexability mismatch"
+                )
 
 
 def ensure_finite_json(value: object, *, path: str = "$") -> None:
