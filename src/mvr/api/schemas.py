@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _require_non_blank(value: str) -> str:
@@ -60,6 +60,58 @@ class KisSearchResponse(BaseModel):
     query: str
     count: int = Field(ge=0)
     results: list[KisHit]
+
+
+class TrakeEventRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+    _validate_text = field_validator("text")(_require_non_blank)
+
+
+class TrakeSearchRequest(BaseModel):
+    """Accepts an already-decomposed k-event TRAKE query. Gap timing is
+    expressed ONLY as connector phrases (e.g. "rồi", "ngay sau đó"),
+    translated via ``translate_gap_phrase()`` -- raw [min,max] second
+    numbers are deliberately not accepted here, since the real-data
+    benchmark (docs/AIC_TRAKE_BENCHMARK_RESULTS.md) measured the phrase
+    table's own defaults outperforming hand-picked numbers (0.639 vs
+    0.633 mean final score)."""
+
+    events: list[TrakeEventRequest] = Field(min_length=2)
+    gap_phrases: list[str] = Field(
+        default_factory=list,
+        description='One entry per gap between consecutive events (len(events)-1 total). '
+        'Empty string "" falls back to the phrase table\'s no-clue default.',
+    )
+    top_k: int = Field(default=100, ge=1, le=100)
+    alignment_strategy: Literal["atlas", "lucifer", "ucese"] | None = Field(
+        default=None,
+        description="Override the evidence-backed default (atlas) for manual testing only.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_gap_phrase_count(self) -> "TrakeSearchRequest":
+        expected = len(self.events) - 1
+        if len(self.gap_phrases) != expected:
+            raise ValueError(
+                f"expected {expected} gap_phrases for {len(self.events)} events, "
+                f"got {len(self.gap_phrases)}"
+            )
+        return self
+
+
+class TrakeChainHit(BaseModel):
+    rank: int = Field(ge=1)
+    video_id: str
+    frames: list[int | None]
+    score: float
+
+
+class TrakeSearchResponse(BaseModel):
+    event_count: int = Field(ge=2)
+    alignment_strategy: str
+    count: int = Field(ge=0)
+    results: list[TrakeChainHit]
 
 
 class SearchHit(BaseModel):

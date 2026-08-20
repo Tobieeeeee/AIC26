@@ -15,6 +15,8 @@ from ..retrieval.hybrid import rrf_fuse
 from ..retrieval.kis import KeyframeFrameIndexResolver, search_kis
 from ..retrieval.lexical import search_lexical
 from ..retrieval.object_search import parse_object_conditions, search_objects
+from ..retrieval.trake import search_trake
+from ..retrieval.trake_events import TrakeEventQuery, TrakeQuery, translate_gap_phrase
 from .schemas import (
     ElasticsearchRuntimeStatus,
     HealthResponse,
@@ -29,13 +31,31 @@ from .schemas import (
     SemanticRuntimeStatus,
     SemanticSearchRequest,
     TextSearchRequest,
+    TrakeChainHit,
+    TrakeSearchRequest,
+    TrakeSearchResponse,
 )
 
 
 DEFAULT_ES_INDEX = "keyframes"
 TOP_N_EACH = 30
 _UNSET = object()
+# Evidence-backed default from the real-data benchmark (see
+# docs/AIC_TRAKE_BENCHMARK_RESULTS.md) -- not loaded from configs/default.yaml
+# because nothing in this codebase actually reads that file; every other
+# "config" value here is likewise a plain Python default (see e.g. each
+# TrakeAlignmentStrategy's own __init__ defaults, already set to the tuned
+# values). Introducing a YAML-loading mechanism for just this one value
+# would be new, unprecedented machinery, not a missing wire-up.
+TRAKE_DEFAULT_ALIGNMENT_STRATEGY = "atlas"
 logger = logging.getLogger(__name__)
+
+
+def _build_trake_alignment_strategy(name: str):
+    from ..retrieval.trake_align import AtlasAlignment, LuciferAlignment, UceseAlignment
+
+    strategies = {"atlas": AtlasAlignment, "lucifer": LuciferAlignment, "ucese": UceseAlignment}
+    return strategies[name]()
 
 
 class LazyFaissSemanticService:
@@ -90,7 +110,7 @@ class LazyFaissSemanticService:
             raise RuntimeError("semantic index is unavailable") from exc
         return self._index
 
-    def search(self, query: str, top_k: int = 5):
+    def _load_retriever(self):
         index = self._load_index()
         if self._retriever is None:
             try:
@@ -112,7 +132,18 @@ class LazyFaissSemanticService:
             except Exception as exc:
                 self._runtime_error = exc
                 raise RuntimeError("semantic runtime is unavailable") from exc
-        return self._retriever.search(query, top_k=top_k)
+        return self._retriever
+
+    def search(self, query: str, top_k: int = 5):
+        return self._load_retriever().search(query, top_k=top_k)
+
+    def retriever(self):
+        """Expose the underlying ``SemanticRetriever`` (``.text_encoder`` /
+        ``.index``) for callers that need dense per-frame scoring (TRAKE's
+        ``search_trake()``), not just top-k ``search()``. Same lazy-load
+        guarantee and exceptions as ``search()`` -- purely additive, does
+        not change ``search()``'s own behavior."""
+        return self._load_retriever()
 
 
 class ElasticsearchMultimodalService:
@@ -454,6 +485,63 @@ def create_app(
                     timestamp=candidate.timestamp,
                 )
                 for candidate in candidates
+            ],
+        )
+
+    @application.post("/search/trake", response_model=TrakeSearchResponse)
+    def search_trake_route(request: TrakeSearchRequest) -> TrakeSearchResponse:
+        """Qualifying-round TRAKE search: ranked candidate chains for an
+        already-decomposed k-event query.
+
+        Returns RAW chains, including unresolved (``None`` -> JSON ``null``)
+        markers, as-is from ``search_trake()``. The never-blank fallback
+        (Phase 07, ``apply_never_blank_fallback``) is deliberately NOT run
+        here -- it is a submission-time concern for whichever tool actually
+        produces the competition entry, not a retrieval-time concern, and
+        applying it silently here would hide which markers were genuinely
+        found versus fabricated.
+        """
+        if semantic_service is None:
+            raise HTTPException(status_code=503, detail="trake semantic index is unavailable")
+        try:
+            query = TrakeQuery(
+                events=tuple(
+                    TrakeEventQuery(index, event.text)
+                    for index, event in enumerate(request.events, start=1)
+                ),
+                gaps=tuple(translate_gap_phrase(phrase) for phrase in request.gap_phrases),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        strategy_name = request.alignment_strategy or TRAKE_DEFAULT_ALIGNMENT_STRATEGY
+        strategy = _build_trake_alignment_strategy(strategy_name)
+
+        try:
+            trake_semantic_service = semantic_service.retriever()
+            chains = search_trake(
+                query,
+                alignment_strategy=strategy,
+                semantic_service=trake_semantic_service,
+                aic_registry=kis_aic_registry,
+                top_k=request.top_k,
+                pipeline_resolver=kis_pipeline_resolver,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        return TrakeSearchResponse(
+            event_count=len(request.events),
+            alignment_strategy=strategy_name,
+            count=len(chains),
+            results=[
+                TrakeChainHit(
+                    rank=rank,
+                    video_id=chain.video_id,
+                    frames=list(chain.frames),
+                    score=chain.score,
+                )
+                for rank, chain in enumerate(chains, start=1)
             ],
         )
 
