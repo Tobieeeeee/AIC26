@@ -83,8 +83,14 @@ def _build_context_block(question: str, context: FrameContext) -> str:
         if counts
         else "(no object detections available)"
     )
+    # Speech is stated separately from on-screen text rather than merged into
+    # one blob: a question about what someone *said* and one about what is
+    # *written* rest on different evidence, and collapsing them would let the
+    # model answer from the wrong source with nothing marking the swap.
+    asr_line = context.asr_text.strip() or "(no speech transcribed near this frame)"
     return (
         f"Detected on-screen text (OCR): {ocr_line}\n"
+        f"Transcribed speech near this frame (ASR): {asr_line}\n"
         f"Detected objects (label: count): {objects_line}\n"
         f"Question: {question}\n"
     )

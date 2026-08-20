@@ -1114,6 +1114,7 @@ def _project_document(
         "shot_id": keyframe.shot_id,
         "frame_idx": keyframe.frame_idx,
         "timestamp": keyframe.timestamp,
+        "image_path": keyframe.image_path,
         "ocr": {
             "texts": ocr,
             "joined": " ".join(item["text"] for item in ocr),
