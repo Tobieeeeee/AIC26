@@ -223,6 +223,80 @@ def test_search_qna_tolerates_hits_without_an_image_path() -> None:
     assert results[0].image_path is None
 
 
+class _RecordingSemanticService:
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def search(self, query: str, top_k: int):
+        self.queries.append(query)
+        return []
+
+
+def test_search_qna_translates_only_the_retrieval_query() -> None:
+    """CLIP's text tower is English-trained, so the event description is
+    translated before retrieval -- but the question must reach the answer
+    reasoner untranslated, or the very detail being asked about can be
+    corrupted in transit."""
+    from mvr.enrichment.qna_answer import AnswerReasoner
+
+    class _Translator:
+        def translate(self, text: str) -> str:
+            return "TRANSLATED: " + text
+
+    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    service = _FakeMultimodalService([_hit("L21_V001", "kf-1", score=0.9)])
+
+    class _CapturingBackend:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def generate(self, prompt: str) -> str:
+            self.prompts.append(prompt)
+            return json.dumps({"answer": "x", "source": "context-grounded"})
+
+    backend = _CapturingBackend()
+
+    search_qna(
+        "một đoạn mô tả", "câu hỏi gốc", top_k=5,
+        semantic_service=None, multimodal_service=service,
+        pipeline_resolver=resolver, answer_reasoner=AnswerReasoner(backend),
+        query_translator=_Translator(),
+    )
+
+    assert service.calls[0][0] == "TRANSLATED: một đoạn mô tả"
+    assert "câu hỏi gốc" in backend.prompts[0]
+    assert "TRANSLATED: câu hỏi gốc" not in backend.prompts[0]
+
+
+def test_search_qna_without_translator_sends_the_original_query() -> None:
+    service = _RecordingSemanticService()
+
+    search_qna(
+        "một đoạn mô tả", "câu hỏi", top_k=5,
+        semantic_service=service, multimodal_service=None,
+        answer_reasoner=_reasoner("1", "context-grounded"),
+    )
+
+    assert service.queries == ["một đoạn mô tả"]
+
+
+def test_search_qna_falls_back_to_original_when_translation_fails() -> None:
+    class _Broken:
+        def translate(self, text: str) -> str:
+            raise RuntimeError("down")
+
+    service = _RecordingSemanticService()
+
+    search_qna(
+        "một đoạn mô tả", "câu hỏi", top_k=5,
+        semantic_service=service, multimodal_service=None,
+        answer_reasoner=_reasoner("1", "context-grounded"),
+        query_translator=_Broken(),
+    )
+
+    assert service.queries == ["một đoạn mô tả"]
+
+
 def test_search_qna_drops_unresolvable_candidates_without_guessing() -> None:
     resolver = KeyframeFrameIndexResolver({"kf-a": 10})  # kf-b unknown
     hits = [_hit("L21_V001", "kf-a", score=0.9), _hit("L21_V001", "kf-b", score=0.8)]

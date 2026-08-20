@@ -37,7 +37,9 @@ ocr = [
     "paddlepaddle>=2,<4",
 ]
 objects = ["ultralytics>=8,<9"]
-qna = ["transformers>=4.40,<5", "torch>=2.2,<3"]
+# sentencepiece is required by the Marian tokenizer used for Vietnamese
+# query translation; transformers raises at load time without it.
+qna = ["transformers>=4.40,<5", "torch>=2.2,<3", "sentencepiece>=0.2,<1"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

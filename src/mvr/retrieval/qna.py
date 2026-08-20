@@ -40,6 +40,7 @@ from typing import Any, Protocol
 
 from mvr.enrichment.qna_answer import AnswerReasoner, AnswerSource
 from mvr.enrichment.qna_context import OcrEngine, build_frame_context
+from mvr.enrichment.qna_translation import QueryTranslator, translate_for_retrieval
 from mvr.retrieval.kis import KeyframeFrameIndexResolver, resolve_original_frame_id
 
 
@@ -102,6 +103,7 @@ def search_qna(
     image_loader: ImageLoader | None = None,
     objects_path_resolver: ObjectsPathResolver | None = None,
     min_object_confidence: float = 0.0,
+    query_translator: QueryTranslator | None = None,
     overfetch: int | None = None,
 ) -> list[QnaCandidate]:
     """Run one Q&A query against the existing retrieval baseline plus the
@@ -129,14 +131,18 @@ def search_qna(
 
     fetch_count = overfetch if overfetch is not None else max(top_k * 3, 30)
 
+    # Only the retrieval query is translated. The question keeps its original
+    # language for the answer reasoner -- see mvr.enrichment.qna_translation.
+    retrieval_query = translate_for_retrieval(event_description.strip(), query_translator)
+
     if multimodal_service is not None:
         raw_hits: Sequence[Mapping[str, Any]] = multimodal_service.search_hybrid(
-            event_description.strip(), top_k=fetch_count, rrf_k=60
+            retrieval_query, top_k=fetch_count, rrf_k=60
         )
     else:
         raw_hits = [
             result.to_dict() if hasattr(result, "to_dict") else dict(result)
-            for result in semantic_service.search(event_description.strip(), top_k=fetch_count)
+            for result in semantic_service.search(retrieval_query, top_k=fetch_count)
         ]
 
     question = question.strip()

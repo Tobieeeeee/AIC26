@@ -72,6 +72,24 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--translate-query", action="store_true",
+        help=(
+            "Translate the event description to English before retrieval. "
+            "CLIP's text tower is English-trained: on the real organizer "
+            "index the same target video ranked nowhere for a Vietnamese "
+            "query but #112/166550 for an English one. The question itself "
+            "is never translated."
+        ),
+    )
+    parser.add_argument(
+        "--translation-model", type=str, default=None,
+        help="Defaults to HelsinkiViEnTranslator's model",
+    )
+    parser.add_argument(
+        "--allow-translation-download", action="store_true",
+        help="Permit downloading the translation model (fails closed otherwise)",
+    )
+    parser.add_argument(
         "--export-prompts", type=Path, default=None,
         help=(
             "Collect prompts to this JSON file instead of generating answers "
@@ -118,6 +136,16 @@ def main() -> None:
         ocr_engine = EasyOcrEngine()
         image_loader = lambda path: Image.open(path).convert("RGB")  # noqa: E731
 
+    query_translator = None
+    if args.translate_query:
+        from mvr.enrichment.qna_translation import HelsinkiViEnTranslator
+
+        translator_kwargs = {"allow_model_download": args.allow_translation_download}
+        if args.translation_model:
+            translator_kwargs["model_name"] = args.translation_model
+        query_translator = HelsinkiViEnTranslator(**translator_kwargs)
+        print(f"[retrieval query EN] {query_translator.translate(event_description)}")
+
     if args.export_prompts is not None:
         collector = CollectingBackend()
         answer_reasoner = AnswerReasoner(collector)
@@ -140,6 +168,7 @@ def main() -> None:
         image_loader=image_loader,
         objects_path_resolver=objects_path_resolver,
         min_object_confidence=args.min_object_confidence,
+        query_translator=query_translator,
     )
 
     if not results:
