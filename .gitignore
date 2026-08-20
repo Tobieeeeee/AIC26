@@ -46,6 +46,7 @@ artifacts/verification/*
 !artifacts/verification/.gitkeep
 
 # Model weights / databases / generated outputs
+/models/
 *.pt
 *.pth
 *.ckpt

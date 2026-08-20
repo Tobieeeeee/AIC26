@@ -16,6 +16,22 @@ enrichment:
   lab6_embedding_model: RN50
   lab6_embedding_pretrained: openai
   lab6_embedding_batch_size: 64
+  asr:
+    mode: per_keyframe
+    sample_rate: 16000
+    pre_seconds: 3.0
+    post_seconds: 3.0
+    vad:
+      provider: silero
+      threshold: 0.5
+      min_speech_duration_ms: 250
+      min_silence_duration_ms: 150
+      merge_gap_ms: 250
+    provider: chunkformer
+    model: khanhld/chunkformer-ctc-large-vie
+    revision: 14a68262fa5fc6d497cb107c18bc5a9308ef21ca
+    device: cpu
+    allow_download: false
 
 retrieval:
   lexical_backend: elasticsearch
