@@ -38,7 +38,7 @@ Temporal expansion (`temporal_radius`) is opt-in and off by default. See
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -87,6 +87,108 @@ def shift_keyframe_id(keyframe_id: str, offset: int) -> str | None:
     if shifted < 0:
         return None
     return f"{prefix}{shifted:0{len(digits)}d}"
+
+
+class KeyframeNeighbourIndex:
+    """Temporal neighbours by position in time, not by arithmetic on an id.
+
+    ``shift_keyframe_id`` bumps the trailing number of the id string, which
+    works only when ids form one running sequence per video, as the
+    organizer's do (``"027"`` -> ``"028"``). It breaks completely on the ids
+    this repo's own pipeline produces::
+
+        L21_V010_S0007_K01
+                 ^^^^ ^^^
+                 shot  index WITHIN that shot
+
+    ``make_keyframes`` takes the shot midpoint and samples extra frames only
+    past ``--long-shot-seconds`` (default 12s), so ordinary 3-8 second shots
+    yield exactly ``K01``. Asking for ``+1`` requests ``K02``, which does not
+    exist, and expansion returns nothing -- silently, for most frames. The
+    real next keyframe is ``S0008_K01``.
+
+    ``frame_idx`` is the honest ordering: it is the frame's position in the
+    original video, it is already in every Task05A document, and it does not
+    care how the id is spelled.
+
+    Deliberately does NOT stop at shot boundaries. It sounds right -- a
+    neighbour in another shot is another scene -- but the one measured case
+    argues against it: p1-15's answer sat 4 keyframes past the retrieval hit,
+    roughly 9 seconds of broadcast news, which almost certainly crosses
+    several shots. Stopping there would discard the only hit this system has
+    ever scored.
+    """
+
+    def __init__(self, ordered: Mapping[str, Sequence[str]]) -> None:
+        self._ordered = {video: list(ids) for video, ids in ordered.items()}
+        self._positions = {
+            video: {keyframe_id: position for position, keyframe_id in enumerate(ids)}
+            for video, ids in self._ordered.items()
+        }
+
+    @classmethod
+    def from_records(
+        cls, records: "Iterable[Mapping[str, Any]]"
+    ) -> "KeyframeNeighbourIndex":
+        """Build from records identifying a video, a keyframe, and a time.
+
+        The keyframe key may be ``keyframe_id`` (Task05A documents) or
+        ``frame_id`` (this repo's persisted search metadata); the ordering
+        key may be ``frame_idx`` or ``timestamp``. Both orderings increase
+        monotonically within a video and therefore agree, so accepting
+        either lets the index be built from what is actually on disk --
+        the persisted FAISS metadata stores ``timestamp`` and no
+        ``frame_idx``, and re-encoding 166,550 vectors to add one field
+        would be absurd.
+        """
+        by_video: dict[str, list[tuple[float, str]]] = {}
+        for record in records:
+            video_id = str(record["video_id"])
+            keyframe_id = record.get("keyframe_id", record.get("frame_id"))
+            order = record.get("frame_idx", record.get("timestamp"))
+            if keyframe_id is None or order is None:
+                raise ValueError(
+                    "record needs a keyframe key (keyframe_id/frame_id) and an "
+                    f"ordering key (frame_idx/timestamp), got {sorted(record)}"
+                )
+            by_video.setdefault(video_id, []).append((float(order), str(keyframe_id)))
+        return cls(
+            {
+                video_id: [keyframe_id for _, keyframe_id in sorted(entries)]
+                for video_id, entries in by_video.items()
+            }
+        )
+
+    @classmethod
+    def from_documents(cls, root: Path | str) -> "KeyframeNeighbourIndex":
+        """Build from a directory of Task05A documents (``<root>/<video>/<kf>.json``)."""
+        import json
+
+        return cls.from_records(
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in sorted(Path(root).rglob("*.json"))
+        )
+
+    def neighbour(self, video_id: str, keyframe_id: str, offset: int) -> str | None:
+        """The keyframe ``offset`` positions away in time, or ``None``.
+
+        ``None`` for an unknown video or keyframe, and for an offset that
+        runs off either end -- never a guess, matching the frame resolver's
+        policy that only verified identities may be emitted.
+        """
+        positions = self._positions.get(video_id)
+        if positions is None:
+            return None
+        position = positions.get(keyframe_id)
+        if position is None:
+            return None
+        target = position + offset
+        if target < 0:
+            return None
+        ordered = self._ordered[video_id]
+        if target >= len(ordered):
+            return None
+        return ordered[target]
 
 
 @dataclass(frozen=True)
@@ -188,6 +290,7 @@ def search_qna(
     query_translator: QueryTranslator | None = None,
     temporal_radius: int = 0,
     neighbour_cost: float = 1.0,
+    neighbour_index: KeyframeNeighbourIndex | None = None,
     overfetch: int | None = None,
 ) -> list[QnaCandidate]:
     """Run one Q&A query against the existing retrieval baseline plus the
@@ -252,9 +355,15 @@ def search_qna(
         hit = raw_hits[rank_index]
         video_id = str(hit["video_id"])
         hit_keyframe_id = str(hit["frame_id"])
-        keyframe_id = (
-            hit_keyframe_id if offset == 0 else shift_keyframe_id(hit_keyframe_id, offset)
-        )
+        if offset == 0:
+            keyframe_id: str | None = hit_keyframe_id
+        elif neighbour_index is not None:
+            keyframe_id = neighbour_index.neighbour(video_id, hit_keyframe_id, offset)
+        else:
+            # No index: fall back to arithmetic on the id string, which only
+            # holds for one running sequence per video. See
+            # KeyframeNeighbourIndex for why shot-scoped ids defeat it.
+            keyframe_id = shift_keyframe_id(hit_keyframe_id, offset)
         if keyframe_id is None:
             continue
         frame_id = resolve_original_frame_id(

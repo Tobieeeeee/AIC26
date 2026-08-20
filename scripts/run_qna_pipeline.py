@@ -136,7 +136,7 @@ def main() -> None:
     from mvr.enrichment.qna_batch import CollectingBackend, write_prompt_batch
     from mvr.indexing.faiss_index import FaissIndex
     from mvr.ingestion.aic_dataset import AicDatasetRegistry
-    from mvr.retrieval.qna import search_qna
+    from mvr.retrieval.qna import KeyframeNeighbourIndex, search_qna
     from mvr.retrieval.semantic import SemanticRetriever
 
     text = args.query_file.read_text(encoding="utf-8")
@@ -180,6 +180,13 @@ def main() -> None:
         if known is not None:
             return known
         return aic_registry.keyframe_path(video_id, keyframe_id)
+
+    # Expand to neighbours by position in time rather than by arithmetic on
+    # the id string. Same result where the ids happen to be one running
+    # sequence per video, but it also refuses to walk off the end of a video
+    # -- and it is the only thing that works at all for shot-scoped ids like
+    # "<video>_S0007_K01", which this repo's own ingestion produces.
+    neighbour_index = KeyframeNeighbourIndex.from_records(index.metadata)
 
     ocr_engine = None
     image_loader = None
@@ -225,6 +232,7 @@ def main() -> None:
         query_translator=query_translator,
         temporal_radius=args.temporal_radius,
         neighbour_cost=args.neighbour_cost,
+        neighbour_index=neighbour_index,
     )
 
     if not results:
