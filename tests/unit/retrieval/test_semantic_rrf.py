@@ -63,7 +63,7 @@ def test_duplicate_keeps_best_rank_and_surfaces_warning() -> None:
     )
     assert fused.results[0].provider_ranks == {"beit3": 2}
     assert fused.results[0].rrf_score == pytest.approx(1 / 62)
-    assert fused.warnings == ("duplicate:beit3:K1",)
+    assert fused.warnings == ("duplicate:beit3:V1/K1",)
 
 
 def test_empty_and_missing_provider_policies() -> None:

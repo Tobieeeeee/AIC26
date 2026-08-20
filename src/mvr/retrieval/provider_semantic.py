@@ -190,7 +190,14 @@ class IndependentSemanticRetriever:
                 {"encoding_ms": encoding_ms, "search_ms": search_ms}
             )
         higher_is_better = self._higher_is_better(contract.metric)
-        best: dict[str, BackendSearchHit] = {}
+        # Deduplicated on (video_id, keyframe_id). This exists to collapse a
+        # backend returning the same vector twice, but on keyframe_id alone
+        # it also collapsed *different* frames: the organizer's 166,550
+        # keyframes carry 632 distinct ids, so a top-100 could return at most
+        # 632 rows and, in practice, dropped every hit whose id was already
+        # claimed by a better-scoring frame in another video. Silently --
+        # the loser looks like a duplicate, not a discarded result.
+        best: dict[tuple[str, str], BackendSearchHit] = {}
         required_metadata = {
             "keyframe_id",
             "video_id",
@@ -201,16 +208,17 @@ class IndependentSemanticRetriever:
         for hit in hits:
             if not np.isfinite(hit.score) or not required_metadata.issubset(hit.metadata):
                 continue
-            keyframe_id = str(hit.metadata["keyframe_id"])
-            current = best.get(keyframe_id)
+            identity = (str(hit.metadata["video_id"]), str(hit.metadata["keyframe_id"]))
+            current = best.get(identity)
             if current is None or (
                 hit.score > current.score if higher_is_better else hit.score < current.score
             ):
-                best[keyframe_id] = hit
+                best[identity] = hit
         ordered = sorted(
             best.values(),
             key=lambda hit: (
                 -hit.score if higher_is_better else hit.score,
+                str(hit.metadata["video_id"]),
                 str(hit.metadata["keyframe_id"]),
             ),
         )[:effective_top_k]

@@ -230,16 +230,19 @@ def load_mapping(artifact: EmbeddingProviderArtifact) -> list[EmbeddingMappingRe
         raise EmbeddingArtifactError(f"cannot read mapping: {artifact.mapping_path}") from exc
 
     records: list[EmbeddingMappingRecord] = []
-    seen_ids: set[str] = set()
+    # See offline._validate_inputs: identity is (video_id, keyframe_id).
+    seen_ids: set[tuple[str, str]] = set()
     for line_number, row in enumerate(rows, start=2):
         keyframe_id = (row.get("keyframe_id") or "").strip()
         video_id = (row.get("video_id") or "").strip()
         feature_file = (row.get("feature_file") or "").strip()
         if not keyframe_id or not video_id or not feature_file:
             raise EmbeddingArtifactError(f"mapping row {line_number} has empty identity/locator")
-        if keyframe_id in seen_ids:
-            raise EmbeddingArtifactError(f"duplicate keyframe_id in mapping: {keyframe_id}")
-        seen_ids.add(keyframe_id)
+        if (video_id, keyframe_id) in seen_ids:
+            raise EmbeddingArtifactError(
+                f"duplicate keyframe in mapping: {video_id}/{keyframe_id}"
+            )
+        seen_ids.add((video_id, keyframe_id))
         try:
             feature_index = int(row["feature_index"])
         except (TypeError, ValueError) as exc:

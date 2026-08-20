@@ -233,8 +233,13 @@ def test_missing_image_fails_before_encoder_or_manifest(tmp_path):
 def test_duplicate_keyframe_id_is_rejected(tmp_path):
     keyframes = tmp_path / "keyframes"
     rows = _rows(keyframes)
+    # Same video AND same keyframe id. Setting only the id left the two
+    # rows in different videos, which is the organizer's normal case --
+    # every video numbers its keyframes from 001 -- so the assertion
+    # demanded that a valid pair be rejected.
     rows[1]["keyframe_id"] = rows[0]["keyframe_id"]
-    with pytest.raises(OfflineEmbeddingError, match="duplicate keyframe_id"):
+    rows[1]["video_id"] = rows[0]["video_id"]
+    with pytest.raises(OfflineEmbeddingError, match="duplicate keyframe"):
         extract_embedding_artifacts(
             rows,
             keyframe_root=keyframes,

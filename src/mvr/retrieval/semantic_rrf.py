@@ -82,10 +82,22 @@ def fuse_semantic_rankings(
     warnings: list[str] = [
         f"missing_provider:{model_id}" for model_id in missing
     ]
-    identities: dict[str, tuple[str, int, int | None, float]] = {}
-    provider_ranks: dict[str, dict[str, int]] = {}
+    # Everything below is keyed on (video_id, keyframe_id).
+    #
+    # On keyframe_id alone this quietly threw away results. The organizer's
+    # 166,550 keyframes carry 632 distinct ids -- "034" is in 842 videos --
+    # so `best_in_provider` treated two different frames as one, kept the
+    # better-ranked, and recorded the loss as a `duplicate:` warning rather
+    # than an error. Measured on two providers each returning L21_V001/034
+    # and L21_V002/034: two candidates in, one result out.
+    #
+    # It was correct while the team generated its own ids
+    # (`L21_V001_S0007_K01` spells the video into the id) and became wrong
+    # when the organizer's keyframes were adopted as canonical identity.
+    identities: dict[tuple[str, str], tuple[int, int | None, float]] = {}
+    provider_ranks: dict[tuple[str, str], dict[str, int]] = {}
     for model_id in participating:
-        best_in_provider: dict[str, ProviderSemanticResult] = {}
+        best_in_provider: dict[tuple[str, str], ProviderSemanticResult] = {}
         for item in ranked_lists[model_id]:
             if item.model_id != model_id:
                 raise SemanticRrfError(
@@ -93,42 +105,45 @@ def fuse_semantic_rankings(
                 )
             if isinstance(item.rank, bool) or not isinstance(item.rank, int) or item.rank <= 0:
                 raise SemanticRrfError(
-                    f"provider {model_id} has invalid rank for {item.keyframe_id}: {item.rank}"
+                    f"provider {model_id} has invalid rank for "
+                    f"{item.video_id}/{item.keyframe_id}: {item.rank}"
                 )
-            previous = best_in_provider.get(item.keyframe_id)
+            key = (item.video_id, item.keyframe_id)
+            previous = best_in_provider.get(key)
             if previous is not None:
-                warnings.append(f"duplicate:{model_id}:{item.keyframe_id}")
+                warnings.append(f"duplicate:{model_id}:{item.video_id}/{item.keyframe_id}")
                 if item.rank >= previous.rank:
                     continue
-            best_in_provider[item.keyframe_id] = item
-        for keyframe_id, item in best_in_provider.items():
-            identity = (item.video_id, item.frame_id, item.shot_id, item.timestamp)
-            existing = identities.get(keyframe_id)
+            best_in_provider[key] = item
+        for key, item in best_in_provider.items():
+            identity = (item.frame_id, item.shot_id, item.timestamp)
+            existing = identities.get(key)
             if existing is not None and existing != identity:
                 raise SemanticRrfError(
-                    f"conflicting identity metadata for keyframe_id {keyframe_id}"
+                    f"conflicting identity metadata for keyframe {key[0]}/{key[1]}"
                 )
-            identities[keyframe_id] = identity
-            provider_ranks.setdefault(keyframe_id, {})[model_id] = item.rank
+            identities[key] = identity
+            provider_ranks.setdefault(key, {})[model_id] = item.rank
 
     scores = {
-        keyframe_id: sum(
-            1.0 / (rrf_k + rank) for rank in ranks.values()
-        )
-        for keyframe_id, ranks in provider_ranks.items()
+        key: sum(1.0 / (rrf_k + rank) for rank in ranks.values())
+        for key, ranks in provider_ranks.items()
     }
+    # The final tiebreak is the full identity, so ordering stays total and
+    # deterministic: keyframe_id alone does not order the corpus.
     ordered_ids = sorted(
         scores,
-        key=lambda keyframe_id: (
-            -scores[keyframe_id],
-            min(provider_ranks[keyframe_id].values()),
-            -len(provider_ranks[keyframe_id]),
-            keyframe_id,
+        key=lambda key: (
+            -scores[key],
+            min(provider_ranks[key].values()),
+            -len(provider_ranks[key]),
+            key,
         ),
     )[:top_k]
     results = []
-    for output_rank, keyframe_id in enumerate(ordered_ids, start=1):
-        video_id, frame_id, shot_id, timestamp = identities[keyframe_id]
+    for output_rank, key in enumerate(ordered_ids, start=1):
+        video_id, keyframe_id = key
+        frame_id, shot_id, timestamp = identities[key]
         results.append(
             FusedSemanticResult(
                 rank=output_rank,
@@ -137,8 +152,8 @@ def fuse_semantic_rankings(
                 frame_id=frame_id,
                 shot_id=shot_id,
                 timestamp=timestamp,
-                rrf_score=scores[keyframe_id],
-                provider_ranks=dict(sorted(provider_ranks[keyframe_id].items())),
+                rrf_score=scores[key],
+                provider_ranks=dict(sorted(provider_ranks[key].items())),
             )
         )
     return SemanticRrfResponse(

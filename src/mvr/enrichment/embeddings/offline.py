@@ -55,16 +55,20 @@ def load_canonical_keyframes(mapping_csv: Path) -> list[dict[str, str]]:
 
 
 def _validate_inputs(rows: Sequence[Mapping[str, str]], keyframe_root: Path) -> None:
-    seen: set[str] = set()
+    # Keyed on (video_id, keyframe_id). A keyframe_id does not identify a
+    # keyframe: the organizer's 166,550 keyframes carry 632 distinct ids,
+    # one per video, so "034" is in 842 of them. On the id alone this raised
+    # at the second video and no extraction could start at all.
+    seen: set[tuple[str, str]] = set()
     for index, row in enumerate(rows, start=2):
         keyframe_id = (row.get("keyframe_id") or "").strip()
         video_id = (row.get("video_id") or "").strip()
         image_path = (row.get("image_path") or "").strip()
         if not keyframe_id or not video_id or not image_path:
             raise OfflineEmbeddingError(f"mapping row {index} has an empty required field")
-        if keyframe_id in seen:
-            raise OfflineEmbeddingError(f"duplicate keyframe_id: {keyframe_id}")
-        seen.add(keyframe_id)
+        if (video_id, keyframe_id) in seen:
+            raise OfflineEmbeddingError(f"duplicate keyframe: {video_id}/{keyframe_id}")
+        seen.add((video_id, keyframe_id))
         if not _SAFE_SHARD_ID.fullmatch(video_id):
             raise OfflineEmbeddingError(f"unsafe video_id for shard filename: {video_id}")
         resolved_root = keyframe_root.resolve()
