@@ -44,6 +44,7 @@ artifacts/metrics/*
 !artifacts/metrics/.gitkeep
 artifacts/verification/*
 !artifacts/verification/.gitkeep
+artifacts/processed_*/
 
 # Model weights / databases / generated outputs
 /models/

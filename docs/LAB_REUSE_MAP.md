@@ -190,6 +190,20 @@ Two behavior notes for KIS-owned code (not lab-derived):
     `frame_idx` column as the original-video frame ID. The `n` ordinal and keyframe
     filenames are used only as lookup keys, never as the submitted frame ID.
 
+## Task05A v1 — Task04 artifact consumption without new lab migration
+
+Task05A v1 migrates no new lab implementation and does not change Task04 model
+behavior. It consumes immutable Task04 artifacts and adds index-document
+preparation under `src/mvr/indexing/`.
+
+| Task04 artifact/component | Task05A target | Behavior preserved / compatibility handling | Verification |
+|---|---|---|---|
+| Task04B OCR per-keyframe JSON (`text`, `conf`, `support_count`) | `indexing.filtering`, `indexing.task05a` | Does not rerun OCR. Applies only the approved Task05A confidence, temporal-support/high-confidence, punctuation-only, normalization, and intra-keyframe dedup gates. Numeric-only text and Vietnamese diacritics are preserved. | VERIFIED |
+| Task04C ASR artifact contract | `indexing.filtering`, `indexing.task05a` | No ASR artifact exists in the current real corpus, so no fields/confidence values are invented. Empty ASR output and `confidence_filter_active=false` are recorded. | VERIFIED |
+| Task04A Faster R-CNN JSON and explicit person/car counts | `indexing.filtering.project_object_metadata` | Does not rerun inference, thresholding, or NMS. Existing person/car counts are authoritative; other retained Task04 labels are counted and projected deterministically. | VERIFIED |
+| Task04A CLIP `.npy` vectors and mapping CSV | `indexing.validation.validate_clip_vector`, `indexing.task05a` | Does not rerun CLIP or suppress near-duplicates. Validates numeric dtype, dimension, finiteness, row existence, and full canonical identity before emitting a vector reference. | VERIFIED |
+| Task04 branch identity | `indexing.task05a` | The real CLIP/Object artifacts use a 643-row TransNetV2 mapping while the selected canonical OCR/ingest mapping has 677 rows. Task05A reports incompatible/missing rows and leaves their branch flags false; it does not repair or positional-join them. | VERIFIED |
+
 ## Status values
 
 ```text
