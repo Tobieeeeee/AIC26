@@ -1,0 +1,158 @@
+"""Task05B v1 default-BM25 retrieval over Task05A lexical projections."""
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from mvr.indexing.lexical_index import SEARCHABLE_FIELDS
+
+
+@dataclass(frozen=True)
+class LexicalSearchHit:
+    rank: int
+    score: float
+    keyframe_id: str
+    video_id: str
+    frame_idx: int
+    shot_id: int | None
+    timestamp: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rank": self.rank,
+            "score": self.score,
+            "keyframe_id": self.keyframe_id,
+            "video_id": self.video_id,
+            "frame_idx": self.frame_idx,
+            "shot_id": self.shot_id,
+            "timestamp": self.timestamp,
+        }
+
+
+def build_task05b_lexical_request(query: str, *, top_k: int = 5) -> dict[str, Any]:
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query must be non-empty")
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
+        raise ValueError("top_k must be positive")
+    return {
+        "size": top_k,
+        "query": {
+            "multi_match": {
+                "query": query.strip(),
+                "fields": list(SEARCHABLE_FIELDS),
+            }
+        },
+        "sort": [
+            {"_score": {"order": "desc"}},
+            {"keyframe_id": {"order": "asc"}},
+        ],
+        "_source": [
+            "keyframe_id",
+            "video_id",
+            "frame_idx",
+            "shot_id",
+            "timestamp",
+        ],
+    }
+
+
+def _source_string(source: Mapping[str, Any], field: str) -> str:
+    value = source.get(field)
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"malformed search response: {field} must be non-empty")
+    return value
+
+
+def _source_int(
+    source: Mapping[str, Any],
+    field: str,
+    *,
+    nullable: bool = False,
+) -> int | None:
+    value = source.get(field)
+    if nullable and value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(f"malformed search response: {field} must be an integer")
+    return value
+
+
+def map_task05b_lexical_response(
+    response: Any,
+    *,
+    top_k: int,
+) -> list[LexicalSearchHit]:
+    if not isinstance(response, Mapping):
+        response = getattr(response, "body", response)
+    if not isinstance(response, Mapping):
+        raise RuntimeError("malformed search response")
+    hits_wrapper = response.get("hits")
+    if not isinstance(hits_wrapper, Mapping):
+        raise RuntimeError("malformed search response: missing hits")
+    raw_hits = hits_wrapper.get("hits")
+    if not isinstance(raw_hits, list):
+        raise RuntimeError("malformed search response: hits.hits must be a list")
+
+    mapped: list[tuple[float, str, str, int, int | None, float]] = []
+    for raw_hit in raw_hits[:top_k]:
+        if not isinstance(raw_hit, Mapping):
+            raise RuntimeError("malformed search response hit")
+        source = raw_hit.get("_source")
+        if not isinstance(source, Mapping):
+            raise RuntimeError("malformed search response: missing _source")
+        keyframe_id = _source_string(source, "keyframe_id")
+        if raw_hit.get("_id") != keyframe_id:
+            raise RuntimeError("malformed search response: _id/keyframe_id mismatch")
+        raw_score = raw_hit.get("_score")
+        if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
+            raise RuntimeError("malformed search response: score must be numeric")
+        score = float(raw_score)
+        if not math.isfinite(score):
+            raise RuntimeError("malformed search response: score must be finite")
+        timestamp_value = source.get("timestamp")
+        if (
+            isinstance(timestamp_value, bool)
+            or not isinstance(timestamp_value, (int, float))
+            or not math.isfinite(float(timestamp_value))
+        ):
+            raise RuntimeError("malformed search response: timestamp must be finite")
+        mapped.append(
+            (
+                score,
+                keyframe_id,
+                _source_string(source, "video_id"),
+                int(_source_int(source, "frame_idx")),
+                _source_int(source, "shot_id", nullable=True),
+                float(timestamp_value),
+            )
+        )
+
+    mapped.sort(key=lambda item: (-item[0], item[1]))
+    return [
+        LexicalSearchHit(
+            rank=rank,
+            score=item[0],
+            keyframe_id=item[1],
+            video_id=item[2],
+            frame_idx=item[3],
+            shot_id=item[4],
+            timestamp=item[5],
+        )
+        for rank, item in enumerate(mapped, start=1)
+    ]
+
+
+def search_task05b_lexical(
+    client: Any,
+    query: str,
+    *,
+    index_name: str,
+    top_k: int = 5,
+) -> list[LexicalSearchHit]:
+    if not isinstance(index_name, str) or not index_name.strip():
+        raise ValueError("index_name must be non-empty")
+    request = build_task05b_lexical_request(query, top_k=top_k)
+    response = client.search(index=index_name, **request)
+    return map_task05b_lexical_response(response, top_k=top_k)
