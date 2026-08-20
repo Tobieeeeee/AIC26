@@ -1,6 +1,6 @@
 # Multi-embedding final release report
 
-Date: 2026-08-21  
+Date: 2026-08-21
 Branch: `feat/rebuild-embedding-models`
 
 ## Release decision
@@ -51,7 +51,7 @@ license locks are in `configs/embedding_providers.json`.
 | Task 13 — deterministic model-level RRF | `064b254` |
 | Task 14 — fasttest and seven ablations | `1c0850e` |
 | Task 15 — approval-gated full-corpus workflow | `6fdf92b` |
-| Task 16 — final release gates | recorded after this report is committed |
+| Task 16 — final release gates | `cd6f534` |
 
 No remote push or PR was created.
 
