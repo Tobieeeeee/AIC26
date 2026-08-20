@@ -243,10 +243,38 @@ ATLAS wins both:
 In a competition where parameters cannot be re-tuned per query, a flat
 plateau beats a knife edge that never actually wins.
 
-**Lucifer stays worth revisiting** if the query set grows to include chains
-where an event genuinely cannot be found — that is the only condition under
-which it can differ from ATLAS, and even `suspect_arrest`, chosen for its
-near-identical events, did not create it. U-CESE is clearly behind (0.344)
+### Lucifer's skip mechanism, measured in isolation
+
+Because the six benchmark queries never trigger a skip, the mechanism was
+verified separately in
+`test_lucifer_skip_beats_atlas_when_an_unfindable_event` — deliberately
+kept out of the benchmark mean, since an impossible query is not a
+representative one and averaging it in would distort the comparison rather
+than inform it.
+
+The test takes `house_fire_alley`'s real first and third events and splices
+an arctic scene between them that nothing in a Vietnamese city bulletin can
+match. Its ground-truth marker for that event is set beyond the end of the
+video: unscoreable by construction, so the maximum achievable score is 2/3
+and what is actually being measured is whether the impossible event drags
+its two findable neighbours down with it.
+
+| strategy | best `L21_V018` chain | final |
+|---|---|---|
+| ATLAS | `(13108, 16534, 17730)` | 0.000 |
+| Lucifer | `(13108, `**`None`**`, 17730)` | **0.267** |
+
+Lucifer declines to invent a frame; ATLAS has no skip path and is
+structurally forced to pick one, and that forced pick constrains its other
+two markers. So the mechanism is real and it does pay off — **but only
+under a condition none of the six realistic queries produced.** That is why
+it does not change the production default.
+
+**Lucifer stays worth revisiting** if real competition queries turn out to
+contain unfindable events more often than this benchmark suggests — that is
+the only condition under which it can beat ATLAS, and even `suspect_arrest`,
+chosen for its near-identical events, did not create it.
+U-CESE is clearly behind (0.344)
 even after its parameter fix, consistent with the lab's own description of
 it as a fast manual-review suggestion generator rather than a primary
 scored strategy.
@@ -273,10 +301,12 @@ scored strategy.
   corpus.
 - **Semantic-only backend.** The hybrid/Elasticsearch path was not
   benchmarked.
-- **Lucifer's skip mechanism is still barely exercised.** Under realistic
-  gap budgets it never fires at all, which is precisely why it ties ATLAS.
-  A query where an event is genuinely unfindable would be needed to measure
-  it, and none of the six produce that condition.
+- **Lucifer's skip mechanism never fires on realistic queries.** Under
+  realistic gap budgets a full chain is always available, which is precisely
+  why it ties ATLAS. It is verified separately (see above) on a
+  deliberately impossible query, where it does beat ATLAS — but no
+  representative query in this set produces that condition, so how often it
+  would matter in the real competition is unknown.
 
 ## Trigger condition for the deferred fourth strategy
 

@@ -167,22 +167,18 @@ def _build_benchmark_queries():
     ]
 
 
-def test_trake_real_data_benchmark_across_all_strategies(tmp_path: Path) -> None:
+def _real_services():
+    """Real dependencies wired as production/Phase 05 expects -- NOT
+    LazyFaissSemanticService (the KIS API route's wrapper): that class only
+    exposes .search(), not the .text_encoder/.index pair search_trake()
+    needs for dense scoring, so a real SemanticRetriever is used directly."""
     from mvr.enrichment.embeddings.openclip import OpenClipEncoder
-    from mvr.evaluation.trake_benchmark import run_trake_benchmark_query, summarize_trake_benchmark
     from mvr.indexing.faiss_index import FaissIndex
     from mvr.ingestion.aic_dataset import AicDatasetRegistry
     from mvr.retrieval.semantic import SemanticRetriever
-    from mvr.retrieval.trake import search_trake
-    from mvr.retrieval.trake_align import AtlasAlignment, LuciferAlignment, UceseAlignment
 
     dataset_root = _require_dataset_root()
     index_root = _require_real_index()
-
-    # Real dependencies, wired exactly as production/Phase 05 expects -- NOT
-    # LazyFaissSemanticService (the KIS API route's wrapper): that class only
-    # exposes .search(), not the .text_encoder/.index pair search_trake()
-    # needs for dense scoring, so a real SemanticRetriever is used directly.
     registry = AicDatasetRegistry(dataset_root)
     faiss_index = FaissIndex.load(index_root)
     encoder = OpenClipEncoder(
@@ -190,7 +186,82 @@ def test_trake_real_data_benchmark_across_all_strategies(tmp_path: Path) -> None
         pretrained=faiss_index.manifest["pretrained"],
         device="cpu",
     )
-    semantic_service = SemanticRetriever(encoder, faiss_index)
+    return SemanticRetriever(encoder, faiss_index), registry
+
+
+def test_lucifer_skip_beats_atlas_when_an_event_is_genuinely_unfindable() -> None:
+    """Lucifer's skip mechanism is its only structural difference from ATLAS,
+    and the six benchmark queries never trigger it: under realistic gap
+    budgets a full chain is always available, so the two tie exactly.
+
+    This test creates the one condition that separates them -- a chain whose
+    middle event does not exist in the video at all -- and is kept OUT of the
+    benchmark mean on purpose: it is a deliberately impossible query, not a
+    representative one, so averaging it in would distort the strategy
+    comparison rather than inform it.
+
+    The middle event has no correct frame, so its ground-truth marker is set
+    beyond the end of the video: it is unscoreable by construction and the
+    maximum achievable score is 2/3. What is being measured is whether the
+    impossible event drags its two findable neighbours down with it.
+    """
+    from mvr.evaluation.trake import TrakeGroundTruth, evaluate_trake
+    from mvr.retrieval.trake import search_trake
+    from mvr.retrieval.trake_align import AtlasAlignment, LuciferAlignment
+    from mvr.retrieval.trake_events import TrakeEventQuery, TrakeQuery, translate_gap_phrase
+
+    semantic_service, registry = _real_services()
+
+    # house_fire_alley's real first and third events, with an arctic scene
+    # spliced in between -- nothing in a Vietnamese city news bulletin can
+    # match it.
+    events = (
+        "fire trucks arriving at a house fire scene on a street",
+        "a polar bear standing alone on an arctic iceberg in falling snow",
+        "firefighters climbing up to put out a fire near tangled electrical wires",
+    )
+    query = TrakeQuery(
+        events=tuple(TrakeEventQuery(i, text) for i, text in enumerate(events, start=1)),
+        gaps=tuple(translate_gap_phrase("") for _ in range(2)),
+    )
+    gt = TrakeGroundTruth(video_id="L21_V018", frames=(11068, 999_999, 11600))
+
+    results = {}
+    for name, strategy in (("atlas", AtlasAlignment()), ("lucifer", LuciferAlignment())):
+        chains = search_trake(
+            query,
+            alignment_strategy=strategy,
+            semantic_service=semantic_service,
+            aic_registry=registry,
+        )
+        best = [chain for chain in chains if chain.video_id == "L21_V018"]
+        results[name] = (evaluate_trake(chains, gt), best[0] if best else None)
+
+    atlas_score, atlas_chain = results["atlas"]
+    lucifer_score, lucifer_chain = results["lucifer"]
+    print(
+        f"\nunfindable-event query: atlas={atlas_score.final_score:.3f} "
+        f"chain={atlas_chain.frames if atlas_chain else None} | "
+        f"lucifer={lucifer_score.final_score:.3f} "
+        f"chain={lucifer_chain.frames if lucifer_chain else None}"
+    )
+
+    assert lucifer_chain is not None and atlas_chain is not None
+    # The mechanism itself: Lucifer declines to invent a frame for the
+    # impossible event; ATLAS is structurally forced to pick one.
+    assert lucifer_chain.frames[1] is None, "Lucifer should skip the unfindable event"
+    assert atlas_chain.frames[1] is not None, "ATLAS has no skip path and must pick something"
+    # And declining to guess is not merely cosmetic -- it scores at least as
+    # well, because the forced pick constrains ATLAS's other two markers.
+    assert lucifer_score.final_score >= atlas_score.final_score
+
+
+def test_trake_real_data_benchmark_across_all_strategies(tmp_path: Path) -> None:
+    from mvr.evaluation.trake_benchmark import run_trake_benchmark_query, summarize_trake_benchmark
+    from mvr.retrieval.trake import search_trake
+    from mvr.retrieval.trake_align import AtlasAlignment, LuciferAlignment, UceseAlignment
+
+    semantic_service, registry = _real_services()
 
     queries = _build_benchmark_queries()
     strategies = {
