@@ -1,0 +1,21 @@
+FROM python:3.12-slim
+
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+
+RUN python -m pip install --no-cache-dir \
+      --index-url "${TORCH_INDEX_URL}" \
+      torch==2.5.1 torchvision==0.20.1 \
+    && python -m pip install --no-cache-dir \
+      einops==0.8.1 \
+      ftfy==6.3.1 \
+      huggingface-hub==0.36.2 \
+      numpy==2.1.2 \
+      Pillow==11.0.0 \
+      regex==2026.7.19 \
+      timm==1.0.15 \
+    && python -m pip check
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /repo
