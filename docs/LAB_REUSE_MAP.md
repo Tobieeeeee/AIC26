@@ -190,6 +190,40 @@ Two behavior notes for KIS-owned code (not lab-derived):
     `frame_idx` column as the original-video frame ID. The `n` ordinal and keyframe
     filenames are used only as lookup keys, never as the submitted frame ID.
 
+---
+
+The TRAKE competition-ready work (branch `feat/trake-competition-ready`; see
+`docs/CODEX_PROGRESS.md` and `docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md`) also
+migrates no new lab code in Phase 01. It makes two unavoidable behavior
+changes to existing KIS-owned production code, required before TRAKE code
+depends on it (see `docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md` for full root
+cause and blast-radius detail):
+
+25. **Resolver exception type:** `ingestion.aic_dataset._normalize_ref()`
+    (and its second caller, `keyframe_path()`'s directory scan) raised a
+    bare `ValueError` for a non-numeric keyframe reference instead of
+    `MissingFrameMappingError`. Because `retrieval.kis.resolve_original_frame_id()`
+    only ever caught `MissingFrameMappingError`, a candidate whose
+    `keyframe_id` was this repo's own (non-numeric) pipeline format crashed
+    the entire `search_kis()` call instead of being dropped, and this
+    crash's likelihood scales with the number of `search_kis()` calls per
+    query — exactly what TRAKE's k-events-per-query shape does. Fixed at
+    the root: `_normalize_ref()` now raises `MissingFrameMappingError`.
+    Purely an exception-type correction; no change to which frame
+    references successfully resolve. Verified: full regression suite green,
+    including the (corrected) pre-existing regression test for this exact
+    crash path.
+26. **`search_kis()`'s `top_k` ceiling raised 100 -> 500:** TRAKE's
+    per-event video-shortlisting step (Phase 05) needs a wider candidate
+    pool than plain KIS's Top-100 qualifying-round cap, mirroring the
+    course lab's own 500-wide `candidate_videos()` shortlisting step. The
+    public `POST /search/kis` HTTP contract (`api/schemas.py`) is
+    unaffected — this raises only the ceiling of `search_kis()`'s own
+    Python parameter validation; the default and all existing callers at
+    `top_k<=100` are unchanged. Verified via a new test asserting
+    `top_k=300` now succeeds, alongside all pre-existing `top_k` boundary
+    tests passing unmodified.
+
 ## Status values
 
 ```text

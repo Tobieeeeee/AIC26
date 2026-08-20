@@ -391,13 +391,29 @@ Blockers:
 
 # Current active phase
 
-None. Phases 01–06 (reuse baseline) are COMPLETE and merged via PR #1. The
-Textual KIS competition-ready task pack (Tasks 01–09) is also COMPLETE on
-`feat/kis-competition-ready`.
+**TRAKE competition-ready task pack — Phase 01 in progress (2026-08-20).**
+Phases 01–06 (reuse baseline) are COMPLETE and merged via PR #1. The
+Textual KIS competition-ready task pack (Tasks 01–09) is COMPLETE and
+merged into `main` via PR #2, including the PR #2 hardening pass.
 
-Next action: human review of `feat/kis-competition-ready`.
+TRAKE (Temporal Retrieval & Alignment of Key Events, `TRAKE = KIS × k
+events, same video, correct order`) was explicitly approved by the project
+owner as post-baseline work, the same way the KIS pack was. It follows a
+separate local task pack at `agent_task/trake_competition_ready/` (kept out
+of Git, same convention as the KIS pack), executed one gated phase at a
+time with a stop-and-report boundary after each. Branch:
+`feat/trake-competition-ready`.
 
-Stop gate: do not begin Q&A, TRAKE, Frontend, VLM, advanced reranking, or
+Note on `AGENTS.md` §13: "Temporal Retrieval" and "Sequence Retrieval" are
+listed there as out of scope, but that list is explicitly scoped to *"the
+First Reuse Baseline"*, which is complete (see above). The KIS pack already
+established the same precedent — §13 also lists "submission adapter" as out
+of scope, yet `src/mvr/submission/kis_export.py` shipped on `main` as
+approved post-baseline work. TRAKE follows the same path.
+
+Next action: execute the TRAKE task pack, one phase at a time.
+
+Stop gate: do not begin Q&A, Frontend, VLM, advanced reranking, or
 deployment without explicit approval.
 
 # Resume instruction

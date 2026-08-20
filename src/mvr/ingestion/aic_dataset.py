@@ -42,14 +42,24 @@ class MissingFrameMappingError(LookupError):
 
 
 def _normalize_ref(value: str) -> str:
-    """Normalize a keyframe reference (CSV ``n``, "003.jpg", or "003") to one key."""
+    """Normalize a keyframe reference (CSV ``n``, "003.jpg", or "003") to one key.
+
+    Raises ``MissingFrameMappingError`` (never a bare ``ValueError``) for a
+    non-numeric reference: a reference this repo's own pipeline produced
+    (e.g. ``"L01_V001_S0002_K01"``) is not a verified AIC mapping, and
+    callers rely on this specific exception type to drop the candidate
+    rather than crash -- see ``resolve_original_frame_id()`` in
+    ``mvr.retrieval.kis``.
+    """
     text = str(value).strip()
     if text.lower().endswith(".jpg"):
         text = text[: -len(".jpg")]
     try:
         return str(int(text))
     except ValueError as exc:
-        raise ValueError(f"keyframe reference must be numeric, got {value!r}") from exc
+        raise MissingFrameMappingError(
+            f"keyframe reference must be numeric, got {value!r}; refusing to guess"
+        ) from exc
 
 
 class AicDatasetRegistry:
@@ -91,7 +101,7 @@ class AicDatasetRegistry:
             try:
                 if _normalize_ref(candidate.stem) == target:
                     return candidate
-            except ValueError:
+            except MissingFrameMappingError:
                 continue
         return None
 

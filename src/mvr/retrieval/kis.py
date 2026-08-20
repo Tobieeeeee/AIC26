@@ -120,16 +120,16 @@ def search_kis(
     """
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query must be a non-empty string")
-    if not 1 <= top_k <= 100:
-        raise ValueError("top_k must be between 1 and 100")
+    if not 1 <= top_k <= 500:
+        raise ValueError("top_k must be between 1 and 500")
     if semantic_service is None and multimodal_service is None:
         raise RuntimeError("no KIS retrieval backend is configured")
 
     # Overfetch beyond top_k so that unresolvable/duplicate hits don't starve
     # the final result count below what the corpus could actually provide.
     # Deliberately NOT capped at top_k itself (that would defeat overfetch
-    # entirely once top_k reaches its own max of 100); the internal pool may
-    # legitimately exceed the requested output size, up to 300 at top_k=100.
+    # entirely once top_k reaches its own max); the internal pool may
+    # legitimately exceed the requested output size, up to 1500 at top_k=500.
     fetch_count = overfetch if overfetch is not None else max(top_k * 3, 30)
 
     if multimodal_service is not None:
