@@ -62,7 +62,7 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
   query: '',
   scene2Query: '',
   taskMode: 'KIS',
-  modelEngine: 'use_all',
+  modelEngine: 'use all',
   simReorder: true,
   advancedMode: false,
   isLoading: false,
