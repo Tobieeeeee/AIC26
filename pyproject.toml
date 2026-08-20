@@ -54,6 +54,14 @@ beit3 = [
     "torchvision>=0.17,<1",
     "transformers>=4.39,<5",
 ]
+metaclip2 = [
+    "numpy>=1.26,<3",
+    "Pillow==11.0.0",
+    "sentencepiece==0.2.0",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+    "transformers==4.57.1",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -7,6 +7,7 @@ from mvr.enrichment.feature_extraction import (
 )
 from mvr.enrichment.embeddings.openclip import OpenClipEncoder
 from mvr.enrichment.embeddings.beit3 import Beit3ImageEncoder
+from mvr.enrichment.embeddings.metaclip2 import MetaClip2ImageEncoder
 from mvr.enrichment.embeddings.artifacts import sha256_file
 from mvr.enrichment.embeddings.offline import (
     extract_embedding_artifacts,
@@ -37,7 +38,7 @@ def main():
         "--embedding-providers",
         type=parse_embedding_providers,
         default=("clip",),
-        help="Comma-separated image embedding provider IDs (currently clip, beit3)",
+        help="Comma-separated image embedding provider IDs (clip, beit3, metaclip2)",
     )
     parser.add_argument(
         "--provider-specs",
@@ -49,6 +50,16 @@ def main():
         "--beit3-checkpoint",
         type=Path,
         help="Local locked BEiT-3 checkpoint; never downloaded implicitly",
+    )
+    parser.add_argument(
+        "--metaclip2-model",
+        type=str,
+        help="Pinned local/cache model path; defaults to locked Hugging Face ID",
+    )
+    parser.add_argument(
+        "--allow-model-downloads",
+        action="store_true",
+        help="Explicitly allow pinned provider downloads (disabled by default)",
     )
     parser.add_argument("--rcnn-model", type=str, default="fasterrcnn_resnet50_fpn", help="Faster R-CNN model")
     parser.add_argument("--rcnn-threshold", type=float, default=0.5, help="Faster R-CNN score threshold")
@@ -104,9 +115,27 @@ def main():
             checkpoint_sha256=sha256_file(args.beit3_checkpoint),
         )
 
+    def run_metaclip2():
+        specs = load_provider_specs(args.provider_specs)
+        spec = specs.get("metaclip2")
+        encoder = MetaClip2ImageEncoder(
+            spec=spec,
+            model_location=args.metaclip2_model,
+            device=args.device,
+            allow_download=args.allow_model_downloads,
+        )
+        extract_embedding_artifacts(
+            keyframes,
+            keyframe_root=args.keyframe_root,
+            embeddings_root=args.output / "embeddings",
+            spec=spec,
+            encoder=encoder,
+            batch_size=args.embedding_batch_size,
+        )
+
     run_selected_embedding_providers(
         args.embedding_providers,
-        {"clip": run_clip, "beit3": run_beit3},
+        {"clip": run_clip, "beit3": run_beit3, "metaclip2": run_metaclip2},
     )
     
     # 2. Faster R-CNN

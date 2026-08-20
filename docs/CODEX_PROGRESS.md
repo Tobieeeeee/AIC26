@@ -712,13 +712,44 @@ Limitations:
   real five-keyframe target is correctly skipped. Mocked extraction exercises
   the complete artifact writer and audit contract without fake model weights.
 
+# Multi-Embedding Task 07 — MetaCLIP-2 Offline Extraction
+
+Status: COMPLETE (real-weight fasttest unavailable locally)
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added a lazy Transformers adapter for the pinned distilled MetaCLIP-2
+  worldwide B/16 model and its same-revision processor.
+- Kept model access local-only by default, with explicit download opt-in and
+  fail-closed errors; no fallback to CLIP, BEiT-3, or another MetaCLIP variant.
+- Reused the provider-neutral atomic writer/auditor while retaining the locked
+  MetaCLIP-2 dimension, preprocessing, normalization, checkpoint revision, and
+  independent output namespace.
+- Wired independent runner selection, optional dependencies, provider-specific
+  negative/deterministic tests, external-weight fasttest, and operator guide.
+
+Verification:
+
+- Task 07 plus Tasks 01–06 relevant regression: 96 passed, 1 skipped
+  (external checkpoint).
+- Unified runner/CLI focused suite: 14 passed; CLI help/import smoke passed in
+  the project PyTorch image.
+- Python compilation and `git diff --check`: passed.
+
+Limitations:
+
+- No pinned MetaCLIP-2 cache exists locally, so real five-keyframe inference is
+  skipped rather than downloading weights or fabricating an inference result.
+
 # Current active phase
 
-Multi-Embedding Task 06 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 07 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 07 MetaCLIP-2 offline extraction using only the locked
+Next action: begin Task 08 Perception Encoder offline extraction using only the locked
 provider contract.
 
 The user explicitly approved automatic continuation through Task 16 for this
