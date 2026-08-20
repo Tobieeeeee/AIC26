@@ -13,7 +13,8 @@ from mvr.enrichment.ocr.scene_text import (
     group_candidates,
     load_keyframes,
     get_shot_boundaries,
-    generate_sampling_frames
+    generate_sampling_frames,
+    resolve_video_path,
 )
 
 
@@ -376,7 +377,7 @@ def process_dataset_docker_ocr(
 
     keyframes = load_keyframes(mapping_csv)
     shots_json = mapping_csv.with_name("shots.json")
-    shot_boundaries = get_shot_boundaries(shots_json) if shots_json.exists() else {}
+    shot_boundaries = get_shot_boundaries(shots_json)
 
     frames_to_extract, samples_by_keyframe = generate_sampling_frames(keyframes, shot_boundaries)
 
@@ -392,11 +393,16 @@ def process_dataset_docker_ocr(
         by_video[kf.video_id].append(kf)
 
     for video_id, v_frames in by_video.items():
-        video_path = video_root / f"{video_id}.mp4"
+        # Searches the raw organizer layout too, where videos are nested as
+        # Videos_L21_a/video/<video_id>.mp4 across 14 directories. Raising
+        # here was already right -- unlike scene_text, which warned and
+        # continued -- but the flat-only lookup meant it raised on the real
+        # download for every video.
+        video_path = resolve_video_path(video_root, video_id)
 
-        if not video_path.exists():
+        if video_path is None:
             raise FileNotFoundError(
-                f"Missing source video: {video_path}"
+                f"Missing source video: {video_id}.mp4 under {video_root}"
             )
 
         video_frames_dir = frames_dir / video_id

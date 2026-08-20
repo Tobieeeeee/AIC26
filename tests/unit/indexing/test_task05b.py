@@ -135,16 +135,46 @@ def test_source_loader_selects_only_authoritative_lexical_true(tmp_path: Path) -
     assert [document.keyframe_id for document in source.documents] == ["frame-a"]
 
 
-def test_bulk_action_uses_keyframe_id_as_elasticsearch_id() -> None:
+def test_bulk_action_identifies_a_document_by_video_and_keyframe() -> None:
+    """This asserted `_id == "frame-a"` -- the keyframe id alone -- and was
+    right while the team generated its own ids: `L21_V001_S0007_K01` spells
+    the video into the id, so it could not collide.
+
+    The organizer's ids do not. 166,550 keyframes carry 632 distinct ids
+    ("034" is in 842 videos, one per video), so `_id = keyframe_id` would
+    index every document and keep 632, each overwritten ~263 times, without
+    a single error anywhere.
+    """
     projected = project_task05a_lexical_document(_document("frame-a"))
     assert projected is not None
     assert list(lexical_bulk_actions([projected], index_name="lexical")) == [
         {
             "_index": "lexical",
-            "_id": "frame-a",
+            "_id": "L21_V010/frame-a",
             "_source": projected.to_source(),
         }
     ]
+
+
+def test_the_same_keyframe_id_in_two_videos_gets_two_documents() -> None:
+    """The case the fixture could not produce: `_document` hardcodes
+    L21_V010, so every test built one video and a collision had nowhere to
+    happen."""
+    first = project_task05a_lexical_document(
+        {**_document("034"), "video_id": "L21_V001"}
+    )
+    second = project_task05a_lexical_document(
+        {**_document("034"), "video_id": "L21_V002"}
+    )
+    assert first is not None and second is not None
+
+    ids = [
+        action["_id"]
+        for action in lexical_bulk_actions([first, second], index_name="lexical")
+    ]
+
+    assert ids == ["L21_V001/034", "L21_V002/034"]
+    assert len(set(ids)) == 2
 
 
 class _Indices:
@@ -192,7 +222,7 @@ def test_build_indexes_and_audits_identity(tmp_path: Path) -> None:
         return 1, []
 
     def scan_fn(client, *, index):
-        return [{"_id": "frame-a"}]
+        return [{"_id": "L21_V010/frame-a"}]
 
     result = build_lexical_index(
         client,
@@ -209,7 +239,7 @@ def test_build_indexes_and_audits_identity(tmp_path: Path) -> None:
     assert result.manifest["source_document_count"] == 1
     assert result.manifest["lexical_indexable_count"] == 1
     assert result.manifest["indexed_count"] == 1
-    assert captured_actions[0]["_id"] == "frame-a"
+    assert captured_actions[0]["_id"] == "L21_V010/frame-a"
     create_call = next(call for call in client.calls if call[0] == "create")
     assert create_call[1]["mappings"] == LEXICAL_MAPPINGS
 
@@ -223,7 +253,7 @@ def test_recreate_deletes_existing_index_before_create(tmp_path: Path) -> None:
         index_name="lexical",
         recreate=True,
         bulk_fn=lambda *args, **kwargs: (1, []),
-        scan_fn=lambda *args, **kwargs: [{"_id": "frame-a"}],
+        scan_fn=lambda *args, **kwargs: [{"_id": "L21_V010/frame-a"}],
     )
     operation_names = [name for name, _ in client.calls]
     assert operation_names[:3] == ["exists", "delete", "create"]
