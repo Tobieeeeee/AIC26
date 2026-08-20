@@ -31,6 +31,11 @@ def _document(index: int) -> dict:
         "shot_id": index + 1,
         "frame_idx": 100 + index,
         "timestamp": 4.0 + index,
+        # Required since the Q&A track began reading these documents as
+        # answering context: without a path there is no frame to show a
+        # VLM or a human reviewer. build_index_documents emits it, so a
+        # fixture without one is a document the pipeline cannot produce.
+        "image_path": f"keyframes/{keyframe_id}.jpg",
         "ocr": {"texts": [], "joined": ""},
         "asr": {"texts": [], "joined": ""},
         "objects": {"labels": [], "counts": {}},

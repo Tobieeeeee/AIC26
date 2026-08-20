@@ -134,6 +134,8 @@ def _fixture(tmp_path: Path):
         document = {
             "schema_version": "1.0",
             **row,
+            # See test_fasttest_baseline._document: required field.
+            "image_path": f"keyframes/{row['keyframe_id']}.jpg",
             "ocr": {"texts": [], "joined": ""},
             "asr": {"texts": [], "joined": ""},
             "objects": {"labels": [], "counts": {}},

@@ -53,6 +53,7 @@ def validate_task05a_document(document: Mapping[str, Any]) -> None:
         "shot_id",
         "frame_idx",
         "timestamp",
+        "image_path",
         "ocr",
         "asr",
         "objects",
@@ -70,6 +71,11 @@ def validate_task05a_document(document: Mapping[str, Any]) -> None:
         raise Task05AValidationError("frame_idx must be an integer")
     if document["frame_idx"] < 0 or not _is_finite_number(document["timestamp"]):
         raise Task05AValidationError("invalid frame_idx/timestamp")
+    # A blank path would satisfy a presence check while helping no consumer:
+    # Q&A candidate review and the search UI both need to render the frame,
+    # and neither can recover the path from anything else in the document.
+    if not isinstance(document["image_path"], str) or not document["image_path"].strip():
+        raise Task05AValidationError("image_path must be a non-empty string")
 
     for section in ("ocr", "asr", "objects", "clip", "indexability"):
         if not isinstance(document[section], Mapping):

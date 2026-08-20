@@ -251,6 +251,8 @@ def test_document_validator_enforces_aggregate_vector_flag(
         "shot_id": 1,
         "frame_idx": 1,
         "timestamp": 0.1,
+        # See test_fasttest_baseline._document: required field.
+        "image_path": "keyframes/K1.jpg",
         "ocr": {"texts": [], "joined": ""},
         "asr": {"texts": [], "joined": ""},
         "objects": {"labels": [], "counts": {}},

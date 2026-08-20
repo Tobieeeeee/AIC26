@@ -62,6 +62,37 @@ class KisSearchResponse(BaseModel):
     results: list[KisHit]
 
 
+class QnaSearchRequest(BaseModel):
+    event_description: str = Field(min_length=1)
+    question: str = Field(min_length=1)
+    top_k: int = Field(default=100, ge=1, le=100)
+
+    _validate_event_description = field_validator("event_description")(_require_non_blank)
+    _validate_question = field_validator("question")(_require_non_blank)
+
+
+class QnaHit(BaseModel):
+    rank: int = Field(ge=1)
+    video_id: str
+    frame_id: int
+    score: float
+    keyframe_id: str | None = None
+    timestamp: float | None = None
+    answer: str
+    answer_source: Literal["context-grounded", "knowledge-grounded", "mixed"]
+    #: Served URL for this candidate's keyframe (e.g. "/keyframes/L21_V001/003.jpg"),
+    #: so a reviewer can see the frame. ``None`` when the API cannot serve it --
+    #: a raw local filesystem path is never exposed here.
+    image_path: str | None = None
+
+
+class QnaSearchResponse(BaseModel):
+    event_description: str
+    question: str
+    count: int = Field(ge=0)
+    results: list[QnaHit]
+
+
 class SearchHit(BaseModel):
     rank: int = Field(ge=1)
     frame_id: str
