@@ -753,6 +753,93 @@ Consequences, stated plainly so nobody re-derives them later:
   realistically as the synthesized query, which must be generated from
   media_info rather than the frame's own OCR or it leaks the answer.
 
+## 3k. Reading Task05A documents, and neighbours by time
+
+Task05A (`src/mvr/indexing/task05a.py`) landed on `main` and emits one
+document per keyframe carrying OCR, ASR, object counts, CLIP row and the
+competition `frame_idx`. Q&A now reads it instead of assembling context
+itself.
+
+### What the reader replaces
+
+Query-time context was: open the keyframe JPEG, run EasyOCR, read the
+organizer objects JSON -- **~6.7s per candidate on CPU**, which is why
+every measurement before this ran with `--no-ocr`. `frame_context_from_record()`
+replaces all of it with a file read.
+
+Taking `frame_idx` from the document also removes `resolve_original_frame_id`
+from this path, and with it the failure mode where an unresolvable mapping
+silently produced `frame_id=None` for every candidate.
+
+### ASR, which Q&A never had
+
+The document's `asr.joined` reaches the prompt as its **own line**, not
+merged into the OCR blob: a question about what someone *said* and one about
+what is *written* rest on different evidence, and collapsing them lets the
+model answer from the wrong source with nothing marking the swap.
+
+This is aimed at a specific measured failure. Of the three verified queries,
+p1-19 asks what two lines of poetry are -- and the poetry is *recited*.
+
+### Objects arrive as counts without detections
+
+Task05A aggregates objects down to `labels` + `counts`, keeping no
+per-detection confidence or box. `FrameContext` holds those in
+`aggregated_object_counts` rather than back-filling a `FrameObjects`:
+inventing detections to satisfy a dataclass would fabricate data the frame
+never had.
+
+### image_path was being dropped
+
+`CanonicalKeyframe` reads `image_path` from the mapping CSV (task05a.py:69,
+:240) and `_project_document` left it out, so the one field that lets a
+consumer *see* the frame was discarded at the last step. Q&A ranks up to 100
+candidates and the flow ends in human or VLM review; nobody adjudicates a
+frame from `frame_idx: 578`, and a search UI cannot render an integer. Now
+emitted and required as a non-blank string by `validate_task05a_document`.
+
+### Neighbours by time, not by arithmetic on an id
+
+`shift_keyframe_id` bumps the trailing number of the id string. That holds
+for organizer keyframes, one running sequence per video (`"027"` ->
+`"028"`). It breaks completely on the ids this repo's own ingestion
+produces:
+
+```
+L21_V010_S0007_K01
+         ^^^^ ^^^
+         shot  index WITHIN that shot
+```
+
+`make_keyframes` takes the shot midpoint and samples extra frames only past
+`--long-shot-seconds` (default 12s), so ordinary 3-8 second shots yield
+exactly `K01`. Asking for `+1` requests `K02`, which does not exist, and
+**expansion returns nothing -- silently, for most frames**. The real next
+keyframe is `S0008_K01`.
+
+`KeyframeNeighbourIndex` orders each video's keyframes by time and steps
+through that ordering. It accepts `frame_idx` or `timestamp` (both increase
+monotonically within a video, so they agree) and `keyframe_id` or
+`frame_id`, which lets it be built from the persisted FAISS metadata --
+that stores `timestamp` and no `frame_idx`, and re-encoding 166,550 vectors
+to add one field would be absurd.
+
+Verified against the real 166,550-keyframe index:
+
+| | old `shift_keyframe_id` | `KeyframeNeighbourIndex` |
+|---|---|---|
+| `L30_V072` `030` `+4` | `034` | `034` |
+| `L30_V072` `041` `+1` (last keyframe) | **`042`** -- does not exist | `None` |
+
+Same answer where it worked, and it stops at the end of a video instead of
+inventing an id that then fails to resolve.
+
+**Deliberately does not stop at shot boundaries.** It sounds right -- a
+neighbour in another shot is another scene -- but the one measured case
+argues against it: p1-15's answer sat 4 keyframes past the retrieval hit,
+roughly 9 seconds of broadcast news, almost certainly across several shots.
+Stopping there would discard the only hit this system has ever scored.
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report
