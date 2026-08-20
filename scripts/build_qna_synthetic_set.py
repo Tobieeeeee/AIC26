@@ -32,9 +32,84 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
+def _report(cases, kept, *, output: Path, frames: int, payload_extra: dict) -> None:
+    import json as _json
+
+    dropped = len(cases) - len(kept)
+    payload = {
+        "format": "mvr-qna-synthetic-set-v1",
+        "note": (
+            "Ground truth built backwards from known frames. Measures ANSWER "
+            "EXTRACTION only -- not retrieval, not human-judged correctness. "
+            "Scores are not comparable with the real ground-truth queries. "
+            "See mvr.evaluation.qna_synthetic."
+        ),
+        "frames_sampled": frames,
+        **payload_extra,
+        "cases": [
+            {
+                "video_id": c.video_id,
+                "keyframe_id": c.keyframe_id,
+                "frame_id": c.frame_id,
+                "question": c.question,
+                "answer": c.answer,
+                "ocr_text": c.ocr_text,
+                "template": c.template,
+            }
+            for c in kept
+        ],
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(_json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    print(f"sinh duoc : {len(cases)} case tu {frames} frame")
+    print(f"bi loai   : {dropped} (dap an lap tren nhieu frame)")
+    print(f"GIU LAI   : {len(kept)} case -> {output}")
+    by_template: dict[str, int] = {}
+    for case in kept:
+        by_template[case.template] = by_template.get(case.template, 0) + 1
+    for template, count in sorted(by_template.items()):
+        print(f"   {template}: {count}")
+
+
+def _run_from_cache(args, drop_ambiguous_cases, generate_cases) -> None:
+    """Rules over already-computed OCR -- no model, no images, no waiting."""
+    import json as _json
+
+    payload = _json.loads(args.ocr_cache.read_text(encoding="utf-8"))
+    if payload.get("format") != "mvr-qna-ocr-cache-v1":
+        raise SystemExit(f"unexpected cache format: {payload.get('format')!r}")
+    frames = payload["frames"]
+    print(f"cache: {len(frames)} frame (khong chay OCR)")
+
+    cases = []
+    for frame in frames:
+        cases.extend(
+            generate_cases(
+                frame["ocr_text"],
+                video_id=frame["video_id"],
+                keyframe_id=frame["keyframe_id"],
+                frame_id=frame["frame_id"],
+            )
+        )
+    kept = drop_ambiguous_cases(cases, max_occurrences=args.max_occurrences)
+    _report(
+        cases, kept, output=args.output, frames=len(frames),
+        payload_extra={"source": str(args.ocr_cache), "max_occurrences": args.max_occurrences},
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build a synthetic Q&A benchmark")
-    parser.add_argument("--index", type=Path, required=True)
+    parser.add_argument(
+        "--ocr-cache", type=Path, default=None,
+        help=(
+            "Read OCR from a cache built by build_qna_ocr_cache.py instead of "
+            "running EasyOCR. Turns a 1.8-hour rule-iteration loop into a "
+            "sub-second one; --index and --dataset-root are then unused."
+        ),
+    )
+    parser.add_argument("--index", type=Path, default=None)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--frames", type=int, default=400,
@@ -59,12 +134,20 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260821)
     args = parser.parse_args()
 
+    from mvr.evaluation.qna_synthetic import drop_ambiguous_cases, generate_cases
+
+    if args.ocr_cache is not None:
+        _run_from_cache(args, drop_ambiguous_cases, generate_cases)
+        return
+
     from PIL import Image
 
     from mvr.enrichment.ocr.easyocr_engine import EasyOcrEngine
-    from mvr.evaluation.qna_synthetic import drop_ambiguous_cases, generate_cases
     from mvr.indexing.faiss_index import FaissIndex
     from mvr.ingestion.aic_dataset import AicDatasetRegistry, MissingFrameMappingError
+
+    if args.index is None:
+        raise SystemExit("pass --index, or --ocr-cache to skip OCR entirely")
 
     index = FaissIndex.load(args.index)
     registry = (

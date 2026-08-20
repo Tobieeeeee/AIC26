@@ -64,11 +64,21 @@ _ADMIN_UNITS: tuple[tuple[str, str], ...] = (
 )
 
 #: A proper-noun run: capitalized words, allowing Vietnamese diacritics.
-#: Capped at four words -- "Thành phố Hồ Chí Minh" is the longest shape that
-#: occurs, and without a cap the rule swallowed a whole seven-word headline
-#: ("SỰ CỦA TA TRONG KHÁNG CHIẾN CHỐNG PHÁP") as a district name on a real
-#: frame.
-_NAME = r"[A-ZÀ-ỸĐ][^\s,.;:]*(?:\s+[A-ZÀ-ỸĐ][^\s,.;:]*){0,3}"
+#: Capped at TWO. Measured over 571 cached real frames, every correct name
+#: was one or two words -- Tân Bình, Hóc Môn, Gia Lai, Chư Pơng, Giang Ly,
+#: Kursk -- and a longer run only ever meant the match had walked into the
+#: next phrase ("THỦ ĐỨC NGAy SAcH" for "Thủ Đức"). Names like "Hồ Chí Minh"
+#: are lost; precision matters more here than recall, because a wrong
+#: expectation in a benchmark is worse than a smaller benchmark.
+_NAME = r"[A-ZÀ-ỸĐ][^\s,.;:]*(?:\s+[A-ZÀ-ỸĐ][^\s,.;:]*){0,1}"
+
+#: Vietnamese vowels including every diacritic form. Every Vietnamese and
+#: transliterated place-name syllable contains one, so a token without a
+#: vowel is OCR damage -- real output produced "TỈNH Qws".
+_VOWELS = frozenset(
+    "aàáảãạăằắẳẵặâầấẩẫậ" "eèéẻẽẹêềếểễệ" "iìíỉĩị"
+    "oòóỏõọôồốổỗộơờớởỡợ" "uùúủũụưừứửữự" "yỳýỷỹỵ"
+)
 
 #: Dates, tolerating the separator soup real OCR produces -- the p1-15 frame
 #: came back as "04.08/2024", one dot and one slash.
@@ -99,6 +109,31 @@ _folded_stopwords = frozenset(_fold(word) for word in _NOT_IN_A_NAME)
 
 def _normalize_answer(text: str) -> str:
     return re.sub(r"\s+", " ", _fold(text)).strip()
+
+
+#: The line `mvr.enrichment.qna_answer._build_context_block` writes the frame's
+#: OCR onto. Matching it lets already-paid-for OCR be recovered from prompt
+#: batches instead of recomputed at ~6.7s per frame.
+_PROMPT_OCR_RE = re.compile(r"^Detected on-screen text \(OCR\): (.*)$", re.MULTILINE)
+
+#: What that block writes when a frame yielded no text at all.
+_NO_OCR_PLACEHOLDER = "(no OCR text detected)"
+
+
+def ocr_text_from_prompt(prompt: str) -> str | None:
+    """Recover a frame's OCR text from a generated answer prompt.
+
+    Returns ``None`` when the prompt has no OCR line -- meaning nothing was
+    recorded -- and ``""`` when the frame was read and genuinely held no
+    text. A frame nobody processed and a frame with nothing on it are
+    different facts, and collapsing them would quietly shrink the corpus
+    while looking like a corpus full of blank frames.
+    """
+    match = _PROMPT_OCR_RE.search(prompt)
+    if match is None:
+        return None
+    text = match.group(1).strip()
+    return "" if text == _NO_OCR_PLACEHOLDER else text
 
 
 @dataclass(frozen=True)
@@ -159,7 +194,10 @@ def _administrative_cases(
             answer = name.group(0).strip()
             if not answer:
                 continue
-            if any(_fold(word) in _folded_stopwords for word in answer.split()):
+            words = answer.split()
+            if any(_fold(word) in _folded_stopwords for word in words):
+                continue
+            if not all(any(ch.lower() in _VOWELS for ch in word) for word in words):
                 continue
             cases.append(
                 SyntheticQnaCase(
