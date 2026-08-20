@@ -38,6 +38,7 @@ from pathlib import Path
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
+
 def normalize_text(value: object) -> str:
     """Casefold, strip Vietnamese diacritics, and collapse whitespace."""
     decomposed = unicodedata.normalize("NFD", str(value)).casefold()

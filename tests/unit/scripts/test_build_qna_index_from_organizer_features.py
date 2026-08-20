@@ -72,6 +72,38 @@ def test_load_video_aligns_vectors_keyframes_and_mapping(tmp_path) -> None:
     assert all(m["video_id"] == "L24_V011" for m in metadata)
 
 
+def test_load_video_returns_exactly_unit_norm_vectors(tmp_path) -> None:
+    """The organizer ships float16, whose rounding leaves norms at ~0.9995 --
+    outside FaissIndex's 1e-4 tolerance. They must come back exactly unit."""
+    _, assets = _make_dataset(tmp_path, n=3)
+
+    features, _ = load_video(assets)
+
+    norms = np.linalg.norm(features, axis=1)
+    assert np.allclose(norms, 1.0, atol=1e-6)
+
+
+def test_renormalize_preserves_direction(tmp_path) -> None:
+    from scripts.build_qna_index_from_organizer_features import renormalize
+
+    raw = np.array([[3.0, 4.0], [0.6, 0.8]], dtype=np.float32)
+
+    out = renormalize(raw)
+
+    assert np.allclose(np.linalg.norm(out, axis=1), 1.0)
+    # direction unchanged: both rows point the same way as their input
+    assert np.allclose(out[0], [0.6, 0.8])
+    assert np.allclose(out[1], [0.6, 0.8])
+
+
+def test_renormalize_does_not_emit_nan_for_a_zero_row() -> None:
+    from scripts.build_qna_index_from_organizer_features import renormalize
+
+    out = renormalize(np.zeros((1, 4), dtype=np.float32))
+
+    assert np.isfinite(out).all()
+
+
 def test_load_video_rejects_more_vectors_than_keyframes(tmp_path) -> None:
     """A silent truncation here would attach every vector to the wrong
     frame, so the mismatch must be fatal."""

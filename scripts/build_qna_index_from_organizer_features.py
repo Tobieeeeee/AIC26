@@ -40,7 +40,14 @@ import numpy as np
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-ORGANIZER_MODEL_NAME = "ViT-B-32"
+# OpenAI's CLIP uses QuickGELU activations. In open_clip, pairing plain
+# "ViT-B-32" with pretrained="openai" builds the model with the WRONG
+# activation and only emits a UserWarning -- text embeddings then sit in a
+# slightly different space from the organizer's image features. Measured on
+# a real query, the mismatched pairing scored 0.3527 against 0.3642 for the
+# correct one, i.e. silently degraded rather than broken. Always name the
+# quickgelu variant for these weights.
+ORGANIZER_MODEL_NAME = "ViT-B-32-quickgelu"
 ORGANIZER_PRETRAINED = "openai"
 
 
@@ -113,7 +120,23 @@ def load_video(assets: VideoAssets) -> tuple[np.ndarray, list[dict]]:
         }
         for keyframe, row in zip(keyframes, rows, strict=True)
     ]
-    return features.astype(np.float32, copy=False), metadata
+    return renormalize(features.astype(np.float32, copy=False)), metadata
+
+
+def renormalize(features: np.ndarray) -> np.ndarray:
+    """Restore exact unit norm after the organizer's float16 storage.
+
+    The shipped vectors are already normalized CLIP embeddings, but float16
+    rounding leaves their norms at ~0.9995 -- outside ``FaissIndex``'s 1e-4
+    tolerance. Rescaling to exact unit length restores the intended value
+    rather than altering it, and cannot change ranking: inner product over
+    unit vectors is cosine similarity, which is invariant to per-vector
+    scale.
+    """
+    norms = np.linalg.norm(features, axis=1, keepdims=True)
+    # Guard against a degenerate all-zero row rather than emitting NaN.
+    norms[norms == 0] = 1.0
+    return np.ascontiguousarray(features / norms, dtype=np.float32)
 
 
 def main() -> None:
