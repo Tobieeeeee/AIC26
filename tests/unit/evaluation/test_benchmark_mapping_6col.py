@@ -109,22 +109,47 @@ def test_timestamp_comes_from_pts_time(tmp_path: Path) -> None:
     assert [r["timestamp"] for r in rows] == ["68.56", "69.8", "71.04"]
 
 
-def test_shot_id_is_blank_when_no_boundaries_are_supplied(tmp_path: Path) -> None:
-    """The organizer ships no shot identity. Blank is explicit and auditable;
-    inventing one is not. `lexical_index` already accepts a null shot_id."""
+def test_shot_id_and_ordinal_are_always_integers(tmp_path: Path) -> None:
+    """Nine call sites across task05a, feature_extraction, docker_ocr,
+    scene_text and the ASR mapping do `int(row["shot_id"])`. This column was
+    blank when no boundaries were supplied, which made the mapping unloadable
+    by every one of them -- see `test_task05a_can_load_what_this_writes`."""
     rows = _rows(
         build_aic_keyframe_mapping_csv(
             _organizer_root(tmp_path), tmp_path / "m.csv", ["L30_V072"]
         )
     )
 
-    assert {r["shot_id"] for r in rows} == {""}
+    for row in rows:
+        int(row["shot_id"])
+        int(row["ordinal"])
+
+
+def test_without_boundaries_each_organizer_keyframe_is_its_own_shot(
+    tmp_path: Path,
+) -> None:
+    """The honest degradation. The organizer's keyframes are already
+    shot-aware -- spacing runs 0.04s to 7.0s with 30-150 distinct values per
+    video, which is cut-driven -- so this restates their sampling rather than
+    inventing cuts. The cost is that OCR dedupe within a shot has nothing to
+    group, so every keyframe is read independently; collapsing the video into
+    one shot instead would make temporal OCR sample one anchor for ~190
+    keyframes."""
+    rows = _rows(
+        build_aic_keyframe_mapping_csv(
+            _organizer_root(tmp_path), tmp_path / "m.csv", ["L30_V072"]
+        )
+    )
+
+    assert [r["shot_id"] for r in rows] == ["33", "34", "35"]
+    assert [r["ordinal"] for r in rows] == ["1", "1", "1"]
 
 
 def test_shot_boundaries_assign_shot_id_by_frame_idx(tmp_path: Path) -> None:
     """Keeps the team's TransNetV2 work: it supplies boundaries while the
     organizer supplies identity. A keyframe belongs to the shot whose frame
-    range contains its frame_idx."""
+    range contains its frame_idx. Numbered from 1, like the team's own
+    detectors, so a shot_id means the same thing on both sides."""
     rows = _rows(
         build_aic_keyframe_mapping_csv(
             _organizer_root(tmp_path),
@@ -134,10 +159,30 @@ def test_shot_boundaries_assign_shot_id_by_frame_idx(tmp_path: Path) -> None:
         )
     )
 
-    assert [r["shot_id"] for r in rows] == ["0", "1", "1"]
+    assert [r["shot_id"] for r in rows] == ["1", "2", "2"]
 
 
-def test_a_keyframe_outside_every_shot_gets_no_shot_id(tmp_path: Path) -> None:
+def test_ordinal_counts_position_within_the_shot(tmp_path: Path) -> None:
+    """`ingestion.keyframes` numbers keyframes 1..n inside each shot, and
+    `feature_extraction.sort_keyframes_deterministically` sorts on
+    (video_id, shot_id, ordinal). A mapping built from organizer data has to
+    number them the same way or that sort is not deterministic."""
+    rows = _rows(
+        build_aic_keyframe_mapping_csv(
+            _organizer_root(tmp_path),
+            tmp_path / "m.csv",
+            ["L30_V072"],
+            shot_boundaries={"L30_V072": [(0, 1720), (1721, 1800)]},
+        )
+    )
+
+    assert [r["ordinal"] for r in rows] == ["1", "1", "2"]
+
+
+def test_a_keyframe_outside_every_shot_gets_the_sentinel(tmp_path: Path) -> None:
+    """Zero cannot collide with a real shot, because the team's detectors
+    number from 1. Dropping the row would lose a frame the competition may
+    be scored on; a blank would not load at all."""
     rows = _rows(
         build_aic_keyframe_mapping_csv(
             _organizer_root(tmp_path),
@@ -147,7 +192,7 @@ def test_a_keyframe_outside_every_shot_gets_no_shot_id(tmp_path: Path) -> None:
         )
     )
 
-    assert [r["shot_id"] for r in rows] == ["0", "", ""]
+    assert [r["shot_id"] for r in rows] == ["1", "0", "0"]
 
 
 def test_the_split_organizer_layout_is_searched_too(tmp_path: Path) -> None:
@@ -234,3 +279,61 @@ def test_a_partially_missing_corpus_still_succeeds(tmp_path: Path) -> None:
     )
 
     assert len(rows) == 3
+
+
+# -- the consumers, run for real ---------------------------------------
+#
+# Asserting on the columns proved nothing: the first version of this
+# adapter satisfied every column assertion above and still could not be
+# loaded by a single downstream module, because `shot_id` was blank and
+# they all do `int(row["shot_id"])`. Reading a file's header is not the
+# same as reading the file. These hand the output to the real readers.
+
+
+def test_task05a_can_load_what_this_writes(tmp_path: Path) -> None:
+    """The consumer the whole adapter exists to feed."""
+    from mvr.indexing.task05a import load_canonical_mapping
+
+    output = build_aic_keyframe_mapping_csv(
+        _organizer_root(tmp_path), tmp_path / "m.csv", ["L30_V072"]
+    )
+
+    keyframes = load_canonical_mapping(output)
+
+    assert [k.keyframe_id for k in keyframes] == ["033", "034", "035"]
+    assert [k.frame_idx for k in keyframes] == [1714, 1745, 1776]
+
+
+def test_feature_extraction_can_sort_what_this_writes(tmp_path: Path) -> None:
+    """Sorts on (video_id, shot_id, ordinal) -- it needs `ordinal`, which
+    the 6-column version did not emit at all."""
+    from mvr.enrichment.feature_extraction import sort_keyframes_deterministically
+
+    output = build_aic_keyframe_mapping_csv(
+        _organizer_root(tmp_path), tmp_path / "m.csv", ["L30_V072"]
+    )
+
+    assert [k["keyframe_id"] for k in sort_keyframes_deterministically(output)] == [
+        "033",
+        "034",
+        "035",
+    ]
+
+
+def test_the_column_set_matches_the_team_ingestion_exactly(tmp_path: Path) -> None:
+    """A mapping built from organizer data and one built by the team's own
+    ingestion have to be interchangeable, or every consumer needs to know
+    which of the two it was handed."""
+    from mvr.evaluation.benchmark import KEYFRAME_MAPPING_COLUMNS
+
+    ingestion_columns = (
+        "keyframe_id",
+        "video_id",
+        "shot_id",
+        "ordinal",
+        "frame_idx",
+        "timestamp",
+        "image_path",
+    )
+
+    assert KEYFRAME_MAPPING_COLUMNS == ingestion_columns

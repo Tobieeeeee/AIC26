@@ -110,16 +110,25 @@ def summarize_kis_benchmark(
     return {name: _summarize_one_config(group) for name, group in by_config.items()}
 
 
-#: The columns `indexing.task05a.load_canonical_mapping` requires, plus the
-#: image path every downstream consumer needs to see the frame.
+#: Exactly the schema `ingestion.metadata.write_metadata` emits, in its
+#: order. Matching it column-for-column is the point: a mapping produced
+#: from organizer data and one produced by the team's own ingestion must be
+#: interchangeable, or every consumer needs to know which one it is holding.
 KEYFRAME_MAPPING_COLUMNS = (
     "keyframe_id",
     "video_id",
     "shot_id",
+    "ordinal",
     "frame_idx",
     "timestamp",
     "image_path",
 )
+
+#: `shot_id` for a keyframe that no supplied shot boundary contains. Zero is
+#: safe as a sentinel because the team's detectors number shots from 1
+#: (`ingestion.shot_detection.transnetv2`, `.pyscenedetect`), so it cannot
+#: collide with a real shot, and it sorts ahead of them.
+UNKNOWN_SHOT_ID = 0
 
 
 def _organizer_keyframe_dirs(dataset_root: Path, video_id: str) -> list[Path]:
@@ -152,19 +161,16 @@ def _organizer_mapping_csv(dataset_root: Path, video_id: str) -> Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
-def _shot_id_for(frame_idx: int, boundaries: Sequence[tuple[int, int]] | None) -> str:
-    """Which shot contains this frame, or "" when nothing says.
+def _shot_id_for(frame_idx: int, boundaries: Sequence[tuple[int, int]]) -> int:
+    """Which supplied shot contains this frame, or `UNKNOWN_SHOT_ID`.
 
-    Blank rather than a guess: the organizer ships no shot identity, and
-    `indexing.lexical_index` already accepts a null `shot_id`. Inventing one
-    would be unauditable, and the value is metadata -- it is not searched on.
+    Numbered from 1 to match `ingestion.shot_detection`, so a `shot_id` here
+    means the same thing as a `shot_id` the team's own detectors produce.
     """
-    if not boundaries:
-        return ""
-    for shot_id, (start, end) in enumerate(boundaries):
+    for shot_id, (start, end) in enumerate(boundaries, start=1):
         if start <= frame_idx <= end:
-            return str(shot_id)
-    return ""
+            return shot_id
+    return UNKNOWN_SHOT_ID
 
 
 def build_aic_keyframe_mapping_csv(
@@ -191,7 +197,29 @@ def build_aic_keyframe_mapping_csv(
 
     `shot_boundaries` optionally assigns `shot_id` from the team's own shot
     detection, letting TransNetV2 supply boundaries while the organizer
-    supplies identity. Without it `shot_id` is blank.
+    supplies identity; `ordinal` is then the keyframe's 1-based position
+    within its shot, exactly as `ingestion.keyframes` numbers it.
+
+    **Without boundaries each organizer keyframe becomes its own shot**:
+    `shot_id` is the organizer's own `n`, and `ordinal` is 1. An earlier
+    version left `shot_id` blank -- reasoning that the organizer ships no
+    shot identity, so inventing one would be unauditable. That reasoning
+    checked `indexing.lexical_index`, which accepts a null `shot_id`, and
+    missed that a null there is a *document* field while this is a *CSV
+    column*: nine call sites across `task05a`, `feature_extraction`,
+    `docker_ocr`, `scene_text` and the ASR mapping all do `int(row["shot_id"])`
+    and raise on a blank. The blank mapping could not be loaded by anything.
+
+    One-shot-per-keyframe is the honest degradation rather than a guess at
+    boundaries. The organizer's keyframes are already shot-aware -- measured
+    spacing runs 0.04s to 7.0s with 30-150 distinct values per video, which
+    is cut-driven, not uniform sampling -- so "each keyframe stands for its
+    own shot" restates their sampling instead of inventing cuts. What it
+    costs is grouping: `scene_text` and `docker_ocr` dedupe OCR *within* a
+    shot, and singleton shots mean no dedupe, which reads every keyframe
+    independently. That is the safe direction. Collapsing a video into one
+    shot would be the alternative, and it would make temporal OCR sample one
+    anchor for ~190 keyframes.
 
     Rows whose keyframe JPEG does not exist locally, and videos with no
     mapping CSV, are skipped rather than guessed -- 23 of 873 videos ship no
@@ -218,6 +246,10 @@ def build_aic_keyframe_mapping_csv(
                     continue
 
         boundaries = None if shot_boundaries is None else shot_boundaries.get(video_id)
+        # `ordinal` counts keyframes within a shot, so it needs the shot to be
+        # known first. Rows arrive in `n` order, which is frame order, so a
+        # running per-shot counter numbers them exactly as ingestion does.
+        ordinals: dict[int, int] = {}
         with csv_path.open(newline="", encoding="utf-8-sig") as handle:
             for row in csv.DictReader(handle):
                 number = int(row["n"].strip())
@@ -225,11 +257,18 @@ def build_aic_keyframe_mapping_csv(
                 if image_path is None:
                     continue
                 frame_idx = int(row["frame_idx"].strip())
+                if boundaries:
+                    shot_id = _shot_id_for(frame_idx, boundaries)
+                    ordinals[shot_id] = ordinals.get(shot_id, 0) + 1
+                    ordinal = ordinals[shot_id]
+                else:
+                    shot_id, ordinal = number, 1
                 rows.append(
                     {
                         "keyframe_id": image_path.stem,
                         "video_id": video_id,
-                        "shot_id": _shot_id_for(frame_idx, boundaries),
+                        "shot_id": str(shot_id),
+                        "ordinal": str(ordinal),
                         "frame_idx": str(frame_idx),
                         "timestamp": row["pts_time"],
                         "image_path": str(image_path),

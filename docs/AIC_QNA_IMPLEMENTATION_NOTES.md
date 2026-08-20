@@ -1009,6 +1009,84 @@ Three things that are currently unmeasurable at n=1:
 - **Prompt and model changes**, which currently have no way to show whether
   they helped.
 
+## 3n. The mapping adapter, and a file nobody opened
+
+`scripts/build_keyframe_mapping.py` generates `keyframe_mapping.csv` from
+the organizer's data in one command. It exists because the team decided the
+organizer's 166,550 keyframes are the single canonical identity, and every
+consumer already reads identity from that one CSV:
+
+    indexing.task05a.load_canonical_mapping
+    enrichment.ocr.docker_ocr.process_dataset_docker_ocr
+    enrichment.feature_extraction.sort_keyframes_deterministically
+    enrichment.asr.mapping
+    indexing.semantic_builder.build_semantic_index
+
+so adopting them is a generation step, not a refactor. No teammate's
+pipeline changes.
+
+Measured on the real corpus: 873 videos with a mapping CSV, 850 with
+downloaded keyframes, **166,550 rows in 6.3 seconds**. The known ground
+truth resolves exactly -- `L30_V072 / 034 -> frame_idx 1745`.
+
+### The bug this uncovered
+
+The 6-column adapter committed in `6e04f4c` produced a file that **not one
+downstream module could load**. `shot_id` was left blank, and nine call
+sites across `task05a`, `feature_extraction`, `docker_ocr`, `scene_text`
+and the ASR mapping all do `int(row["shot_id"])`:
+
+    Task05AValidationError: invalid numeric identity in mapping line 2
+
+The docstring justified the blank by citing `indexing.lexical_index`, which
+accepts a null `shot_id`. That is true and irrelevant: a null there is a
+*document field*, this is a *CSV column*. The wrong consumer was checked.
+`ordinal` was missing outright, so `sort_keyframes_deterministically` would
+have raised `KeyError` as well.
+
+Every column assertion in the test file passed throughout. They asserted on
+the header and never opened the file with a real reader -- which is why the
+tests now end with `test_task05a_can_load_what_this_writes` and
+`test_feature_extraction_can_sort_what_this_writes`, and why the script
+verifies its own output through both before exiting. **Reading a file's
+header is not the same as reading the file.**
+
+### What `shot_id` is without shot detection
+
+Each organizer keyframe becomes its own shot: `shot_id` is the organizer's
+own `n`, `ordinal` is 1. This is the honest degradation rather than a guess
+at boundaries -- the organizer's keyframes are already shot-aware (measured
+spacing 0.04s-7.0s, 30-150 distinct values per video, i.e. cut-driven, not
+uniform), so it restates their sampling instead of inventing cuts.
+
+The cost is grouping: `scene_text` and `docker_ocr` dedupe OCR *within* a
+shot, and singleton shots mean no dedupe, so every keyframe is read
+independently. That is the safe direction. The alternative -- one shot per
+video -- would make temporal OCR sample a single anchor for ~190 keyframes.
+
+`--shots-json` takes the team's own `shots.json` and fills real shot ids,
+numbered from 1 to match `ingestion.shot_detection`; `ordinal` then counts
+position within the shot exactly as `ingestion.keyframes` does. A keyframe
+no supplied shot contains gets `UNKNOWN_SHOT_ID = 0`, which cannot collide
+because the detectors number from 1. The script refuses a `shots.json`
+whose own numbering is not `1..n` in start-frame order rather than
+renumbering silently, since renumbering would break every join back to that
+file and surface far away as OCR attached to the wrong shot.
+
+### Left for the owner of `enrichment/ocr/validator.py`
+
+`validate_ocr_output` keys its duplicate check on `keyframe_id` alone. The
+organizer's 166,550 keyframes carry only **632 distinct ids** -- `"001"`
+exists in ~850 videos -- so against the real mapping it stops at row 309:
+
+    ERROR: Duplicate keyframe_id in mapping: 001
+    (L21_V001, then L21_V002)
+
+It needs `(video_id, keyframe_id)`, the same fix the Elasticsearch `_id`
+and the fusion key already carry (3l). Not changed here: it is outside Q&A
+and belongs to whoever owns the OCR pipeline. Nothing else is blocked by it
+-- the validator is a post-run check, not a step in the pipeline.
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report
