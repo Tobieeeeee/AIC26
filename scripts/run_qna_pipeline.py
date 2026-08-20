@@ -57,7 +57,17 @@ def main() -> None:
         "--dataset-root", type=Path, required=True,
         help="AIC dataset root with videos/keyframes/map_keyframes/objects",
     )
-    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument(
+        "--top-k", type=int, default=100,
+        help=(
+            "How many ranked answers to produce (competition maximum: 100). "
+            "Defaults to the full budget because the final score averages "
+            "R@1/5/20/50/100 -- three of those five cutoffs are unreachable "
+            "below 20 answers, so a smaller value discards score that costs "
+            "nothing but compute to claim. Lower it for quick local smoke "
+            "tests, where OCR over 100 frames is the slow part."
+        ),
+    )
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--qna-model", type=str, default=None, help="Defaults to HuggingFaceCausalLmBackend's default model")
     parser.add_argument("--allow-model-download", action="store_true")

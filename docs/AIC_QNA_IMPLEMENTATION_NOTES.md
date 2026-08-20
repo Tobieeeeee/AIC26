@@ -476,7 +476,7 @@ failure.** The organizer requires `frame_id` inside the interval, so a
    into a hit. -- **done, see 3h.**
 2. **Use the full 100-answer budget.** Runs currently use `--top-k 20`,
    spending the budget on 20 *different* videos while the top video gets
-   two slots.
+   two slots. -- **done, see 3i.**
 
 Both live in `search_qna`, and the benchmark now makes each change
 measurable.
@@ -577,10 +577,71 @@ reaches the reasoner with almost nothing. `search_qna` takes a
 `run_qna_pipeline.py`) which also backfills any primary hit whose backend
 returned no image.
 
-### Still open from 3g
+## 3i. The 100-answer budget (step 2 of the 3g next steps)
 
-2. **Use the full 100-answer budget.** Partly done: the runs above use
-   `--top-k 100`. The pipeline's own default is still 5.
+`run_qna_pipeline.py --top-k` now defaults to **100**, the competition
+maximum, instead of 5. The final score averages R@1/5/20/50/100, and three
+of those five cutoffs are structurally unreachable below 20 answers — a
+smaller default discards score that costs nothing but compute to claim.
+
+Raising it is safe in the strict sense, which was verified rather than
+assumed: the expansion plan is sorted globally by cost and truncated at
+`top_k`, so **the first 20 rows of a 100-answer run are identical to a
+20-answer run** (checked on all three ground-truth queries). R@1, R@5 and
+R@20 therefore cannot degrade when the budget grows; only R@50 and R@100
+can move, and only upward.
+
+### Measured: it bought nothing here, and that is worth recording
+
+| top-k (radius 4, cost 0.5) | p1-15 | p1-19 | p1-22 | Final |
+|---|---|---|---|---|
+| 20 | frame at #18 | absent | absent | 0.000 |
+| 100 | frame at #18 | absent | absent | 0.000 |
+
+Identical. p1-15's correct frame already lands at #18, inside 20; p1-19
+and p1-22 have no correct video anywhere near the top, so eighty more
+slots of the wrong videos change nothing. **The change is insurance, not
+a gain** — five times the LLM calls for zero measured benefit on n=3. It
+is still the right default, because "the correct frame happened to land
+at #18" is a property of these three queries, not of the system.
+
+### How the budget actually splits
+
+Making `expanded_from` survive the batch round-trip (below) exposed the
+split for the first time. At `radius 4, cost 0.5` a 100-answer run is
+**13 retrieval hits and 87 temporal hedges** — 100 slots covering only
+~13 videos. That is the whole trade-off in one number, so it was worth
+measuring the extremes:
+
+| configuration | videos covered | correct frame found |
+|---|---|---|
+| `radius 0` (pure retrieval, 100 hits) | 73 | none of the three |
+| `radius 4, cost 50` (breadth-first) | 53 | none of the three |
+| `radius 4, cost 0.5` (depth-leaning) | ~13 | **p1-15 at #18** |
+
+Depth wins decisively, and the reason is visible in the retrieval ranks:
+video-level retrieval is either very good (p1-15 at ranks #1–2) or
+hopeless (p1-19 at #153). There is little in between, so buying breadth —
+73 videos instead of 13 — reaches nothing that 13 did not already reach.
+Spending the budget on *more frames of a good video* is what pays.
+
+This is still n=3 and all three are p1. The conclusion to carry forward is
+the shape of the trade-off, not the specific constants.
+
+### Expansion provenance survives the GPU round-trip
+
+`PromptItem` gained `temporal_offset` / `expanded_from`, both defaulted so
+the batches already sitting in `artifacts/` still load unchanged. Without
+this a 100-row batch could not be debugged after the GPU host replaced
+every answer — the batch file is the only record, since the GPU host never
+sees the retrieval run, and ~87% of the rows are hedges.
+
+`import_qna_answers.py` restores the fields, prints the offset per row,
+and closes with a budget line: slots used out of 100, split into retrieval
+hits vs temporal hedges, plus any lost to unparseable model output. Blank
+or unparseable answers were already dropped by `merge_answer_batch` rather
+than fabricated, so the larger budget does not risk failing the export —
+`validate_qna_predictions` still refuses blanks by design.
 
 ## 4. Branch / task-pack plan (confirmed with the user)
 

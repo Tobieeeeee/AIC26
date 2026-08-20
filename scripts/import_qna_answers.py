@@ -29,6 +29,7 @@ def main() -> None:
 
     from mvr.enrichment.qna_batch import merge_answer_batch, read_prompt_batch
     from mvr.retrieval.qna import QnaCandidate
+    from mvr.submission.qna_export import MAX_PREDICTIONS_PER_QUERY
 
     batch = read_prompt_batch(args.prompts)
     print(f"[query_id] {batch.query_id}")
@@ -46,6 +47,8 @@ def main() -> None:
             timestamp=item.timestamp,
             answer="PENDING_BATCH_ANSWER",
             answer_source="mixed",
+            temporal_offset=item.temporal_offset,
+            expanded_from=item.expanded_from,
         )
         for item in batch.items
     ]
@@ -56,11 +59,27 @@ def main() -> None:
         print(f"(dropped {dropped} candidate(s) whose model output did not parse)")
 
     for candidate in merged:
+        origin = (
+            "" if candidate.expanded_from is None
+            else f" [{candidate.temporal_offset:+d} from {candidate.expanded_from}]"
+        )
         print(
             f"#{candidate.rank} {candidate.video_id} frame={candidate.frame_id} "
             f"score={candidate.score:.4f} answer={candidate.answer!r} "
-            f"source={candidate.answer_source}"
+            f"source={candidate.answer_source}{origin}"
         )
+
+    # The 100-answer budget is the scored resource, so say plainly how much
+    # of it survived: R@100 is one fifth of the final score and every slot
+    # lost to unparseable output is a fifth of a fifth thrown away.
+    hedges = sum(1 for c in merged if c.expanded_from is not None)
+    print()
+    print(
+        f"[budget] {len(merged)}/{MAX_PREDICTIONS_PER_QUERY} slots used "
+        f"({len(merged) - hedges} retrieval hits, {hedges} temporal hedges"
+        + (f", {dropped} lost to unparsed output" if dropped else "")
+        + ")"
+    )
 
     if args.output is not None:
         from mvr.submission.qna_export import (

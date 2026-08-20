@@ -93,6 +93,11 @@ class PromptItem:
     score: float
     prompt: str
     timestamp: float | None = None
+    #: Expansion provenance, carried so a batch stays debuggable after the
+    #: GPU host has replaced every answer. Defaulted, so batches written
+    #: before temporal expansion existed still load unchanged.
+    temporal_offset: int = 0
+    expanded_from: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,6 +137,8 @@ def write_prompt_batch(
                 "keyframe_id": candidate.keyframe_id,
                 "score": candidate.score,
                 "timestamp": candidate.timestamp,
+                "temporal_offset": getattr(candidate, "temporal_offset", 0),
+                "expanded_from": getattr(candidate, "expanded_from", None),
                 "prompt": prompt,
             }
             for index, (candidate, prompt) in enumerate(zip(candidates, prompts, strict=True))
@@ -159,6 +166,8 @@ def read_prompt_batch(path: Path | str) -> PromptBatch:
                 keyframe_id=row["keyframe_id"],
                 score=row["score"],
                 timestamp=row.get("timestamp"),
+                temporal_offset=row.get("temporal_offset", 0),
+                expanded_from=row.get("expanded_from"),
                 prompt=row["prompt"],
             )
             for row in payload["items"]
