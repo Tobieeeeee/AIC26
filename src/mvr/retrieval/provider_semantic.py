@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -46,6 +47,7 @@ class IndependentSemanticResponse:
     failed_providers: tuple[str, ...]
     errors: dict[str, str]
     failure_policy: str
+    timings_ms: dict[str, dict[str, float]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +62,10 @@ class IndependentSemanticResponse:
             },
             "errors": dict(self.errors),
             "failure_policy": self.failure_policy,
+            "timings_ms": {
+                model_id: dict(sorted(values.items()))
+                for model_id, values in sorted(self.timings_ms.items())
+            },
         }
 
 
@@ -147,7 +153,12 @@ class IndependentSemanticRetriever:
         raise ProviderSearchError(f"unsupported provider index metric: {metric}")
 
     def search_provider(
-        self, model_id: str, query: str, *, top_k: int
+        self,
+        model_id: str,
+        query: str,
+        *,
+        top_k: int,
+        _timing_sink: dict[str, float] | None = None,
     ) -> tuple[ProviderSemanticResult, ...]:
         if top_k <= 0:
             raise ValueError("top_k must be positive")
@@ -160,16 +171,24 @@ class IndependentSemanticRetriever:
             f"__{model_id}"
         ):
             raise QueryRoutingError(f"cross-provider index route for {model_id}")
+        encoding_started = time.perf_counter()
         embedding: QueryEmbedding = self.query_encoders.encode_query(
             model_id, query, index_contract=contract
         )
+        encoding_ms = (time.perf_counter() - encoding_started) * 1000.0
         if embedding.model_id != model_id or embedding.dimension != contract.dimension:
             raise QueryRoutingError("encoder result does not match target index contract")
+        search_started = time.perf_counter()
         hits = self.backend.search(
             contract,
             embedding.vector,
             effective_top_k * self.candidate_multiplier,
         )
+        search_ms = (time.perf_counter() - search_started) * 1000.0
+        if _timing_sink is not None:
+            _timing_sink.update(
+                {"encoding_ms": encoding_ms, "search_ms": search_ms}
+            )
         higher_is_better = self._higher_is_better(contract.metric)
         best: dict[str, BackendSearchHit] = {}
         required_metadata = {
@@ -225,11 +244,17 @@ class IndependentSemanticRetriever:
             raise ValueError("at least one semantic provider is required")
         ranked_lists: dict[str, tuple[ProviderSemanticResult, ...]] = {}
         errors: dict[str, str] = {}
+        timings: dict[str, dict[str, float]] = {}
         for model_id in requested:
             try:
+                provider_timing: dict[str, float] = {}
                 ranked_lists[model_id] = self.search_provider(
-                    model_id, query, top_k=top_k
+                    model_id,
+                    query,
+                    top_k=top_k,
+                    _timing_sink=provider_timing,
                 )
+                timings[model_id] = provider_timing
             except Exception as exc:
                 errors[model_id] = f"{type(exc).__name__}: {exc}"
                 if self.failure_policy == "fail_closed" and model_id in self.required_providers:
@@ -245,4 +270,5 @@ class IndependentSemanticRetriever:
             failed_providers=failed,
             errors=errors,
             failure_policy=self.failure_policy,
+            timings_ms=timings,
         )

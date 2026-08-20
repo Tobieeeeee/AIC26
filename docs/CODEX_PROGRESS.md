@@ -922,13 +922,42 @@ Blockers:
 
 - None. No quality claim or `rrf_k` tuning was performed.
 
+# Multi-Embedding Task 14 — Fasttest and Seven Ablations
+
+Status: COMPLETE (structural fixture; real weights unavailable)
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added the seven required single/pair/triple provider configurations and a
+  deterministic JSON/Markdown ablation report framework.
+- Added separated warm-up, measured query, provider encoding/search, and fusion
+  timing collection with median/p95 summaries and runtime/provenance metadata.
+- Added a five-keyframe structural E2E test covering three offline artifacts,
+  Task05A, three indexes, three online searches, and semantic RRF.
+- Quality fields are explicitly `not evaluated` without representative ground
+  truth; the conclusion makes no model-combination improvement claim.
+
+Verification:
+
+- Ablation and structural E2E suite: 6 passed.
+- Committed ablation CLI/config: PASS; 7 rows, expected keyframes 5, quality
+  not evaluated, bounded conclusion present.
+- Python compilation and `git diff --check`: passed.
+
+Limitations:
+
+- Real three-provider artifacts are unavailable locally, so this is structural
+  E2E with injected deterministic encoders/backends, not a model-quality run.
+
 # Current active phase
 
-Multi-Embedding Task 13 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 14 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 14 fasttest and ablation.
+Next action: begin Task 15 full-corpus build orchestration and dry run.
 
 The user explicitly approved automatic continuation through Task 16 for this
 task pack. Expensive full-corpus execution remains separately approval-gated.
