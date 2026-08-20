@@ -37,6 +37,14 @@ ocr = [
     "paddlepaddle>=2,<4",
 ]
 objects = ["ultralytics>=8,<9"]
+asr = [
+    "chunkformer==1.2.2",
+    "huggingface-hub>=0.28,<2",
+    "numpy>=1.26,<3",
+    "silero-vad==6.2.1",
+    "torch>=2.5.1,<3",
+    "torchaudio>=2.5.1,<3",
+]
 # sentencepiece is required by the Marian tokenizer used for Vietnamese
 # query translation; transformers raises at load time without it.
 qna = ["transformers>=4.40,<5", "torch>=2.2,<3", "sentencepiece>=0.2,<1"]

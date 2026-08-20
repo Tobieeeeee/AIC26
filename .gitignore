@@ -51,6 +51,7 @@ artifacts/qna*/*
 !artifacts/qna/.gitkeep
 
 # Model weights / databases / generated outputs
+/models/
 *.pt
 *.pth
 *.ckpt
