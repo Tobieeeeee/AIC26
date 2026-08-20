@@ -55,6 +55,8 @@ artifacts/qna*/*
 # copy would point at directories no teammate has. Regenerate in ~11s with
 # `python scripts/build_keyframe_mapping.py --dataset-root <your root>`.
 artifacts/keyframe_mapping.csv
+artifacts/fasttest/
+artifacts/fasttest_real_3models/
 
 # Model weights / databases / generated outputs
 /models/

@@ -48,6 +48,32 @@ asr = [
 # sentencepiece is required by the Marian tokenizer used for Vietnamese
 # query translation; transformers raises at load time without it.
 qna = ["transformers>=4.40,<5", "torch>=2.2,<3", "sentencepiece>=0.2,<1"]
+beit3 = [
+    "numpy>=1.26,<3",
+    "Pillow>=10,<13",
+    "sentencepiece>=0.1.99,<1",
+    "timm==0.4.12",
+    "torch>=2.2,<3",
+    "torchvision>=0.17,<1",
+    "transformers>=4.39,<5",
+]
+metaclip2 = [
+    "numpy>=1.26,<3",
+    "Pillow==11.0.0",
+    "sentencepiece==0.2.0",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+    "transformers==4.57.1",
+]
+perception-encoder = [
+    "einops==0.8.1",
+    "huggingface-hub>=0.28,<2",
+    "numpy==2.1.2",
+    "Pillow==11.0.0",
+    "timm==1.0.15",
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

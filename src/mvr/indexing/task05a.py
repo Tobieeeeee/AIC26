@@ -16,6 +16,12 @@ from typing import Any
 
 import numpy as np
 
+from mvr.enrichment.embeddings.artifacts import (
+    EmbeddingArtifactError,
+    load_provider_artifact,
+    sha256_file,
+)
+
 from .filtering import (
     AsrFilterConfig,
     OcrFilterConfig,
@@ -50,6 +56,7 @@ class Task05AConfig:
     ocr: OcrFilterConfig = field(default_factory=OcrFilterConfig)
     asr: AsrFilterConfig = field(default_factory=AsrFilterConfig)
     clip_expected_dimension: int | None = None
+    required_embedding_providers: tuple[str, ...] = ()
     sample_limit: int = 5
 
     def __post_init__(self) -> None:
@@ -57,6 +64,10 @@ class Task05AConfig:
             raise ValueError("clip_expected_dimension must be positive")
         if self.sample_limit < 1:
             raise ValueError("sample_limit must be positive")
+        if len(set(self.required_embedding_providers)) != len(
+            self.required_embedding_providers
+        ):
+            raise ValueError("required_embedding_providers must be unique")
 
 
 @dataclass(frozen=True)
@@ -1071,6 +1082,324 @@ def _load_clip(
     return outputs, stats, {"invalid_vector_samples": invalid_samples}
 
 
+def _empty_embedding_stats(
+    expected: int,
+    *,
+    required: bool,
+    status: str,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "required": required,
+        "dimension": None,
+        "dtype": None,
+        "normalized": None,
+        "vectors_expected": expected,
+        "vectors_valid": 0,
+        "vectors_invalid": expected,
+        "missing_ids": expected,
+        "extra_ids": 0,
+        "duplicate_ids": 0,
+        "mapping_mismatches": 0,
+        "source_mapping_rows": 0,
+        "invalid_by_reason": {status: expected},
+    }
+
+
+def _load_embedding_provider(
+    provider_root: Path,
+    canonical: list[CanonicalKeyframe],
+    config: Task05AConfig,
+    issues: _IssueCollector,
+    *,
+    required: bool,
+) -> tuple[dict[tuple[str, str], dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
+    """Validate one provider without allowing its failure to affect peers."""
+
+    provider_id = provider_root.name
+    by_identity, by_keyframe_id = _canonical_lookup(canonical)
+    try:
+        artifact = load_provider_artifact(provider_root, verify_checksum=True)
+    except (EmbeddingArtifactError, OSError, ValueError) as exc:
+        issues.add(
+            "invalid_embedding_provider",
+            str(exc),
+            branch=f"embeddings.{provider_id}",
+            path=provider_root,
+        )
+        stats = _empty_embedding_stats(
+            len(canonical), required=required, status="invalid_artifact"
+        )
+        return {}, stats, [{"provider": provider_id, "reason": str(exc), "path": str(provider_root)}]
+
+    manifest = artifact.manifest
+    provider_id = manifest.model_id
+    invalid_reasons: Counter[str] = Counter()
+    invalid_samples: list[dict[str, Any]] = []
+    outputs: dict[tuple[str, str], dict[str, Any]] = {}
+    rows_by_identity: dict[tuple[str, str], dict[str, str]] = {}
+    duplicate_identities: set[tuple[str, str]] = set()
+    extra_ids: set[str] = set()
+    mapping_mismatches = 0
+    arrays: dict[Path, np.ndarray | None] = {}
+
+    try:
+        with artifact.mapping_path.open(newline="", encoding="utf-8-sig") as handle:
+            reader = csv.DictReader(handle)
+            required_columns = {
+                "keyframe_id",
+                "video_id",
+                "feature_file",
+                "feature_index",
+            }
+            missing_columns = required_columns - set(reader.fieldnames or [])
+            if missing_columns:
+                raise EmbeddingArtifactError(
+                    f"mapping missing required columns: {sorted(missing_columns)}"
+                )
+            rows = list(reader)
+    except (OSError, ValueError, EmbeddingArtifactError) as exc:
+        issues.add(
+            "invalid_embedding_mapping",
+            str(exc),
+            branch=f"embeddings.{provider_id}",
+            path=artifact.mapping_path,
+        )
+        stats = _empty_embedding_stats(
+            len(canonical), required=required, status="invalid_mapping"
+        )
+        stats.update(
+            {
+                "dimension": manifest.embedding_dimension,
+                "dtype": manifest.dtype,
+                "normalized": manifest.normalized,
+            }
+        )
+        return {}, stats, [{"provider": provider_id, "reason": str(exc), "path": str(artifact.mapping_path)}]
+
+    if len(rows) != manifest.keyframe_count:
+        mapping_mismatches += abs(len(rows) - manifest.keyframe_count) or 1
+        issues.add(
+            "embedding_count_mismatch",
+            f"mapping rows {len(rows)} != manifest keyframe_count {manifest.keyframe_count}",
+            branch=f"embeddings.{provider_id}",
+            path=artifact.mapping_path,
+        )
+
+    for row in rows:
+        keyframe_id = str(row.get("keyframe_id", "")).strip()
+        video_id = str(row.get("video_id", "")).strip()
+        canonical_row = by_keyframe_id.get(keyframe_id)
+        if canonical_row is None:
+            extra_ids.add(keyframe_id)
+            issues.add(
+                "extra_identity",
+                "embedding mapping identity not in canonical mapping",
+                branch=f"embeddings.{provider_id}",
+                keyframe_id=keyframe_id,
+                video_id=video_id,
+                path=artifact.mapping_path,
+            )
+            continue
+        identity = canonical_row.identity
+        if identity in rows_by_identity or identity in duplicate_identities:
+            duplicate_identities.add(identity)
+            rows_by_identity.pop(identity, None)
+            outputs.pop(identity, None)
+            issues.add(
+                "duplicate_identity",
+                "duplicate embedding mapping identity",
+                branch=f"embeddings.{provider_id}",
+                keyframe_id=keyframe_id,
+                video_id=video_id,
+                path=artifact.mapping_path,
+            )
+            continue
+        rows_by_identity[identity] = dict(row)
+
+    for identity, row in sorted(rows_by_identity.items()):
+        canonical_row = by_identity[identity]
+        if str(row.get("video_id", "")).strip() != canonical_row.video_id:
+            invalid_reasons["mapping_mismatch"] += 1
+            mapping_mismatches += 1
+            continue
+        optional_comparisons = (
+            ("frame_id", canonical_row.frame_idx, int),
+            ("shot_id", canonical_row.shot_id, int),
+            ("timestamp", canonical_row.timestamp, float),
+        )
+        mismatch = False
+        for field_name, expected, cast in optional_comparisons:
+            raw = str(row.get(field_name, "")).strip()
+            if not raw:
+                continue
+            try:
+                actual = cast(raw)
+            except (TypeError, ValueError):
+                mismatch = True
+                break
+            if field_name == "timestamp":
+                mismatch = abs(actual - expected) > 1e-6
+            else:
+                mismatch = actual != expected
+            if mismatch:
+                break
+        if mismatch:
+            invalid_reasons["mapping_mismatch"] += 1
+            mapping_mismatches += 1
+            continue
+
+        feature_file = str(row.get("feature_file", "")).strip()
+        try:
+            feature_index = int(row.get("feature_index", ""))
+            vector_path = artifact.resolve_vector_path(feature_file)
+        except (TypeError, ValueError, EmbeddingArtifactError):
+            invalid_reasons["invalid_locator"] += 1
+            continue
+        if feature_index < 0:
+            invalid_reasons["invalid_locator"] += 1
+            continue
+        if vector_path not in arrays:
+            try:
+                arrays[vector_path] = np.load(
+                    vector_path, mmap_mode="r", allow_pickle=False
+                )
+            except (OSError, ValueError):
+                arrays[vector_path] = None
+        matrix = arrays[vector_path]
+        if matrix is None or matrix.ndim != 2 or feature_index >= matrix.shape[0]:
+            invalid_reasons["invalid_locator"] += 1
+            continue
+        if str(matrix.dtype) != manifest.dtype:
+            invalid_reasons["dtype_mismatch"] += 1
+            continue
+        vector = matrix[feature_index]
+        reason = validate_clip_vector(
+            vector, expected_dimension=manifest.embedding_dimension
+        )
+        if reason is not None:
+            invalid_reasons[reason] += 1
+            continue
+        if manifest.normalized and not np.isclose(
+            float(np.linalg.norm(vector)), 1.0, rtol=1e-3, atol=1e-3
+        ):
+            invalid_reasons["not_normalized"] += 1
+            continue
+        outputs[identity] = {
+            "provider": provider_id,
+            "video_id": canonical_row.video_id,
+            "feature_file": feature_file,
+            "row_idx": feature_index,
+        }
+
+    missing_identities = set(by_identity) - set(rows_by_identity) - duplicate_identities
+    invalid_reasons["missing_mapping"] += len(missing_identities)
+    invalid_reasons["duplicate_identity"] += len(duplicate_identities)
+    for identity in sorted(set(by_identity) - set(outputs)):
+        if len(invalid_samples) >= config.sample_limit:
+            break
+        reason = "missing_mapping"
+        if identity in duplicate_identities:
+            reason = "duplicate_identity"
+        elif identity in rows_by_identity:
+            reason = next(
+                (name for name, count in invalid_reasons.items() if count > 0),
+                "invalid_vector",
+            )
+        invalid_samples.append(
+            {
+                "provider": provider_id,
+                "video_id": identity[0],
+                "keyframe_id": identity[1],
+                "reason": reason,
+                "path": str(artifact.mapping_path),
+            }
+        )
+
+    provider_valid = (
+        len(outputs) == len(canonical)
+        and not extra_ids
+        and not duplicate_identities
+        and mapping_mismatches == 0
+    )
+    stats = {
+        "status": "valid" if provider_valid else "invalid",
+        "required": required,
+        "dimension": manifest.embedding_dimension,
+        "dtype": manifest.dtype,
+        "normalized": manifest.normalized,
+        "vectors_expected": len(canonical),
+        "vectors_valid": len(outputs),
+        "vectors_invalid": len(canonical) - len(outputs),
+        "missing_ids": len(missing_identities),
+        "extra_ids": len(extra_ids),
+        "duplicate_ids": len(duplicate_identities),
+        "mapping_mismatches": mapping_mismatches,
+        "source_mapping_rows": len(rows),
+        "manifest_keyframe_count": manifest.keyframe_count,
+        "mapping_sha256": sha256_file(artifact.mapping_path),
+        "invalid_by_reason": dict(sorted(invalid_reasons.items())),
+    }
+    return outputs, stats, invalid_samples
+
+
+def _load_embeddings(
+    root: Path,
+    canonical: list[CanonicalKeyframe],
+    config: Task05AConfig,
+    issues: _IssueCollector,
+) -> tuple[
+    dict[str, dict[tuple[str, str], dict[str, Any]]],
+    dict[str, dict[str, Any]],
+    dict[str, Any],
+]:
+    outputs: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
+    stats: dict[str, dict[str, Any]] = {}
+    samples: dict[str, list[dict[str, Any]]] = {}
+    required = set(config.required_embedding_providers)
+    provider_roots = (
+        sorted(
+            (path for path in root.iterdir() if path.is_dir()),
+            key=lambda path: path.name,
+        )
+        if root.is_dir()
+        else []
+    )
+    for provider_root in provider_roots:
+        provider_id = provider_root.name
+        provider_outputs, provider_stats, provider_samples = _load_embedding_provider(
+            provider_root,
+            canonical,
+            config,
+            issues,
+            required=provider_id in required,
+        )
+        outputs[provider_id] = provider_outputs
+        stats[provider_id] = provider_stats
+        samples[provider_id] = provider_samples
+    for provider_id in sorted(required - set(stats)):
+        issues.add(
+            "missing_required_embedding_provider",
+            "required embedding provider is absent",
+            branch=f"embeddings.{provider_id}",
+            path=root / provider_id,
+        )
+        outputs[provider_id] = {}
+        stats[provider_id] = _empty_embedding_stats(
+            len(canonical), required=True, status="missing_provider"
+        )
+        samples[provider_id] = [
+            {
+                "provider": provider_id,
+                "reason": "missing_provider",
+                "path": str(root / provider_id),
+            }
+        ]
+    return outputs, dict(sorted(stats.items())), {
+        "invalid_embedding_samples": dict(sorted(samples.items()))
+    }
+
+
 def _prepare_output_root(output_root: Path, protected_roots: Iterable[Path | None]) -> None:
     output_root = output_root.resolve()
     for root in protected_roots:
@@ -1106,7 +1435,19 @@ def _project_document(
     asr: list[dict[str, Any]],
     objects: dict[str, Any] | None,
     clip: dict[str, Any] | None,
+    embeddings: Mapping[str, dict[str, Any] | None],
 ) -> dict[str, Any]:
+    embedding_flags = {
+        provider_id: locator is not None
+        for provider_id, locator in sorted(embeddings.items())
+    }
+    indexability = {
+        "lexical": bool(ocr or asr),
+        "vector": False,
+        "object": objects is not None,
+        "embeddings": embedding_flags,
+    }
+    indexability["vector"] = any(indexability["embeddings"].values())
     document = {
         "schema_version": DOCUMENT_SCHEMA_VERSION,
         "keyframe_id": keyframe.keyframe_id,
@@ -1130,11 +1471,8 @@ def _project_document(
             "feature_file": None,
             "row_idx": None,
         },
-        "indexability": {
-            "lexical": bool(ocr or asr),
-            "vector": clip is not None,
-            "object": objects is not None,
-        },
+        "embeddings": dict(sorted(embeddings.items())),
+        "indexability": indexability,
     }
     validate_task05a_document(document)
     ensure_finite_json(document)
@@ -1147,6 +1485,7 @@ def build_index_documents(
     mapping_csv: Path,
     output_root: Path,
     clip_root: Path | None = None,
+    embeddings_root: Path | None = None,
     objects_root: Path | None = None,
     ocr_root: Path | None = None,
     asr_root: Path | None = None,
@@ -1161,6 +1500,11 @@ def build_index_documents(
     if not features_root.is_dir():
         raise FileNotFoundError(f"features root not found: {features_root}")
     clip_root = Path(clip_root) if clip_root is not None else features_root / "clip"
+    embeddings_root = (
+        Path(embeddings_root)
+        if embeddings_root is not None
+        else features_root / "embeddings"
+    )
     objects_root = (
         Path(objects_root) if objects_root is not None else features_root / "objects"
     )
@@ -1177,10 +1521,26 @@ def build_index_documents(
     clip, clip_stats, clip_samples = _load_clip(
         clip_root, canonical, config, issues
     )
+    embeddings, embedding_stats, embedding_samples = _load_embeddings(
+        embeddings_root, canonical, config, issues
+    )
+    # Compatibility adapter for pre-Task04 CLIP-only artifacts. Modern provider
+    # artifacts always take precedence and remain independently addressable.
+    if not embedding_stats:
+        embeddings = {"clip": clip}
+        embedding_stats = {"clip": {**clip_stats, "required": False, "status": "legacy"}}
 
     _prepare_output_root(
         output_root,
-        (features_root, mapping_csv.parent, clip_root, objects_root, ocr_root, asr_root),
+        (
+            features_root,
+            mapping_csv.parent,
+            clip_root,
+            embeddings_root,
+            objects_root,
+            ocr_root,
+            asr_root,
+        ),
     )
     document_identities: set[tuple[str, str]] = set()
     indexability = Counter()
@@ -1192,13 +1552,20 @@ def build_index_documents(
             asr=asr.get(identity, []),
             objects=objects.get(identity),
             clip=clip.get(identity),
+            embeddings={
+                provider_id: provider_vectors.get(identity)
+                for provider_id, provider_vectors in embeddings.items()
+            },
         )
         if identity in document_identities:
             raise Task05AValidationError(f"duplicate output identity: {identity}")
         document_identities.add(identity)
-        for branch, enabled in document["indexability"].items():
-            if enabled:
+        for branch in ("lexical", "vector", "object"):
+            if document["indexability"][branch]:
                 indexability[branch] += 1
+        for provider_id, enabled in document["indexability"]["embeddings"].items():
+            if enabled:
+                indexability[f"embeddings.{provider_id}"] += 1
         _atomic_json_write(
             output_root
             / "documents"
@@ -1216,6 +1583,11 @@ def build_index_documents(
         "objects": _manifest_reference(objects_root),
         "ocr": _manifest_reference(ocr_root),
         "asr": _manifest_reference(asr_root),
+        "embeddings": {
+            provider_id: _manifest_reference(embeddings_root / provider_id)
+            for provider_id in embedding_stats
+            if provider_id != "clip" or (embeddings_root / provider_id).is_dir()
+        },
     }
     filter_config = {
         "ocr": {
@@ -1247,6 +1619,19 @@ def build_index_documents(
         "remove_diacritics": False,
     }
     dataset_identity = clean_display_text(dataset) or features_root.name
+    invalid_required_providers = sorted(
+        provider_id
+        for provider_id in config.required_embedding_providers
+        if embedding_stats.get(provider_id, {}).get("status") != "valid"
+    )
+    embedding_provider_policy = {
+        "required": sorted(config.required_embedding_providers),
+        "optional": sorted(
+            set(embedding_stats) - set(config.required_embedding_providers)
+        ),
+        "required_satisfied": not invalid_required_providers,
+        "invalid_required": invalid_required_providers,
+    }
     manifest = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
         "task": "task05a",
@@ -1260,6 +1645,7 @@ def build_index_documents(
             "objects": str(objects_root.resolve()),
             "ocr": str(ocr_root.resolve()),
             "asr": str(asr_root.resolve()),
+            "embeddings": str(embeddings_root.resolve()),
         },
         "source_branch_manifests": source_manifests,
         "document_count": len(document_identities),
@@ -1269,10 +1655,16 @@ def build_index_documents(
         "asr": asr_stats,
         "objects": object_stats,
         "clip": clip_stats,
+        "embeddings": embedding_stats,
+        "embedding_provider_policy": embedding_provider_policy,
         "indexability_counts": {
             "lexical": indexability["lexical"],
             "vector": indexability["vector"],
             "object": indexability["object"],
+            "embeddings": {
+                provider_id: indexability[f"embeddings.{provider_id}"]
+                for provider_id in sorted(embedding_stats)
+            },
         },
         "validation_issue_counts": dict(sorted(issues.counts.items())),
     }
@@ -1287,6 +1679,8 @@ def build_index_documents(
             "asr": asr_stats,
             "objects": object_stats,
             "clip": clip_stats,
+            "embeddings": embedding_stats,
+            "embedding_provider_policy": embedding_provider_policy,
             "indexability": manifest["indexability_counts"],
         },
         "drop_reasons": {
@@ -1297,6 +1691,7 @@ def build_index_documents(
         **asr_samples,
         **object_samples,
         **clip_samples,
+        **embedding_samples,
         "identity_schema_error_samples": issues.all_samples(),
         "validation_issue_counts": dict(sorted(issues.counts.items())),
     }
