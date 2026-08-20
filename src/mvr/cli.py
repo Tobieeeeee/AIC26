@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -20,6 +21,7 @@ from .ingestion.pipeline import run_pipeline
 from .retrieval.frame_refinement import RefinementWindowConfig, refine_top_candidates
 from .retrieval.kis import KisCandidate, search_kis
 from .retrieval.semantic import SemanticRetriever
+from .enrichment.ocr.scene_text import process_video_ocr
 
 
 KIS_BENCHMARK_TOP_K = 100
@@ -118,6 +120,25 @@ def _add_build_aic_index_parser(subparsers: argparse._SubParsersAction) -> None:
         default="auto",
     )
     parser.set_defaults(command="build-aic-index")
+
+
+def _add_enrich_ocr_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "enrich-ocr",
+        help="Run temporal OCR enrichment on extracted keyframes",
+    )
+    parser.add_argument("--mapping-csv", type=Path, required=True)
+    parser.add_argument("--video-root", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "cuda", "mps"],
+        default="auto",
+    )
+    parser.add_argument("--ocr-conf-threshold", type=float, default=0.50)
+    parser.add_argument("--text-similarity-threshold", type=float, default=0.80)
+    parser.add_argument("--bbox-iou-threshold", type=float, default=0.30)
+    parser.set_defaults(command="enrich-ocr")
 
 
 def _discover_aic_video_ids(dataset_root: Path) -> list[str]:
@@ -256,6 +277,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     _add_search_parser(subparsers)
     _add_build_aic_index_parser(subparsers)
     _add_benchmark_kis_parser(subparsers)
+    _add_enrich_ocr_parser(subparsers)
     values = vars(parser.parse_args(argv))
     command = values.pop("command")
     if command == "ingest":
@@ -278,6 +300,42 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
     if command == "benchmark-kis":
         _run_benchmark_kis(**values)
+        return
+    if command == "enrich-ocr":
+        from .enrichment.ocr.scene_text import process_video_ocr
+        mapping_csv = values.pop("mapping_csv")
+        video_root = values.pop("video_root")
+        output = values.pop("output")
+        device = values.pop("device")
+        ocr_conf = values.pop("ocr_conf_threshold")
+        text_sim = values.pop("text_similarity_threshold")
+        bbox_iou = values.pop("bbox_iou_threshold")
+
+        # We process each video separately. A naive way is to loop over videos based on the mapping-csv.
+        # However, mapping-csv contains all keyframes. We can group them by video, then find the shots.json.
+        # But wait, the instruction says "Run temporal OCR enrichment". The input contract:
+        # artifacts/ingest_<dataset>/
+        # ├── video_metadata.csv
+        # ├── keyframes/
+        # ├── keyframe_mapping.csv
+        # └── shots.json
+        # So we process the entire dataset ingest dir!
+        # wait, video-root is supposed to be the root of the raw videos?
+        # The prompt says: --video-root
+        # Yes, extract_keyframes needs the original video file.
+
+        # Let's write the handler here or call a main function in scene_text.py
+        from .enrichment.ocr.scene_text import process_dataset_ocr
+        manifest = process_dataset_ocr(
+            mapping_csv=mapping_csv,
+            video_root=video_root,
+            output_dir=output,
+            device=device,
+            ocr_conf_threshold=ocr_conf,
+            text_similarity_threshold=text_sim,
+            bbox_iou_threshold=bbox_iou
+        )
+        print(json.dumps(manifest, indent=2, ensure_ascii=False))
         return
 
     index = FaissIndex.load(values.pop("index"))
