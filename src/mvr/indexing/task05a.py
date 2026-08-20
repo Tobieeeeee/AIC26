@@ -266,23 +266,39 @@ def _canonical_lookup(
     keyframes: Iterable[CanonicalKeyframe],
 ) -> tuple[
     dict[tuple[str, str], CanonicalKeyframe],
-    dict[str, CanonicalKeyframe],
+    dict[str, set[str]],
 ]:
+    """The canonical index, plus which videos claim each keyframe id.
+
+    This required `keyframe_id` to be globally unique and raised otherwise.
+    That held while the team generated its own ids -- `L21_V001_S0007_K01`
+    spells the video into the id -- and the organizer's do not: 166,550
+    keyframes carry 632 distinct ids, one per video, so "034" is in 842 of
+    them. Building Task05A documents over the organizer's corpus raised on
+    the second video, which blocked *everything* downstream, since the
+    lexical index, the provider indexes and the OCR documents all read from
+    those documents.
+
+    The second return value is diagnostics only, and deliberately not a
+    lookup: it lets `_resolve_canonical` still tell "this keyframe belongs
+    to another video" (`identity_mismatch`) from "no such keyframe"
+    (`extra_identity`), which the uniqueness assumption used to give for
+    free.
+    """
     by_identity: dict[tuple[str, str], CanonicalKeyframe] = {}
-    by_keyframe_id: dict[str, CanonicalKeyframe] = {}
+    videos_by_keyframe_id: dict[str, set[str]] = {}
     for keyframe in keyframes:
         by_identity[keyframe.identity] = keyframe
-        if keyframe.keyframe_id in by_keyframe_id:
-            raise Task05AValidationError(
-                f"keyframe_id is not globally unique: {keyframe.keyframe_id}"
-            )
-        by_keyframe_id[keyframe.keyframe_id] = keyframe
-    return by_identity, by_keyframe_id
+        videos_by_keyframe_id.setdefault(keyframe.keyframe_id, set()).add(
+            keyframe.video_id
+        )
+    return by_identity, videos_by_keyframe_id
 
 
 def _resolve_canonical(
     payload: Mapping[str, Any],
-    by_keyframe_id: Mapping[str, CanonicalKeyframe],
+    by_identity: Mapping[tuple[str, str], CanonicalKeyframe],
+    videos_by_keyframe_id: Mapping[str, set[str]],
     *,
     branch: str,
     path: Path,
@@ -298,8 +314,24 @@ def _resolve_canonical(
             path=path,
         )
         return None
-    canonical = by_keyframe_id.get(keyframe_id)
-    if canonical is None:
+    canonical = by_identity.get((video_id, keyframe_id))
+    if canonical is not None:
+        return canonical
+    # The artifact does not name a keyframe we hold. Which of the two
+    # reasons it is used to fall out of the lookup itself, back when a
+    # keyframe_id was assumed globally unique.
+    known_videos = videos_by_keyframe_id.get(keyframe_id)
+    if known_videos:
+        issues.add(
+            "identity_mismatch",
+            f"video_id {video_id!r} is not among {sorted(known_videos)!r} "
+            f"for keyframe {keyframe_id!r}",
+            branch=branch,
+            keyframe_id=keyframe_id,
+            video_id=video_id,
+            path=path,
+        )
+    else:
         issues.add(
             "extra_identity",
             "artifact identity is not in canonical mapping",
@@ -308,18 +340,7 @@ def _resolve_canonical(
             video_id=video_id,
             path=path,
         )
-        return None
-    if canonical.video_id != video_id:
-        issues.add(
-            "identity_mismatch",
-            f"video_id {video_id!r} != canonical {canonical.video_id!r}",
-            branch=branch,
-            keyframe_id=keyframe_id,
-            video_id=video_id,
-            path=path,
-        )
-        return None
-    return canonical
+    return None
 
 
 def _validate_branch_identity(
@@ -400,7 +421,7 @@ def _load_ocr(
     config: Task05AConfig,
     issues: _IssueCollector,
 ) -> tuple[dict[tuple[str, str], list[dict[str, Any]]], dict[str, Any], dict[str, Any]]:
-    by_identity, by_keyframe_id = _canonical_lookup(canonical)
+    by_identity, videos_by_keyframe_id = _canonical_lookup(canonical)
     outputs: dict[tuple[str, str], list[dict[str, Any]]] = {}
     drop_counts: Counter[str] = Counter()
     input_entries = 0
@@ -438,7 +459,8 @@ def _load_ocr(
                 continue
             mapped = _resolve_canonical(
                 payload,
-                by_keyframe_id,
+                by_identity,
+                videos_by_keyframe_id,
                 branch="ocr",
                 path=path,
                 issues=issues,
@@ -647,7 +669,7 @@ def _load_asr(
     config: Task05AConfig,
     issues: _IssueCollector,
 ) -> tuple[dict[tuple[str, str], list[dict[str, Any]]], dict[str, Any], dict[str, Any]]:
-    by_identity, by_keyframe_id = _canonical_lookup(canonical)
+    by_identity, videos_by_keyframe_id = _canonical_lookup(canonical)
     manifest, _ = _load_manifest(root)
     raw_by_identity: dict[tuple[str, str], list[dict[str, Any]]] = {}
     all_records: list[dict[str, Any]] = []
@@ -677,7 +699,8 @@ def _load_asr(
                 continue
             mapped = _resolve_canonical(
                 payload,
-                by_keyframe_id,
+                by_identity,
+                videos_by_keyframe_id,
                 branch="asr",
                 path=path,
                 issues=issues,
@@ -804,7 +827,7 @@ def _load_objects(
     config: Task05AConfig,
     issues: _IssueCollector,
 ) -> tuple[dict[tuple[str, str], dict[str, Any]], dict[str, Any], dict[str, Any]]:
-    by_identity, by_keyframe_id = _canonical_lookup(canonical)
+    by_identity, videos_by_keyframe_id = _canonical_lookup(canonical)
     outputs: dict[tuple[str, str], dict[str, Any]] = {}
     seen: set[tuple[str, str]] = set()
     object_entries = 0
@@ -828,7 +851,8 @@ def _load_objects(
                 continue
             mapped = _resolve_canonical(
                 payload,
-                by_keyframe_id,
+                by_identity,
+                videos_by_keyframe_id,
                 branch="objects",
                 path=path,
                 issues=issues,
@@ -926,7 +950,7 @@ def _load_clip(
     config: Task05AConfig,
     issues: _IssueCollector,
 ) -> tuple[dict[tuple[str, str], dict[str, Any]], dict[str, Any], dict[str, Any]]:
-    by_identity, by_keyframe_id = _canonical_lookup(canonical)
+    by_identity, videos_by_keyframe_id = _canonical_lookup(canonical)
     outputs: dict[tuple[str, str], dict[str, Any]] = {}
     invalid_by_identity: dict[tuple[str, str], str] = {
         identity: "missing_mapping" for identity in by_identity
@@ -965,7 +989,7 @@ def _load_clip(
             for row_number, row in enumerate(rows, start=2):
                 keyframe_id = str(row.get("keyframe_id", "")).strip()
                 video_id = str(row.get("video_id", "")).strip()
-                canonical_row = by_keyframe_id.get(keyframe_id)
+                canonical_row = by_identity.get((video_id, keyframe_id))
                 if canonical_row is None:
                     mapping_mismatches += 1
                     issues.add(
@@ -1117,7 +1141,7 @@ def _load_embedding_provider(
     """Validate one provider without allowing its failure to affect peers."""
 
     provider_id = provider_root.name
-    by_identity, by_keyframe_id = _canonical_lookup(canonical)
+    by_identity, videos_by_keyframe_id = _canonical_lookup(canonical)
     try:
         artifact = load_provider_artifact(provider_root, verify_checksum=True)
     except (EmbeddingArtifactError, OSError, ValueError) as exc:
@@ -1189,7 +1213,7 @@ def _load_embedding_provider(
     for row in rows:
         keyframe_id = str(row.get("keyframe_id", "")).strip()
         video_id = str(row.get("video_id", "")).strip()
-        canonical_row = by_keyframe_id.get(keyframe_id)
+        canonical_row = by_identity.get((video_id, keyframe_id))
         if canonical_row is None:
             extra_ids.add(keyframe_id)
             issues.add(

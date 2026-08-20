@@ -36,7 +36,11 @@ def _config(**kwargs):
     values = {
         "run_id": "test-run",
         "queries": ({"id": "Q1", "text": "query"},),
-        "canonical_ids": frozenset({"K1", "K2", "K3", "K4", "K5"}),
+        # (video_id, keyframe_id): the bare id would validate a result
+        # from any video, and 842 organizer videos share each id.
+        "canonical_ids": frozenset(
+            ("V1", f"K{i}") for i in range(1, 6)
+        ),
         "warmup_runs": 1,
         "measured_runs": 2,
     }
@@ -107,7 +111,7 @@ def test_noncanonical_result_fails_structural_gate() -> None:
 
 def test_count_and_provider_coverage_mismatches_fail() -> None:
     with pytest.raises(MultiEmbeddingFasttestError, match="count"):
-        _config(canonical_ids=frozenset({"K1"}))
+        _config(canonical_ids=frozenset({("V1", "K1")}))
 
     def missing_provider(query, providers, top_k):
         response = _retrieve(query, providers, top_k)
