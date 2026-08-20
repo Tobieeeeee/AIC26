@@ -808,13 +808,42 @@ Blockers:
 
 - None.
 
+# Multi-Embedding Task 10 — Provider-Specific Semantic Indexes
+
+Status: COMPLETE
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added a provider-isolated semantic index builder gated by the Task05A
+  provider flag, current provider manifest hash, canonical `keyframe_id`,
+  dimension, dtype, finite-value, normalization, and locator checks.
+- Added environment/dataset/provider collection namespaces and a routing guard
+  that rejects cross-provider collections before backend calls.
+- Added explicit create/rebuild/append policies, batching, partial-failure
+  accounting, provenance manifests, and a persistent exact FAISS backend.
+- Added a multi-provider build CLI and operator documentation.
+
+Verification:
+
+- Fake-backend unit suite: 8 passed.
+- Task09/Task10 plus real FAISS backend integration: 19 passed.
+- Five-vector contracts independently indexed BEiT-3, MetaCLIP-2, and PE with
+  zero missing/extra/duplicates/failures in the acceptance fixture.
+- CLI help, Python compilation, and `git diff --check`: passed.
+
+Blockers:
+
+- None. Full-corpus index construction remains Task 15 and was not run.
+
 # Current active phase
 
-Multi-Embedding Task 09 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 10 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 10 provider-specific indexes.
+Next action: begin Task 11 provider query encoders.
 
 The user explicitly approved automatic continuation through Task 16 for this
 task pack. Expensive full-corpus execution remains separately approval-gated.
