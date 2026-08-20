@@ -121,6 +121,20 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--elasticsearch-url", type=str, default=None,
+        help=(
+            "Fuse Task05B lexical (BM25 over OCR + ASR) with semantic retrieval. "
+            "Aimed at the measured failure mode of p1-19 and p1-22: both have "
+            "ZERO candidates from the correct video, because what distinguishes "
+            "them is text -- recited poetry, an on-screen title -- not scene "
+            "appearance. Without this flag retrieval stays semantic-only."
+        ),
+    )
+    parser.add_argument(
+        "--lexical-index", type=str, default=None,
+        help="Elasticsearch index name holding the Task05B documents",
+    )
+    parser.add_argument(
         "--records", type=Path, default=None,
         help=(
             "Directory of Task05A documents (<root>/<video_id>/<keyframe_id>.json). "
@@ -162,6 +176,30 @@ def main() -> None:
         device=args.device,
     )
     semantic_service = SemanticRetriever(encoder, index)
+
+    # Lexical fusion is opt-in: it needs a running Elasticsearch holding the
+    # Task05B documents. Without it the pipeline behaves exactly as before.
+    multimodal_service = None
+    if args.elasticsearch_url:
+        if not args.lexical_index:
+            raise SystemExit("--elasticsearch-url requires --lexical-index")
+        from elasticsearch import Elasticsearch
+
+        from mvr.retrieval.lexical_bm25 import search_task05b_lexical
+        from mvr.retrieval.qna_fusion import QnaFusedRetriever
+
+        client = Elasticsearch(args.elasticsearch_url)
+        index_name = args.lexical_index
+
+        def lexical_search(query: str, *, top_k: int):
+            return search_task05b_lexical(client, query, index_name=index_name, top_k=top_k)
+
+        multimodal_service = QnaFusedRetriever(
+            semantic_service=semantic_service, lexical_search=lexical_search
+        )
+        print(f"[retrieval] semantic + lexical BM25 ({index_name})")
+    else:
+        print("[retrieval] semantic only (pass --elasticsearch-url to add BM25)")
 
     aic_registry = AicDatasetRegistry(args.dataset_root)
     objects_root = args.dataset_root / "objects"
@@ -240,7 +278,7 @@ def main() -> None:
         question,
         top_k=args.top_k,
         semantic_service=semantic_service,
-        multimodal_service=None,
+        multimodal_service=multimodal_service,
         aic_registry=aic_registry,
         answer_reasoner=answer_reasoner,
         ocr_engine=ocr_engine,

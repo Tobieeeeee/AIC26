@@ -840,6 +840,81 @@ argues against it: p1-15's answer sat 4 keyframes past the retrieval hit,
 roughly 9 seconds of broadcast news, almost certainly across several shots.
 Stopping there would discard the only hit this system has ever scored.
 
+## 3l. Fusing lexical retrieval (Task05B) into Q&A
+
+`feat/lexical` landed on `main` with an Elasticsearch BM25 index over
+exactly two fields:
+
+```python
+SEARCHABLE_FIELDS = ["ocr_text", "asr_text"]
+```
+
+Those are the two signals the measured failures need. Of the three verified
+queries, two score zero and both are **retrieval** failures -- neither has a
+single candidate from the correct video, so answering and budget changes
+cannot reach them, and temporal expansion cannot either since it only
+expands around videos retrieval already found:
+
+| query | asks about | signal |
+|---|---|---|
+| p1-19 | "Hai câu thơ đó là gì?" -- poetry, **recited** | `asr_text` |
+| p1-22 | the recipe title, **on screen** | `ocr_text` |
+
+Finding those two videos by hand earlier meant scanning `media_info`
+titles: doing BM25's job manually.
+
+### `QnaFusedRetriever`
+
+Semantic (FAISS/CLIP) + lexical (BM25), fused with the existing `rrf_fuse`,
+exposed as `search_hybrid` so `search_qna` consumes it unchanged. Opt-in via
+`--elasticsearch-url` + `--lexical-index`; without them the pipeline is
+semantic-only exactly as before.
+
+**Fusion keys on `(video_id, keyframe_id)`, never the bare id.** The real
+index holds **166,550 keyframes with only 632 distinct ids** -- `"001"`
+exists in roughly 850 videos. Fusing on the id alone would merge unrelated
+frames from unrelated videos into one ranked entry.
+
+Worth flagging to the team: `mvr.api.app.MultimodalService.search_hybrid`
+does key RRF on `frame_id` alone. That is safe while ids are this repo's own
+globally-unique `<video>_S0007_K01`, and unsafe for organizer-style ids. Not
+changed here -- different code path, different owner -- but it is the same
+trap.
+
+### `frame_id` vs `frame_idx`
+
+Two names differing by three characters, meaning entirely different things:
+
+```
+frame_id   in a search hit  ->  the KEYFRAME id       ("034", "V_S0007_K01")
+frame_idx                   ->  the ORIGINAL-VIDEO frame  (1745)
+```
+
+`LexicalSearchHit` carries both, so the adapter maps them explicitly rather
+than guessing. Swapping them would make every candidate fail to resolve --
+silently, since an unresolvable candidate is simply dropped.
+
+Because the lexical document states `frame_idx`, `search_qna` now uses it
+directly and skips keyframe->frame resolution for those hits. **Only at
+offset 0**: `frame_idx` describes the hit's own keyframe, and a temporally
+expanded neighbour is a different frame. Reusing the parent's index would
+submit the parent's frame under the neighbour's id -- a wrong answer that
+looks perfectly well-formed. When both a hit `frame_idx` and a resolver
+mapping exist and disagree, this raises rather than picking a winner.
+
+### Degradation is asymmetric on purpose
+
+A failing **lexical** branch is caught and logged: Elasticsearch being
+unreachable should cost recall, not the query. A failing **semantic** branch
+propagates: it is the primary path, and swallowing its failure would hide an
+outage behind quietly worse results.
+
+### Not yet measured
+
+This cannot be scored until Elasticsearch is running with the Task05B
+documents indexed, which needs `build_index_documents` over the corpus
+first. The adapter and its 14 tests are ready; the measurement is not.
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report

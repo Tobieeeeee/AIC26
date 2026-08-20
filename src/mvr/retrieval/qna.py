@@ -380,6 +380,22 @@ def search_qna(
             pipeline_resolver=pipeline_resolver,
             aic_registry=aic_registry,
         )
+        # A lexical hit already states its own competition frame index, so
+        # requiring a keyframe->frame mapping on top of it asks twice. Only
+        # at offset 0: `frame_idx` describes the HIT's keyframe, and a
+        # temporally expanded neighbour is a different frame -- reusing the
+        # parent's index would submit the parent's frame under the
+        # neighbour's id, a wrong answer that looks perfectly well-formed.
+        if offset == 0:
+            hit_frame_idx = hit.get("frame_idx")
+            if hit_frame_idx is not None:
+                hit_frame_idx = int(hit_frame_idx)
+                if frame_id is not None and frame_id != hit_frame_idx:
+                    raise ValueError(
+                        f"frame_idx disagreement for ({video_id!r}, {keyframe_id!r}): "
+                        f"hit says {hit_frame_idx}, resolver says {frame_id}"
+                    )
+                frame_id = hit_frame_idx
         if frame_id is None:
             continue
         key = (video_id, frame_id)
