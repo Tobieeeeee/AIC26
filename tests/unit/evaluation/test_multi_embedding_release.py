@@ -24,5 +24,7 @@ def test_release_gate_reports_architecture_hygiene_and_operational_blockers(
     assert report["provider_matrix"]["perception_encoder"]["dimension"] == 1024
     assert report["repository_hygiene"]["banned_tracked_artifacts"] == []
     assert report["repository_hygiene"]["oversized_tracked_files"] == []
-    assert len(report["operational_blockers"]) >= 4
+    assert len(report["operational_blockers"]) == 2
+    assert all("not run locally" not in item for item in report["operational_blockers"])
+    assert report["real_fasttest_evidence"].startswith("not evaluated")
     assert json.loads(serialize_release_report(report))["quality_claim"].startswith("none")

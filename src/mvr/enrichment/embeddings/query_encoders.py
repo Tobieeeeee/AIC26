@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from .artifacts import verify_file_sha256
 from .beit3 import Beit3ImageEncoder
 from .metaclip2 import MetaClip2ImageEncoder
 from .perception_encoder import PerceptionEncoderImageEncoder
@@ -78,13 +79,14 @@ class Beit3TextEncoder:
 
     @staticmethod
     def _load_runtime(spec, checkpoint_path, tokenizer_path, device):
+        verify_file_sha256(
+            tokenizer_path, spec.tokenizer_sha256, "BEiT-3 tokenizer"
+        )
         image_encoder = Beit3ImageEncoder(
             spec=spec, checkpoint_path=checkpoint_path, device=device
         )
         torch, model, runtime = image_encoder._get_runtime()
         _, resolved_device = runtime
-        if not tokenizer_path.is_file():
-            raise FileNotFoundError(f"BEiT-3 tokenizer not found: {tokenizer_path}")
         try:
             transformers = importlib.import_module("transformers")
             tokenizer = transformers.XLMRobertaTokenizer(str(tokenizer_path))

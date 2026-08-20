@@ -35,6 +35,7 @@ class ProviderSpec:
     checkpoint_or_pretrained: str
     model_revision: str | None
     checkpoint_sha256: str | None
+    tokenizer_sha256: str | None
     source_repository: str
     source_revision: str
     official_sources: tuple[str, ...]
@@ -85,6 +86,15 @@ class ProviderSpec:
         checksum = payload.get("checkpoint_sha256")
         if checksum is not None and not re.fullmatch(r"[0-9a-f]{64}", checksum):
             raise ProviderSpecError("checkpoint_sha256 must be null or a SHA256 hex digest")
+        if model_id in {"beit3", "perception_encoder"} and checksum is None:
+            raise ProviderSpecError(f"{model_id} requires a locked checkpoint_sha256")
+        tokenizer_checksum = payload.get("tokenizer_sha256")
+        if tokenizer_checksum is not None and not re.fullmatch(
+            r"[0-9a-f]{64}", tokenizer_checksum
+        ):
+            raise ProviderSpecError("tokenizer_sha256 must be null or a SHA256 hex digest")
+        if model_id == "beit3" and tokenizer_checksum is None:
+            raise ProviderSpecError("BEiT-3 requires a locked tokenizer_sha256")
 
         sources = payload.get("official_sources")
         dependencies = payload.get("dependencies")
@@ -121,6 +131,7 @@ class ProviderSpec:
             checkpoint_or_pretrained=_required_text(payload, "checkpoint_or_pretrained"),
             model_revision=model_revision,
             checkpoint_sha256=checksum,
+            tokenizer_sha256=tokenizer_checksum,
             source_repository=_required_text(payload, "source_repository"),
             source_revision=source_revision,
             official_sources=tuple(sources),

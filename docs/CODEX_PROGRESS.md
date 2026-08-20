@@ -1003,13 +1003,15 @@ Verification:
 - Python compilation and `git diff --check`: PASS.
 - Full repository pytest in the CI dependency set: PASS, 429 passed and 9
   opt-in/real-runtime tests skipped.
-- `pip check` in `mvr-asr:prepush`: FAIL because that ASR image preinstalls
-  `torchaudio 2.5.1+cpu` while the broad semantic extra resolves newer Torch;
-  this is separate from the configured CI pytest gate.
+- Historical pre-isolation `pip check` failed when a broad semantic extra was
+  installed into `mvr-asr:prepush`. The current unchanged ASR image now passes
+  `pip check` with Torch/torchaudio `2.5.1+cpu`; semantic providers remain in
+  separate pinned images.
 
 Operational blockers:
 
-- Real-weight three-provider five-keyframe inference is unavailable locally.
+- At this historical Task 16 checkpoint, real-weight three-provider inference
+  had not yet run; the acceptance follow-up below supersedes this status.
 - Full-corpus execution and representative-ground-truth evaluation remain
   approval- and resource-gated.
 
@@ -1057,6 +1059,37 @@ complete and regression-verified.
 
 Next action: resolve the full-corpus commands and resource plan, then request
 explicit approval before any non-dry-run full build.
+
+# Multi-embedding pre-commit remediation
+
+Status: PASS; FULL-CORPUS RELEASE REMAINS APPROVAL-GATED
+
+- Removed developer-specific absolute paths from committed fasttest config and
+  the full-corpus runbook.
+- Locked the BEiT-3 tokenizer SHA256 alongside the checkpoint and made both
+  image and text runtime paths reject missing or altered assets before model
+  loading.
+- Hardened recorded-query replay to validate provider identity, revision,
+  dimension, dtype, normalization, vector SHA256, provider-specific index
+  contract, and source embedding manifest SHA256.
+- Pinned all three embedding Docker base images by digest.
+- Corrected canonical/feature mapping hashes, recorded the five input image
+  hashes, clarified BEiT-3 asset licensing, and reconciled the current ASR
+  dependency status.
+- The static release audit no longer claims that real inference did not run;
+  it explicitly leaves real artifact validation to the runtime evidence audit.
+
+Verification:
+
+- Focused provenance/query/release tests: 54 passed.
+- Full regression: 438 passed, 9 intentional opt-in/optional-runtime skips.
+- Real BEiT-3, MetaCLIP-2, and Perception Encoder five-keyframe tests: PASS.
+- Three pinned-digest Docker builds and `pip check`: PASS.
+- Recorded query/index evidence replay, structural release audit, full-corpus
+  dry run, and `git diff --check`: PASS.
+
+No full-corpus non-dry-run operation was launched. Full-corpus execution and
+representative-ground-truth quality evaluation remain approval-gated.
 
 # Resume instruction
 

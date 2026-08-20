@@ -14,6 +14,11 @@ from mvr.enrichment.embeddings.beit3 import (
     Beit3ImageEncoder,
     _install_torch_six_inf_compat,
 )
+from mvr.enrichment.embeddings.artifacts import (
+    EmbeddingArtifactError,
+    sha256_file,
+    verify_file_sha256,
+)
 from mvr.enrichment.embeddings.offline import (
     OfflineEmbeddingError,
     audit_embedding_artifact,
@@ -76,6 +81,16 @@ def test_beit3_runtime_is_lazy_and_missing_dependency_is_actionable(tmp_path):
     with pytest.raises(Beit3DependencyError, match="isolated BEiT-3 runtime"):
         encoder.encode_images([tmp_path / "image.jpg"])
     assert calls == [("beit3", tmp_path / "checkpoint.pth", "auto")]
+
+
+def test_locked_asset_checksum_fails_closed_before_model_loading(tmp_path):
+    checkpoint = tmp_path / "checkpoint.pth"
+    checkpoint.write_bytes(b"wrong checkpoint")
+    expected = "0" * 64
+
+    with pytest.raises(EmbeddingArtifactError, match="SHA256 mismatch"):
+        verify_file_sha256(checkpoint, expected, "BEiT-3 checkpoint")
+    assert sha256_file(checkpoint) != expected
 
 
 def _rows(root: Path):

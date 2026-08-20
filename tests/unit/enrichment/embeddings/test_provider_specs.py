@@ -63,6 +63,16 @@ def test_perception_checkpoint_has_published_sha256():
     )
 
 
+def test_beit3_locks_checkpoint_and_tokenizer_sha256():
+    provider = load_provider_specs(SPEC_PATH).get("beit3")
+    assert provider.checkpoint_sha256 == (
+        "d483a41d92b9aea7ef87d17551413b8c22faae927110666b01ac3aa7a199a25b"
+    )
+    assert provider.tokenizer_sha256 == (
+        "6f5e2fefcf793761a76a6bfb8ad35489f9c203b25557673284b6d032f41043f4"
+    )
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
@@ -92,6 +102,28 @@ def test_rejects_duplicate_provider_id(tmp_path):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ProviderSpecError, match="must be unique"):
+        load_provider_specs(path)
+
+
+def test_rejects_beit3_without_locked_tokenizer_sha256(tmp_path):
+    payload = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+    payload["providers"][0]["tokenizer_sha256"] = None
+    path = tmp_path / "providers.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ProviderSpecError, match="requires a locked tokenizer"):
+        load_provider_specs(path)
+
+
+@pytest.mark.parametrize("model_id", ["beit3", "perception_encoder"])
+def test_rejects_local_checkpoint_provider_without_sha256(tmp_path, model_id):
+    payload = json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+    provider = next(row for row in payload["providers"] if row["model_id"] == model_id)
+    provider["checkpoint_sha256"] = None
+    path = tmp_path / "providers.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ProviderSpecError, match="requires a locked checkpoint"):
         load_provider_specs(path)
 
 

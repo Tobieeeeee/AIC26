@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from .artifacts import verify_file_sha256
 from .provider_specs import ProviderSpec
 
 
@@ -47,8 +48,9 @@ class Beit3ImageEncoder:
 
     @staticmethod
     def _load_official_runtime(spec: ProviderSpec, checkpoint: Path, device: str):
-        if not checkpoint.is_file():
-            raise FileNotFoundError(f"BEiT-3 checkpoint not found: {checkpoint}")
+        verify_file_sha256(
+            checkpoint, spec.checkpoint_sha256, "BEiT-3 checkpoint"
+        )
         try:
             torch = importlib.import_module("torch")
             timm = importlib.import_module("timm")

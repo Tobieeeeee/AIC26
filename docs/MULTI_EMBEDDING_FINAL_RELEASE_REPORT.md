@@ -103,14 +103,18 @@ identities. These are deterministic injected vectors, not real model outputs.
 - Lint, type-check, formatter, and dependency/security scanners: not configured
   in `pyproject.toml` or CI; no substitute result is claimed. The release audit
   supplies static architecture and Git-hygiene checks.
-- Extra `pip check` in `mvr-asr:prepush`: FAIL because the image preinstalls
-  `torchaudio 2.5.1+cpu`, while the broad semantic extra resolves a newer Torch.
-  This mixed image is not the configured CI environment; pytest is separate.
+- Current `pip check` in the unchanged `mvr-asr:prepush` image: PASS with
+  Torch `2.5.1+cpu` and torchaudio `2.5.1+cpu`. Semantic providers use their
+  own pinned images and are not installed into the ASR image.
+- Current post-remediation regression: 438 passed and 9 intentional
+  opt-in/optional-runtime tests skipped; each of the three real-provider
+  fasttests was activated separately and passed.
 
 ## Remaining skips and blockers
 
-- Real three-provider five-keyframe inference: model assets and isolated
-  provider runtimes are not all available locally.
+- Real three-provider five-keyframe inference: completed after this initial
+  Task 16 snapshot; see `REAL_THREE_PROVIDER_FASTTEST_REPORT.md`. This remains
+  runtime/integration evidence, not a representative quality benchmark.
 - Full-corpus extraction/indexing/online smoke/benchmark: not launched because
   commands still contain approval-blocking placeholders, the extracted root and
   canonical mapping are absent, and resource estimates are unmeasured.

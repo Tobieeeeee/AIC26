@@ -9,7 +9,7 @@ from mvr.enrichment.embeddings.openclip import OpenClipEncoder
 from mvr.enrichment.embeddings.beit3 import Beit3ImageEncoder
 from mvr.enrichment.embeddings.metaclip2 import MetaClip2ImageEncoder
 from mvr.enrichment.embeddings.perception_encoder import PerceptionEncoderImageEncoder
-from mvr.enrichment.embeddings.artifacts import sha256_file
+from mvr.enrichment.embeddings.artifacts import verify_file_sha256
 from mvr.enrichment.embeddings.offline import (
     extract_embedding_artifacts,
     run_selected_embedding_providers,
@@ -111,6 +111,9 @@ def main():
             parser.error("--beit3-checkpoint is required when selecting beit3")
         specs = load_provider_specs(args.provider_specs)
         spec = specs.get("beit3")
+        checkpoint_hash = verify_file_sha256(
+            args.beit3_checkpoint, spec.checkpoint_sha256, "BEiT-3 checkpoint"
+        )
         encoder = Beit3ImageEncoder(
             spec=spec,
             checkpoint_path=args.beit3_checkpoint,
@@ -123,7 +126,7 @@ def main():
             spec=spec,
             encoder=encoder,
             batch_size=args.embedding_batch_size,
-            checkpoint_sha256=sha256_file(args.beit3_checkpoint),
+            checkpoint_sha256=checkpoint_hash,
         )
 
     def run_metaclip2():
@@ -152,12 +155,11 @@ def main():
             )
         specs = load_provider_specs(args.provider_specs)
         spec = specs.get("perception_encoder")
-        checkpoint_hash = sha256_file(args.perception_encoder_checkpoint)
-        if spec.checkpoint_sha256 and checkpoint_hash != spec.checkpoint_sha256:
-            raise ValueError(
-                "Perception Encoder checkpoint SHA256 does not match locked spec: "
-                f"{checkpoint_hash}"
-            )
+        checkpoint_hash = verify_file_sha256(
+            args.perception_encoder_checkpoint,
+            spec.checkpoint_sha256,
+            "Perception Encoder checkpoint",
+        )
         encoder = PerceptionEncoderImageEncoder(
             spec=spec,
             checkpoint_path=args.perception_encoder_checkpoint,

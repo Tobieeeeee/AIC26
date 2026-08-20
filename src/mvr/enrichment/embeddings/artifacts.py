@@ -47,6 +47,24 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def verify_file_sha256(path: Path, expected_sha256: str | None, asset_name: str) -> str:
+    """Fail closed when a local model asset is absent, unlocked, or altered."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"{asset_name} not found: {path}")
+    if not isinstance(expected_sha256, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", expected_sha256
+    ):
+        raise EmbeddingArtifactError(f"{asset_name} has no locked SHA256")
+    actual_sha256 = sha256_file(path)
+    if actual_sha256 != expected_sha256:
+        raise EmbeddingArtifactError(
+            f"{asset_name} SHA256 mismatch: expected {expected_sha256}, "
+            f"got {actual_sha256}"
+        )
+    return actual_sha256
+
+
 def _require_string(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise EmbeddingArtifactError(f"{field} must be a non-empty string")

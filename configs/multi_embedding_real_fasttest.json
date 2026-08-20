@@ -16,14 +16,14 @@
     },
     "perception_encoder": {
       "runtime_image": "mvr-embedding-perception-encoder:real-fasttest",
-      "checkpoint": "C:/Code_Save/.vscode/dataset_aic/models/multi_embedding/assets/perception_encoder/PE-Core-L14-336.pt",
+      "checkpoint": "../dataset_aic/models/multi_embedding/assets/perception_encoder/PE-Core-L14-336.pt",
       "revision": "ee1fdb467ab42497fa2e60e94a79e9d7383c1cbd",
       "artifact_directory": "artifacts/fasttest_real_3models/features/embeddings/perception_encoder"
     },
     "beit3": {
       "runtime_image": "mvr-embedding-beit3:real-fasttest",
-      "checkpoint": "C:/Code_Save/.vscode/dataset_aic/models/multi_embedding/assets/beit3/beit3_base_itc_patch16_224.pth",
-      "tokenizer": "C:/Code_Save/.vscode/dataset_aic/models/multi_embedding/assets/beit3/beit3.spm",
+      "checkpoint": "../dataset_aic/models/multi_embedding/assets/beit3/beit3_base_itc_patch16_224.pth",
+      "tokenizer": "../dataset_aic/models/multi_embedding/assets/beit3/beit3.spm",
       "source_revision": "69961945a2fd283f2beed74d1f3c543265c9930c",
       "artifact_directory": "artifacts/fasttest_real_3models/features/embeddings/beit3",
       "checkpoint_sha256": "d483a41d92b9aea7ef87d17551413b8c22faae927110666b01ac3aa7a199a25b",

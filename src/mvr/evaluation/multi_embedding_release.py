@@ -50,6 +50,12 @@ def audit_multi_embedding_release(repository_root: Path) -> dict[str, Any]:
     indexes = (root / "src/mvr/indexing/provider_indexes.py").read_text(encoding="utf-8")
     rrf = (root / "src/mvr/retrieval/semantic_rrf.py").read_text(encoding="utf-8")
     lexical = (root / "src/mvr/indexing/lexical_index.py").read_text(encoding="utf-8")
+    real_fasttest_config = (
+        root / "configs/multi_embedding_real_fasttest.json"
+    ).read_text(encoding="utf-8")
+    replay_verifier = (
+        root / "scripts/verification/run_real_multi_embedding_retrieval.py"
+    ).read_text(encoding="utf-8")
     architecture_checks = {
         "provider_artifact_layout": "features/embeddings/<model_id>" in (
             root / "docs/MULTI_EMBEDDING_ARTIFACTS.md"
@@ -68,6 +74,22 @@ def audit_multi_embedding_release(repository_root: Path) -> dict[str, Any]:
         ).read_text(encoding="utf-8"),
         "task05b_fields_unchanged": all(
             field in lexical for field in ('"ocr_text"', '"asr_text"')
+        ),
+        "real_fasttest_config_portable": re.search(
+            r'(?i)[a-z]:[\\/]', real_fasttest_config
+        ) is None,
+        "beit3_assets_checksum_locked": bool(
+            specs.get("beit3").checkpoint_sha256
+            and specs.get("beit3").tokenizer_sha256
+        ),
+        "recorded_query_evidence_verified": all(
+            marker in replay_verifier
+            for marker in (
+                'manifest.get("vector_sha256")',
+                'manifest.get("checkpoint_sha256")',
+                'manifest.get("tokenizer_sha256")',
+                'source_embedding_manifest_sha256',
+            )
         ),
     }
 
@@ -98,9 +120,6 @@ def audit_multi_embedding_release(repository_root: Path) -> dict[str, Any]:
         (banned_tracked, banned_staged, oversized_tracked, suspicious_names)
     )
     operational_blockers = [
-        "BEiT-3 real-weight five-keyframe inference not run locally",
-        "MetaCLIP-2 real-weight five-keyframe inference not run locally",
-        "Perception Encoder real-weight five-keyframe inference not run locally",
         "full-corpus extraction, provider audits, indexes, online smoke, and benchmark not run",
         "representative-ground-truth quality evaluation not available",
     ]
@@ -111,6 +130,10 @@ def audit_multi_embedding_release(repository_root: Path) -> dict[str, Any]:
         "provider_matrix": provider_matrix,
         "architecture_checks": architecture_checks,
         "repository_hygiene": hygiene,
+        "real_fasttest_evidence": (
+            "not evaluated by this static audit; validate with the recorded-artifact "
+            "audit and opt-in provider runtime tests"
+        ),
         "operational_blockers": operational_blockers,
         "quality_claim": "none; structural and latency smoke only",
     }

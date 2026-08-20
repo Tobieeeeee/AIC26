@@ -8,6 +8,7 @@
       "checkpoint_or_pretrained": "beit3_base_itc_patch16_224.pth",
       "model_revision": null,
       "checkpoint_sha256": "d483a41d92b9aea7ef87d17551413b8c22faae927110666b01ac3aa7a199a25b",
+      "tokenizer_sha256": "6f5e2fefcf793761a76a6bfb8ad35489f9c203b25557673284b6d032f41043f4",
       "source_repository": "https://github.com/microsoft/unilm",
       "source_revision": "69961945a2fd283f2beed74d1f3c543265c9930c",
       "official_sources": [
@@ -38,7 +39,7 @@
       "dtype": "float32",
       "normalized": true,
       "similarity_metric": "inner_product",
-      "license": "MIT (UniLM code); checkpoint distributed by Microsoft under the repository release",
+      "license": "MIT for UniLM code; the checkpoint and tokenizer are linked by the official UniLM README, but their separate asset license terms must be confirmed before redistribution",
       "access_requirements": "Public direct-download checkpoint and tokenizer; no account or gated approval documented",
       "dependencies": [
         "provider environment: pytorch/pytorch:1.8.1-cuda11.1-cudnn8-devel",
@@ -58,6 +59,7 @@
       "checkpoint_or_pretrained": "facebook/metaclip-2-worldwide-b16",
       "model_revision": "8cc8591f32b43a809f3325192d3b77aa56968ddb",
       "checkpoint_sha256": null,
+      "tokenizer_sha256": null,
       "source_repository": "https://github.com/facebookresearch/MetaCLIP",
       "source_revision": "f47f7841f6a91cc5676729a3d125519393d87d1e",
       "official_sources": [
@@ -107,6 +109,7 @@
       "checkpoint_or_pretrained": "facebook/PE-Core-L14-336:PE-Core-L14-336.pt",
       "model_revision": "ee1fdb467ab42497fa2e60e94a79e9d7383c1cbd",
       "checkpoint_sha256": "0cdab5b338cbaa1e7a5dcd1b2fb4c9f4d5df1abd289564658edbab64a650e7e8",
+      "tokenizer_sha256": null,
       "source_repository": "https://github.com/facebookresearch/perception_models",
       "source_revision": "65a4a17a587b6a89eaa0dc08f231c2cb1c285f9f",
       "official_sources": [

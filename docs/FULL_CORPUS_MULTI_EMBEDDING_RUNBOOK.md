@@ -68,8 +68,8 @@ one provider at a time, with potentially multiple GPU-hours. These are planning
 figures, not measured requirements. Confirm actual GPU VRAM, throughput, model
 access, disk, output target, and backup policy before approval.
 
-The configured output is outside Git:
-`C:\Code_Save\.vscode\dataset_aic\output\multi_embedding_full`.
+The configured output is outside Git and relative to the repository root:
+`../dataset_aic/output/multi_embedding_full`.
 Index policy is `create`; switching to `rebuild` is deliberately rejected by
 the runner until a separate destructive-target approval is implemented.
 
