@@ -409,6 +409,100 @@ weights the organizer used (not the `laion2b_s34b_b79k` weights currently
 indexed). **That is a team-level decision, not a Q&A one.** Likewise ASR,
 running detectors over the full corpus, and multi-embedding RRF.
 
+## 3g. Retrieval work and the first real measurement
+
+### Full-corpus index from organizer features
+
+Re-encoding all 873 videos locally was ~15 CPU-hours; the organizer ships
+CLIP ViT-B/32 features for every video, so
+`scripts/build_qna_index_from_organizer_features.py` assembles
+`artifacts/indexes/qna_organizer_all` (850 videos, **166,550 vectors**) in
+about four minutes. Two traps found while doing it, both silent:
+
+- The shipped float16 vectors have norms ~0.9995, outside `FaissIndex`'s
+  1e-4 tolerance; they are renormalized to exact unit length.
+- **QuickGELU.** `open_clip` accepts `ViT-B-32` + `pretrained="openai"` but
+  builds the wrong activation, warning only. Measured 0.3527 vs **0.3642**
+  for the correct pairing. The manifest records `ViT-B-32-quickgelu`, and
+  every consumer builds its encoder from the manifest, so both this index
+  and the older LAION one coexist safely.
+
+### Query translation
+
+`src/mvr/enrichment/qna_translation.py`, opt-in via `--translate-query`.
+Only the retrieval query is translated; the question reaches the reasoner
+untouched. Measured over the full index:
+
+| query | no translation | with translation |
+|---|---|---|
+| p1-15 | #7709 | **#1** |
+| p1-19 | #5877 | #153 |
+| p2-3  | #1483 | #113 |
+| p3-13 | #1703 | **#38** |
+| median | 3790 | **75** |
+
+The MT model translates proper nouns literally ("Khánh Hòa" → "South
+Korea"); it still wins by ~50x because CLIP leans on scene description
+over names. A name-preserving translator should do better.
+
+### media_info as a diagnostic
+
+`qna_media_info.py` + `find_qna_source_videos.py`. Covers all 873 videos
+(objects cover 59), and found source videos that retrieval could not:
+`L24_V011` for p1-19 and, after the user corrected a wrong assumption
+about the video genre, `L30_V078` ("Lớp học 0 đồng cho người yêu bếp") for
+p1-22 — a title scan beat image search for queries whose distinguishing
+content is abstract ("a class", "teaching others").
+
+### First measurement against human-verified ground truth
+
+Three p1 queries verified by a human (`artifacts/qna/ground_truth.json`).
+Both pipelines score **Final = 0.000**, but the split matters:
+
+| query | right video | GT keyframes | retrieved | gap |
+|---|---|---|---|---|
+| p1-15 | **ranks #1, #2** | 34, 35 | 27, 30 | **4 keyframes (~10s)** |
+| p1-19 | absent from top-20 (rank 153) | 185–188 | — | — |
+| p1-22 | absent from top-20 | 30, 31 | — | — |
+
+**Video-level retrieval already works; frame-level precision is the
+failure.** The organizer requires `frame_id` inside the interval, so a
+4-keyframe miss scores the same as a completely wrong answer.
+
+### Next steps this points to (highest value first)
+
+1. **Temporal expansion.** When a video ranks highly, submit its
+   neighbouring keyframes too. This is what converts p1-15's near-miss
+   into a hit.
+2. **Use the full 100-answer budget.** Runs currently use `--top-k 20`,
+   spending the budget on 20 *different* videos while the top video gets
+   two slots.
+
+Both live in `search_qna`, and the benchmark now makes each change
+measurable.
+
+### Verifying ground truth (two mistakes worth not repeating)
+
+`verify_qna_ground_truth.py` now rejects both, because both happened and
+each silently scores 0 forever: a mistyped `video_id` (`L030_V072`), and
+an interval containing no keyframe (`[186,188]`, nearest keyframes at 153
+and 248) — the system can only emit frame indices of existing keyframes.
+
+### Environment (this machine)
+
+```
+repo            D:\AIC26 (branch feat/qna-competition-ready)
+venv            D:\AIC26\.venv  (py -3.12, extras dev,api,semantic,qna,ocr)
+organizer data  D:\AIC26_data          (raw layout: Keyframes_L*/, map-keyframes-aic25-b1/, ...)
+registry root   D:\AIC26_test_root     (normalized layout AicDatasetRegistry needs)
+queries         D:\AIC_query           (9 Q&A queries across p1/p2/p3)
+index           artifacts/indexes/qna_organizer_all   (850 videos, quickgelu+openai)
+ground truth    artifacts/qna/ground_truth.json       (3 p1 queries, human-verified)
+```
+
+Machine limit: 3.8GB RAM, no GPU — answer generation runs on Kaggle via
+`docs/QNA_KAGGLE_RUNBOOK.md`.
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report
