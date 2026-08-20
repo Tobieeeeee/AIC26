@@ -286,13 +286,53 @@ caller tình cờ gom theo video".
 | `keyframe_mapping.csv` từ data BTC (166.550 dòng, 11 giây) | ✅ xong |
 | `ocr/validator.py` — khoá `(video_id, keyframe_id)` | ✅ xong, kèm 4 test |
 | `lexical_index.py` — `_id`, kiểm trùng, audit, `_scan_ids` O(n²) | ✅ xong |
-| `scene_text.py` — shots.json, video-root, shot_boundaries | ✅ xong, kèm 10 test |
-| `docker_ocr.py` — tìm video ở cả hai layout | ✅ xong |
-| Task05A build documents | ⏳ chờ T1+T2 |
+| `scene_text.py` — shots.json, video-root, shot_boundaries | ✅ xong, kèm 11 test |
+| `docker_ocr.py` — video layout, anchor lookup, gộp canonical | ✅ xong |
+| **`task05a.py` — `_canonical_lookup` raise trên corpus BTC** | ✅ xong |
+| `semantic_rrf.py` + `provider_semantic.py` — RRF multi-embedding | ✅ xong, kèm 6 test |
+| `provider_indexes.py`, `embeddings/{offline,artifacts}.py` | ✅ xong |
+| `fasttest_baseline.py`, `multi_embedding_ablation.py` | ✅ xong |
+| Task05A build documents (chạy thật) | ⏳ chờ T1+T2 |
 | Build lexical index + nối fusion | ⏳ chờ T3 |
 
-**Toàn bộ 590 test pass.** Không chỗ nào trong ba file trên có test trước
-đó, nên phần lớn lỗi ở trên là lỗi chưa từng có gì canh.
+**Toàn bộ 739 test pass.**
+
+### Chốt chặn nặng nhất, đã gỡ
+
+`task05a._canonical_lookup` **bắt buộc `keyframe_id` duy nhất toàn cục** và
+raise nếu không:
+
+```
+Task05AValidationError: keyframe_id is not globally unique: 034
+```
+
+Nghĩa là `build_index_documents` **không dựng nổi một document nào** trên
+corpus BTC — dừng ngay ở video thứ hai. Mà lexical index, provider index và
+OCR document đều đọc từ những document đó. Cả hệ thống đứng ở đây.
+
+### Kiểm chứng end-to-end trên định danh BTC thật
+
+Hai video cùng có keyframe `034`:
+
+```
+1. Task05A canonical lookup : 2 keyframe                     (trước: raise)
+2. Elasticsearch _id        : ['L21_V001/034','L21_V002/034'] (trước: ['034','034'])
+3. Multi-embedding RRF      : 2 kết quả                       (trước: 1)
+4. OCR anchor lookup        : V001→1745, V002→900             (trước: cả hai đều 900)
+```
+
+### Về hệ multi-embedding vừa merge (PR #7)
+
+Code mới cũng dính đúng lỗi này, ở hai dạng khác nhau:
+
+- **Trích xuất và index thì raise** — `offline`, `artifacts`, `provider_indexes`
+  đều coi video thứ hai là trùng lặp, nên không build được gì.
+- **Truy hồi thì vứt kết quả im lặng** — `provider_semantic` và `semantic_rrf`
+  coi hai frame khác nhau là một, giữ cái điểm cao hơn, và ghi phần mất đi
+  thành một dòng `duplicate:` warning. Top-100 chỉ trả về tối đa **632** dòng.
+
+Đã sửa cả hai. Cái thứ hai đáng lo hơn: nó **không báo lỗi**, chỉ âm thầm
+giảm recall — đúng chỗ Q&A đang trượt.
 
 ---
 
