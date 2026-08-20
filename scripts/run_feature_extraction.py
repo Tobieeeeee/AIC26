@@ -8,6 +8,7 @@ from mvr.enrichment.feature_extraction import (
 from mvr.enrichment.embeddings.openclip import OpenClipEncoder
 from mvr.enrichment.embeddings.beit3 import Beit3ImageEncoder
 from mvr.enrichment.embeddings.metaclip2 import MetaClip2ImageEncoder
+from mvr.enrichment.embeddings.perception_encoder import PerceptionEncoderImageEncoder
 from mvr.enrichment.embeddings.artifacts import sha256_file
 from mvr.enrichment.embeddings.offline import (
     extract_embedding_artifacts,
@@ -38,7 +39,7 @@ def main():
         "--embedding-providers",
         type=parse_embedding_providers,
         default=("clip",),
-        help="Comma-separated image embedding provider IDs (clip, beit3, metaclip2)",
+        help="Comma-separated provider IDs (clip, beit3, metaclip2, perception_encoder)",
     )
     parser.add_argument(
         "--provider-specs",
@@ -61,6 +62,11 @@ def main():
         action="store_true",
         help="Explicitly allow pinned provider downloads (disabled by default)",
     )
+    parser.add_argument(
+        "--perception-encoder-checkpoint",
+        type=Path,
+        help="Local locked PE-Core-L14-336 checkpoint; never downloaded implicitly",
+    )
     parser.add_argument("--rcnn-model", type=str, default="fasterrcnn_resnet50_fpn", help="Faster R-CNN model")
     parser.add_argument("--rcnn-threshold", type=float, default=0.5, help="Faster R-CNN score threshold")
     parser.add_argument("--rcnn-nms-threshold", type=float, default=0.5, help="Faster R-CNN NMS threshold")
@@ -71,6 +77,11 @@ def main():
         type=int,
         default=32,
         help="Image embedding batch size",
+    )
+    parser.add_argument(
+        "--skip-objects",
+        action="store_true",
+        help="Run only selected embedding providers",
     )
 
     args = parser.parse_args()
@@ -133,12 +144,49 @@ def main():
             batch_size=args.embedding_batch_size,
         )
 
+    def run_perception_encoder():
+        if args.perception_encoder_checkpoint is None:
+            parser.error(
+                "--perception-encoder-checkpoint is required when selecting "
+                "perception_encoder"
+            )
+        specs = load_provider_specs(args.provider_specs)
+        spec = specs.get("perception_encoder")
+        checkpoint_hash = sha256_file(args.perception_encoder_checkpoint)
+        if spec.checkpoint_sha256 and checkpoint_hash != spec.checkpoint_sha256:
+            raise ValueError(
+                "Perception Encoder checkpoint SHA256 does not match locked spec: "
+                f"{checkpoint_hash}"
+            )
+        encoder = PerceptionEncoderImageEncoder(
+            spec=spec,
+            checkpoint_path=args.perception_encoder_checkpoint,
+            device=args.device,
+        )
+        extract_embedding_artifacts(
+            keyframes,
+            keyframe_root=args.keyframe_root,
+            embeddings_root=args.output / "embeddings",
+            spec=spec,
+            encoder=encoder,
+            batch_size=args.embedding_batch_size,
+            checkpoint_sha256=checkpoint_hash,
+        )
+
     run_selected_embedding_providers(
         args.embedding_providers,
-        {"clip": run_clip, "beit3": run_beit3, "metaclip2": run_metaclip2},
+        {
+            "clip": run_clip,
+            "beit3": run_beit3,
+            "metaclip2": run_metaclip2,
+            "perception_encoder": run_perception_encoder,
+        },
     )
     
     # 2. Faster R-CNN
+    if args.skip_objects:
+        print("Object extraction skipped.")
+        return
     print(f"Initializing Faster R-CNN ({args.rcnn_model})...")
     rcnn_detector = FasterRCNN(model_name=args.rcnn_model, device=args.device, score_threshold=args.rcnn_threshold, nms_threshold=args.rcnn_nms_threshold)
     extract_objects(dataset_name, keyframes, rcnn_detector, args.output, args.keyframe_root, args.mapping_csv)

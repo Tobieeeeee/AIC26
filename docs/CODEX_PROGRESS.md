@@ -743,14 +743,46 @@ Limitations:
 - No pinned MetaCLIP-2 cache exists locally, so real five-keyframe inference is
   skipped rather than downloading weights or fabricating an inference result.
 
+# Multi-Embedding Task 08 — Perception Encoder Offline Extraction
+
+Status: COMPLETE (real-weight fasttest unavailable locally)
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added a lazy PE Core L/14-336 adapter using the official paired CLIP class,
+  provider-specific transform, `normalize=True`, eval mode, and inference mode.
+- Enforced the published checkpoint SHA256 before runner inference and recorded
+  checkpoint/source provenance in the independent PE artifact manifest.
+- Added a unified PowerShell feature wrapper supporting configurable provider
+  lists, all three providers together, and each provider independently.
+- Added explicit embedding-only runner mode, optional dependencies,
+  provider-specific negative/deterministic tests, external-weight fasttest,
+  and operator documentation.
+
+Verification:
+
+- Provider-focused and baseline regression suite: 105 passed, 1 skipped
+  (external PE checkpoint fasttest).
+- Unified runner/CLI smoke suite: 15 passed; CLI help/import smoke passed in
+  the project PyTorch image.
+- PowerShell wrapper parsing, Python compilation, and `git diff --check`:
+  passed.
+
+Limitations:
+
+- The 2.68 GB PE checkpoint is not present locally, so real five-keyframe
+  inference is skipped. No checkpoint, vector, cache, or generated artifact was
+  downloaded or committed.
+
 # Current active phase
 
-Multi-Embedding Task 07 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 08 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 08 Perception Encoder offline extraction using only the locked
-provider contract.
+Next action: begin Task 09 Task05A multi-embedding validation.
 
 The user explicitly approved automatic continuation through Task 16 for this
 task pack. Expensive full-corpus execution remains separately approval-gated.
