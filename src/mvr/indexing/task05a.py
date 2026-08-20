@@ -38,6 +38,12 @@ from .validation import (
 DOCUMENT_SCHEMA_VERSION = "1.0"
 MANIFEST_SCHEMA_VERSION = "1.0"
 
+# Branch-level JSON metadata is not a keyframe artifact.  Keep this explicit
+# and branch-aware so malformed real keyframe JSON is still validated.
+AUXILIARY_FILES_BY_BRANCH: dict[str, set[str]] = {
+    "asr": {"manifest.json", "errors.json"},
+}
+
 
 @dataclass(frozen=True)
 class Task05AConfig:
@@ -361,11 +367,19 @@ def _validate_branch_identity(
     return True
 
 
-def _json_feature_files(root: Path, excluded: set[str]) -> list[Path]:
+def _json_feature_files(
+    root: Path,
+    excluded: set[str],
+    *,
+    branch: str | None = None,
+) -> list[Path]:
+    branch_excluded = set(excluded)
+    if branch is not None:
+        branch_excluded.update(AUXILIARY_FILES_BY_BRANCH.get(branch, set()))
     return sorted(
         path
         for path in root.rglob("*.json")
-        if path.name not in excluded
+        if path.name not in branch_excluded
     )
 
 
@@ -399,7 +413,10 @@ def _load_ocr(
             path=root,
         )
     else:
-        for path in _json_feature_files(root, {"manifest.json"}):
+        for path in _json_feature_files(
+            root,
+            {"manifest.json"},
+        ):
             try:
                 payload = _read_json(path)
             except (OSError, json.JSONDecodeError) as exc:
@@ -634,7 +651,11 @@ def _load_asr(
             path=root,
         )
     else:
-        for path in _json_feature_files(root, {"manifest.json"}):
+        for path in _json_feature_files(
+            root,
+            {"manifest.json"},
+            branch="asr",
+        ):
             try:
                 payload = _read_json(path)
             except (OSError, json.JSONDecodeError) as exc:

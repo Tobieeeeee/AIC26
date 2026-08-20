@@ -433,3 +433,27 @@ def test_builder_rejects_duplicate_canonical_identity(tmp_path: Path) -> None:
             output_root=tmp_path / "processed",
             config=Task05AConfig(ocr=OcrFilterConfig()),
         )
+
+
+def test_asr_branch_metadata_is_ignored_but_malformed_keyframe_is_reported(
+    tmp_path: Path,
+) -> None:
+    features, mapping = _make_features(tmp_path)
+    asr_root = features / "asr"
+    _write_json(asr_root / "errors.json", {"errors": [{"message": "diagnostic"}]})
+    result = build_index_documents(
+        features_root=features,
+        mapping_csv=mapping,
+        output_root=tmp_path / "processed",
+    )
+    assert result.manifest["validation_issue_counts"].get("invalid_schema", 0) == 0
+    assert result.manifest["asr"]["input_entries"] > 0
+
+    broken_path = asr_root / "V1" / "BROKEN.json"
+    _write_json(broken_path, {"segments": [{"transcript": "not valid identity"}]})
+    result_with_broken = build_index_documents(
+        features_root=features,
+        mapping_csv=mapping,
+        output_root=tmp_path / "processed-broken",
+    )
+    assert result_with_broken.manifest["validation_issue_counts"]["invalid_schema"] >= 1
