@@ -9,6 +9,11 @@ from mvr.evaluation.trake import (
     trake_r_score,
 )
 
+# `score` is irrelevant to trake_r_score()/evaluate_trake() correctness (both
+# depend only on `frames` vs. ground truth) -- a fixed placeholder is used
+# throughout this file since these tests exercise correctness, not ranking.
+_UNUSED_SCORE = 1.0
+
 # -- trake_r_score: cross-checked against trake_align.py's own self-check --
 # assert r_score(7, (1, 3, 5), 7, (1, 4, 20)) == 2 / 3
 # assert r_score(7, (1, 3, 5), 8, (1, 3, 5)) == 0.0
@@ -16,14 +21,14 @@ from mvr.evaluation.trake import (
 
 def test_r_score_wrong_video_is_zero_even_with_matching_frames() -> None:
     gt = TrakeGroundTruth(video_id=8, frames=(1, 3, 5))
-    prediction = TrakeChainPrediction(video_id=7, frames=(1, 3, 5))
+    prediction = TrakeChainPrediction(video_id=7, frames=(1, 3, 5), score=_UNUSED_SCORE)
 
     assert trake_r_score(prediction, gt) == 0.0
 
 
 def test_r_score_partial_credit_matches_lab_reference_example() -> None:
     gt = TrakeGroundTruth(video_id=7, frames=(1, 4, 20))
-    prediction = TrakeChainPrediction(video_id=7, frames=(1, 3, 5))
+    prediction = TrakeChainPrediction(video_id=7, frames=(1, 3, 5), score=_UNUSED_SCORE)
 
     # Marker 1: |1-1|=0 <= 1 -> correct. Marker 2: |3-4|=1 <= 1 -> correct.
     # Marker 3: |5-20|=15 > 1 -> wrong. 2/3 correct, matching trake_align.py.
@@ -33,13 +38,13 @@ def test_r_score_partial_credit_matches_lab_reference_example() -> None:
 def test_r_score_inclusive_tolerance_boundary() -> None:
     gt = TrakeGroundTruth(video_id="v", frames=(100,), tolerance=2)
 
-    assert trake_r_score(TrakeChainPrediction("v", (102,)), gt) == 1.0  # exactly tol
-    assert trake_r_score(TrakeChainPrediction("v", (103,)), gt) == 0.0  # tol + 1
+    assert trake_r_score(TrakeChainPrediction("v", (102,), _UNUSED_SCORE), gt) == 1.0  # exactly tol
+    assert trake_r_score(TrakeChainPrediction("v", (103,), _UNUSED_SCORE), gt) == 0.0  # tol + 1
 
 
 def test_r_score_none_marker_never_counts_as_correct() -> None:
     gt = TrakeGroundTruth(video_id="v", frames=(10, 20, 30))
-    prediction = TrakeChainPrediction("v", (10, None, 30))
+    prediction = TrakeChainPrediction("v", (10, None, 30), _UNUSED_SCORE)
 
     assert trake_r_score(prediction, gt) == 2 / 3
 
@@ -48,14 +53,14 @@ def test_r_score_none_marker_does_not_match_unknown_gt_placeholder() -> None:
     # Even if a GT frame were somehow the same sentinel-like value, an
     # unresolved (None) prediction must never be treated as correct.
     gt = TrakeGroundTruth(video_id="v", frames=(10, 0, 30))
-    prediction = TrakeChainPrediction("v", (10, None, 30))
+    prediction = TrakeChainPrediction("v", (10, None, 30), _UNUSED_SCORE)
 
     assert trake_r_score(prediction, gt) == 2 / 3
 
 
 def test_r_score_rejects_marker_count_mismatch() -> None:
     gt = TrakeGroundTruth(video_id="v", frames=(1, 2, 3))
-    prediction = TrakeChainPrediction("v", (1, 2))
+    prediction = TrakeChainPrediction("v", (1, 2), _UNUSED_SCORE)
 
     with pytest.raises(ValueError):
         trake_r_score(prediction, gt)
@@ -64,8 +69,8 @@ def test_r_score_rejects_marker_count_mismatch() -> None:
 # -- evaluate_trake ----------------------------------------------------------
 
 GT = TrakeGroundTruth(video_id="L21_V001", frames=(100, 200, 300), tolerance=1)
-CORRECT = TrakeChainPrediction("L21_V001", (100, 200, 300))
-WRONG = TrakeChainPrediction("L21_V001", (999, 999, 999))
+CORRECT = TrakeChainPrediction("L21_V001", (100, 200, 300), _UNUSED_SCORE)
+WRONG = TrakeChainPrediction("L21_V001", (999, 999, 999), _UNUSED_SCORE)
 
 
 def test_evaluate_trake_empty_prediction_list_scores_zero() -> None:
@@ -100,7 +105,7 @@ def test_evaluate_trake_running_max_across_cutoffs_at_rank_21() -> None:
 def test_evaluate_trake_uses_best_partial_score_within_cutoff() -> None:
     # A partially-correct chain (2/3) ranked above a wrong chain (0/3) must
     # win the running max for every cutoff it's within.
-    partial = TrakeChainPrediction("L21_V001", (100, 200, 999))
+    partial = TrakeChainPrediction("L21_V001", (100, 200, 999), _UNUSED_SCORE)
     predictions = [partial, WRONG]
 
     score = evaluate_trake(predictions, GT)

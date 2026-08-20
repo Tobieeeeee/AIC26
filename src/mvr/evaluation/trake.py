@@ -43,10 +43,22 @@ class TrakeGroundTruth:
 
 @dataclass(frozen=True)
 class TrakeChainPrediction:
-    """One predicted frame per event; ``None`` = unresolved, never a guess."""
+    """One candidate chain: one predicted frame per event (``None`` =
+    unresolved, never a guess), plus the alignment strategy's own score for
+    that chain.
+
+    ``score`` is opaque outside the strategy that produced it (ATLAS/Lucifer
+    sum similarity minus gap penalties; U-CESE uses ``events_covered +
+    0.001 * total_similarity`` -- see ``mvr.retrieval.trake_align``) and is
+    used only to RANK chains before evaluation, never compared across
+    strategies on an absolute scale. It plays no role in ``trake_r_score``/
+    ``evaluate_trake`` correctness -- those depend only on ``frames`` vs.
+    ground truth, trusting the caller's rank order.
+    """
 
     video_id: str
     frames: tuple[int | None, ...]
+    score: float
 
 
 @dataclass(frozen=True)

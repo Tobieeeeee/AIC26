@@ -224,6 +224,53 @@ cause and blast-radius detail):
     `top_k=300` now succeeds, alongside all pre-existing `top_k` boundary
     tests passing unmodified.
 
+TRAKE Phase 04 ports three chain-alignment algorithms from the course lab's
+`trake_align.py` (`dp_align` -> `AtlasAlignment`, `dp_align_soft` ->
+`LuciferAlignment`, `two_pointer_clips` -> `UceseAlignment`, plus
+`first_touch`) into `src/mvr/retrieval/trake_align.py`. The lab file is
+course material kept outside this repository, not one of the migration
+source labs in the table above, so it has no source-row entry there. The
+ports preserve the reference algorithms' mathematics, defaults (`alpha`,
+`beta`, `lam=0.8`, `min_sim`, `T_win`), scoring formulas, and documented
+behavioral differences, and are verified against the reference's own
+`python trake_align.py` self-check values. Three deviations are recorded
+here as required:
+
+27. **Per-video instead of whole-corpus scope.** The lab's alignment
+    functions each scan every video in one call (`video_spans()`,
+    `candidate_videos(..., pre_topk)`). This port takes one video's score
+    matrix per call, because video shortlisting now happens earlier via
+    `search_kis()` in Phase 05 orchestration. Only the reference's
+    per-video-span core logic is ported; the outer scanning helpers are not
+    needed. Consequence: `two_pointer_clips`'s `topk` was a GLOBAL per-event
+    hit threshold across all videos and is now scoped to one video, so the
+    lab's own `two_pointer_clips` self-check numbers are not numerically
+    reproducible here by construction. Its documented core property (a
+    winning chain need not be chronologically ordered) is preserved and
+    explicitly tested instead.
+28. **Lucifer `lam` threaded through the state key.** The lab's
+    `_soft_key()` hard-codes `0.8` when ranking intermediate DP states,
+    while `dp_align_soft()`'s final score uses the caller's `lam` — the two
+    disagree for any `lam != 0.8`. This port uses the configured `lam` in
+    both places. Verified to leave behavior identical at the lab's own
+    default `lam=0.8` (the reference self-check value `1.85 * 0.8` still
+    matches exactly), so this is a consistency correction, not a tuning
+    change.
+29. **Lucifer accumulates the gap budget across skipped events.** The lab
+    indexes the gap constraint by the current event (`gaps[j-1]`) even when
+    the events in between were skipped, so a surviving time span is judged
+    against only the last hop's budget although a skipped event still
+    consumes real elapsed time. Measured example: with
+    `gaps = ([0,10], [0,10])`, E1 invisible, E0 at t=0 and E2 at t=18
+    (inside the combined 20s budget), the reference formula charges
+    `(18-10)^2` and the DP then discards the perfectly findable E0,
+    returning `(None, None, f2)` instead of `(f0, None, f2)`. This port sums
+    the bounds of every gap traversed since the last MATCHED event. The
+    lab's own self-check only ever passes `gaps=None`, so it never exercises
+    this path. Verified: identical to the reference when no event is
+    skipped, and the regression scenario above now returns
+    `(f0, None, f2)`.
+
 ## Status values
 
 ```text
