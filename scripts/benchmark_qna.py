@@ -71,6 +71,7 @@ def main() -> None:
         QnaAnswer,
         QnaGroundTruth,
         evaluate_qna,
+        qna_answer_matches_lenient,
         qna_answer_matches,
     )
 
@@ -84,6 +85,7 @@ def main() -> None:
     print()
 
     finals: list[float] = []
+    finals_lenient: list[float] = []
     frame_hits = 0
     answer_hits = 0
     scored = 0
@@ -110,8 +112,15 @@ def main() -> None:
             answer=entry["answer"],
         )
         answers = [QnaAnswer(v, f, a) for v, f, a in candidates]
+        # Two bounds, because one number cannot say "somewhere between".
+        # strict  = normalized equality (+ number words, + a leading
+        #           Vietnamese administrative-unit word)
+        # lenient = the answer appears inside the reply, or vice versa
+        # The organizer's human judge sits somewhere in between.
         score = evaluate_qna(answers, gt)
+        score_lenient = evaluate_qna(answers, gt, matcher=qna_answer_matches_lenient)
         finals.append(score.final_score)
+        finals_lenient.append(score_lenient.final_score)
         scored += 1
 
         # Split the failure mode: a wrong frame and a wrong answer need
@@ -126,7 +135,11 @@ def main() -> None:
         answer_hits += 1 if answer_ok else 0
 
         recall = " ".join(f"R@{k}={score.recall_at_k[k]:.0f}" for k in QNA_CUTOFFS)
-        print(f"{query_id:20} Final={score.final_score:.3f}  {recall}")
+        spread = (
+            "" if score_lenient.final_score == score.final_score
+            else f"  (lenient={score_lenient.final_score:.3f})"
+        )
+        print(f"{query_id:20} Final={score.final_score:.3f}{spread}  {recall}")
         print(f"{'':20} frame dung: {'hang #' + str(frame_ok) if frame_ok else 'KHONG CO'}"
               f"   |   dap an dung o dau do: {'co' if answer_ok else 'khong'}")
 
@@ -135,12 +148,15 @@ def main() -> None:
 
     print()
     print("=" * 62)
-    print(f"  Mean Final Score (uoc luong noi bo) : {sum(finals) / len(finals):.4f}")
+    strict_mean = sum(finals) / len(finals)
+    lenient_mean = sum(finals_lenient) / len(finals_lenient)
+    print(f"  Mean Final Score  strict          : {strict_mean:.4f}")
+    print(f"  Mean Final Score  lenient (can tren): {lenient_mean:.4f}")
     print(f"  Query co frame dung trong top-100   : {frame_hits}/{scored}")
     print(f"  Query co dap an dung o bat ky dau   : {answer_hits}/{scored}")
     print("=" * 62)
-    print("Luu y: so sanh dap an dung xap xi (qna_answer_matches), khong phai")
-    print("cham diem chinh thuc cua BTC.")
+    print("Luu y: BTC cham theo NGU NGHIA (nguoi cham). Hai con so tren la hai")
+    print("can cua uoc luong noi bo -- diem that nam giua, khong phai diem chinh thuc.")
 
 
 if __name__ == "__main__":

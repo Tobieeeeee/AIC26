@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 QNA_CUTOFFS: tuple[int, ...] = (1, 5, 20, 50, 100)
@@ -103,31 +103,123 @@ def _to_digit_string(normalized_text: str) -> str | None:
     return _NUMBER_WORDS.get(normalized_text)
 
 
+def _strip_diacritics(text: str) -> str:
+    """Fold Vietnamese diacritics so the prefix list needs one spelling each.
+
+    Answers reach here from OCR, which mangles tone marks routinely -- the
+    run that motivated this read "huyen" as "huyen" but "Khanh" as "Khonh".
+    Matching the unit word without its marks is what makes the rule hold on
+    real, imperfect input. U+0111 (d-stroke) has no NFD decomposition, so it
+    is mapped explicitly.
+    """
+    decomposed = unicodedata.normalize("NFD", text.replace("đ", "d"))
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+#: Vietnamese administrative-unit words. In an answer they label the kind of
+#: place, they are not part of its name -- "Xa Giang Ly" answers "what is
+#: this commune called?" with the name "Giang Ly". No entry is a
+#: space-delimited prefix of another, so the order here does not affect
+#: which one matches.
+_ADMIN_UNIT_PREFIXES = (
+    "thanh pho",
+    "thi tran",
+    "thi xa",
+    "huyen",
+    "phuong",
+    "quan",
+    "tinh",
+    "xa",
+)
+
+
+def _strip_leading_admin_unit(normalized_text: str) -> str:
+    """Drop one leading administrative-unit word, if anything survives it.
+
+    Leading only, and one only: the goal is to equate "Xa Giang Ly" with
+    "Giang Ly", NOT to reduce a whole address to its first name. Stripping
+    mid-string would make "Xa Giang Ly huyen Khanh Vinh" -- which is more
+    than the answer -- score as correct, so the strict matcher stays strict
+    and that case is left to the lenient bound.
+    """
+    folded = _strip_diacritics(normalized_text)
+    for prefix in _ADMIN_UNIT_PREFIXES:
+        if folded.startswith(prefix + " "):
+            remainder = normalized_text[len(prefix) + 1 :].strip()
+            # Never return empty: a bare unit word would then match anything.
+            return remainder or normalized_text
+    return normalized_text
+
+
+def _match_keys(text: str) -> set[str]:
+    """Every normalized form one answer may legitimately take."""
+    normalized = _normalize_answer_text(text)
+    if not normalized:
+        return set()
+    keys = {normalized, _strip_leading_admin_unit(normalized)}
+    for key in tuple(keys):
+        digits = _to_digit_string(key)
+        if digits is not None:
+            keys.add(digits)
+    return keys
+
+
 def qna_answer_matches(candidate: str, ground_truth: str) -> bool:
-    """Approximate semantic-match check -- see module docstring for scope."""
+    """Approximate semantic-match check -- see module docstring for scope.
+
+    Widened once, deliberately and with a stated rule, after the first real
+    end-to-end run: the model answered "Xa Giang Ly" where ground truth said
+    "Giang Ly" and scored 0, which the organizer's human judge would not
+    have done. Only a *leading* administrative-unit word is normalized away;
+    everything looser belongs to ``qna_answer_matches_lenient``.
+    """
+    candidate_keys = _match_keys(candidate)
+    truth_keys = _match_keys(ground_truth)
+    if not candidate_keys or not truth_keys:
+        return False
+    return bool(candidate_keys & truth_keys)
+
+
+def qna_answer_matches_lenient(candidate: str, ground_truth: str) -> bool:
+    """Upper bound on what a human judge might accept: containment.
+
+    Deliberately NOT the default. It accepts an answer buried in a longer
+    reply ("Xa Giang Ly huyen Khanh Vinh" for "Giang Ly"), which a judge
+    plausibly would and plausibly would not. Reporting it *alongside* the
+    strict score is the honest move -- one number cannot express a range,
+    and quietly adopting the generous end would have us stop fixing things
+    that still need fixing.
+    """
+    if qna_answer_matches(candidate, ground_truth):
+        return True
     norm_candidate = _normalize_answer_text(candidate)
     norm_truth = _normalize_answer_text(ground_truth)
-    if norm_candidate == norm_truth:
-        return True
-
-    digit_candidate = _to_digit_string(norm_candidate)
-    digit_truth = _to_digit_string(norm_truth)
-    if digit_candidate is not None and digit_truth is not None:
-        return digit_candidate == digit_truth
-    return False
+    if not norm_candidate or not norm_truth:
+        return False
+    return norm_truth in norm_candidate or norm_candidate in norm_truth
 
 
-def qna_r_score(answer: QnaAnswer, gt: QnaGroundTruth) -> float:
+AnswerMatcher = Callable[[str, str], bool]
+
+
+def qna_r_score(
+    answer: QnaAnswer, gt: QnaGroundTruth, *, matcher: AnswerMatcher = qna_answer_matches
+) -> float:
     if answer.video_id != gt.video_id:
         return 0.0
     if not (gt.start_frame <= answer.frame_id <= gt.end_frame):
         return 0.0
-    if not qna_answer_matches(answer.answer, gt.answer):
+    if not matcher(answer.answer, gt.answer):
         return 0.0
     return 1.0
 
 
-def evaluate_qna(answers: Sequence[QnaAnswer], gt: QnaGroundTruth) -> QnaScore:
+def evaluate_qna(
+    answers: Sequence[QnaAnswer],
+    gt: QnaGroundTruth,
+    *,
+    matcher: AnswerMatcher = qna_answer_matches,
+) -> QnaScore:
     """Score up to 100 ranked answers against one ground-truth interval+answer.
 
     ``answers`` must already be rank-ordered (rank 1 first). Ranks beyond
@@ -138,6 +230,8 @@ def evaluate_qna(answers: Sequence[QnaAnswer], gt: QnaGroundTruth) -> QnaScore:
     recall_at_k: dict[int, float] = {}
     for cutoff in QNA_CUTOFFS:
         top = considered[:cutoff]
-        recall_at_k[cutoff] = max((qna_r_score(a, gt) for a in top), default=0.0)
+        recall_at_k[cutoff] = max(
+            (qna_r_score(a, gt, matcher=matcher) for a in top), default=0.0
+        )
     final_score = sum(recall_at_k[cutoff] for cutoff in QNA_CUTOFFS) / len(QNA_CUTOFFS)
     return QnaScore(recall_at_k=recall_at_k, final_score=final_score)

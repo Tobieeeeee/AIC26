@@ -643,6 +643,116 @@ or unparseable answers were already dropped by `merge_answer_batch` rather
 than fabricated, so the larger budget does not risk failing the export —
 `validate_qna_predictions` still refuses blanks by design.
 
+## 3j. First end-to-end score, and the instrument that was hiding it
+
+The whole chain ran for the first time: retrieval → temporal expansion →
+keyframe image → EasyOCR → Qwen2.5-7B on Kaggle → import → score.
+
+**Mean Final Score 0.2000** (p1-15 = 0.600, the other two = 0.000), against
+0.000 before. Not a good score. But the first non-zero one, and the run
+that proved every component works when connected.
+
+### Two bugs had to be fixed before it could run at all
+
+Both were latent because every previous measurement passed `--no-ocr`, so
+the OCR path had never once executed against a real engine, and temporal
+expansion is what finally made it reachable.
+
+1. `build_frame_context` guarded on `ocr_engine is None` but not `image is
+   None`. An expanded neighbour has no image from the retrieval backend, so
+   EasyOCR got `None` and raised `UnboundLocalError` from inside its own
+   input reformatting, aborting the query.
+2. `run_qna_pipeline` resolved neighbour images through `AicDatasetRegistry`,
+   whose root can be a smaller normalized tree than the one the index was
+   built from. Every neighbour outside that tree silently lost its image —
+   and with it nearly all of its Q&A signal. The index's own metadata
+   already stores a path for every keyframe it holds, which is exactly the
+   set neighbours are drawn from, so it is consulted first now.
+
+### What actually happened on p1-15
+
+```
+retrieval        L30_V072 keyframes 027, 030   (right video, ~9s early)
+expansion +4     keyframe 034, frame 1745      (start of GT interval)
+EasyOCR          "... Xa Giang Ly huyen Khonh Vinh, tinh Khanh Hoa ..."
+Qwen2.5-7B       {"answer": "Xa Giang Ly", "source": "context-grounded"}
+ground truth     "Giang Ly"
+```
+
+Every link was load-bearing: without expansion the frame is never reached,
+without the two fixes above it arrives with no image and no text.
+
+### The instrument was reporting 0.000 for a correct answer
+
+`qna_answer_matches` did normalized equality, so `"xa giang ly"` failed
+against `"giang ly"` — for a question that literally asks *"what is this
+**commune** called?"*. The organizer uses a human judge, who would not call
+that wrong.
+
+The module docstring had anticipated exactly this: widen it "explicitly in
+a later task rather than silently" if it proved too conservative on an
+observed real query. So:
+
+- **strict** now folds diacritics and strips *one leading* Vietnamese
+  administrative-unit word (`xa`, `phuong`, `thi tran`, `thi xa`, `huyen`,
+  `quan`, `tinh`, `thanh pho`). Leading and one only — `"Xa Giang Ly huyen
+  Khanh Vinh"` is more than the answer and still scores 0. Diacritic
+  folding matters because answers arrive from OCR, which mangles tone marks
+  routinely.
+- **lenient** (`qna_answer_matches_lenient`) adds containment as an explicit
+  upper bound, and is never the default.
+- `evaluate_qna(..., matcher=...)` threads the choice through, and the
+  benchmark prints both. One number cannot express "somewhere between", and
+  quietly adopting the generous end would have us stop fixing what still
+  needs fixing.
+
+On this run both bounds land on 0.2000 — the answer is unambiguously
+correct, not a judgment call.
+
+### The other two are retrieval failures, definitively
+
+| query | candidates from the right video | why |
+|---|---|---|
+| p1-15 | 12 of 100, one inside the GT interval | works |
+| p1-19 | **0 of 100** | right video ranks #153 |
+| p1-22 | **0 of 100** | right video absent from the top hits |
+
+Temporal expansion cannot help: it only expands around videos retrieval
+already found. Nor can budget reallocation — the widest measured setting
+covers 53–73 videos, still short of #153. These two need a *different
+signal*: p1-19 asks about a **recited poem** (ASR), p1-22 about an
+**on-screen title** (OCR + BM25). Both are the lexical branch.
+
+### Dropped answers are not a bug
+
+p1-15 lost 43 of 100 slots, which looked alarming. 40 of those were
+`{"answer": ""}` — the model honestly declining on frames whose OCR held
+nothing. An empty answer scores 0 anyway, so dropping it costs nothing. The
+remaining 3 had an invalid `source`. p1-19 lost 1, p1-22 lost 9.
+
+### n=3 is permanent, and that changes the method
+
+The p2/p3 queries are reference queries whose answers lie **outside** the
+data we hold, so they can never be verified. Three queries is the ceiling —
+and since only one is currently scorable, the answer half is effectively
+n=1.
+
+Consequences, stated plainly so nobody re-derives them later:
+
+- `temporal_radius=4` and `neighbour_cost=0.5` were chosen on **n=1**. They
+  are frozen defaults, **not** tuned optima, and further fitting against
+  these three queries is overfitting to three queries.
+- Improvements must now be argued from **mechanism** and verified by
+  **component-level tests**, not by moving a Final Score that only one
+  query can move.
+- The one way to get real n is a **synthetic set**: start from a known
+  frame, OCR it, generate a question whose answer is a span of that text.
+  Ground truth is exact by construction — no human verification — because
+  the frame is the input, not the search result. It measures answer
+  extraction and frame precision well; it measures *retrieval* only as
+  realistically as the synthesized query, which must be generated from
+  media_info rather than the frame's own OCR or it leaks the answer.
+
 ## 4. Branch / task-pack plan (confirmed with the user)
 
 Branch: `feat/qna-competition-ready`. Tasks, one at a time, stop-and-report
