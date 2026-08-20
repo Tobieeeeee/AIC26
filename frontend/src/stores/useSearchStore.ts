@@ -1,20 +1,11 @@
 import { create } from 'zustand';
-import type { KeyframeResult, TaskMode, ModelEngine } from '../types/competition';
+import { searchApi, type SearchPayload } from '../api/searchApi';
+import { mockResults } from '../data/mockResults';
+import type { KeyframeResult, RetrievalMode, TaskMode } from '../types/competition';
 
-const initialMockResults: KeyframeResult[] = [
-  { id: '1', video_id: 'L01_V001', frame_id: 1240, timestamp: '00:02:00', timestamp_sec: 120, score: 0.98, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['person', 'car', 'tree'] },
-  { id: '2', video_id: 'L01_V002', frame_id: 1258, timestamp: '00:02:05', timestamp_sec: 125, score: 0.95, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['person', 'motorcycle'] },
-  { id: '3', video_id: 'L01_V003', frame_id: 1276, timestamp: '00:02:11', timestamp_sec: 131, score: 0.91, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['car', 'building'] },
-  { id: '4', video_id: 'L01_V004', frame_id: 1294, timestamp: '00:02:18', timestamp_sec: 138, score: 0.88, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['person'] },
-  { id: '5', video_id: 'L02_V005', frame_id: 1312, timestamp: '00:02:22', timestamp_sec: 142, score: 0.84, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['dog', 'tree'] },
-  { id: '6', video_id: 'L02_V006', frame_id: 1330, timestamp: '00:02:27', timestamp_sec: 147, score: 0.81, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['bicycle'] },
-  { id: '7', video_id: 'L02_V007', frame_id: 1348, timestamp: '00:02:35', timestamp_sec: 155, score: 0.77, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['boat', 'water'] },
-  { id: '8', video_id: 'L02_V008', frame_id: 1366, timestamp: '00:02:40', timestamp_sec: 160, score: 0.74, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['truck'] },
-  { id: '9', video_id: 'L03_V009', frame_id: 1384, timestamp: '00:02:46', timestamp_sec: 166, score: 0.70, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['bus'] },
-  { id: '10', video_id: 'L03_V010', frame_id: 1402, timestamp: '00:02:51', timestamp_sec: 171, score: 0.66, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['traffic'] },
-  { id: '11', video_id: 'L03_V011', frame_id: 1420, timestamp: '00:02:58', timestamp_sec: 178, score: 0.63, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['airplane'] },
-  { id: '12', video_id: 'L03_V012', frame_id: 1438, timestamp: '00:03:04', timestamp_sec: 184, score: 0.60, thumbnail_url: '', video_url: 'https://www.w3schools.com/html/mov_bbb.mp4', objects: ['person', 'umbrella'] },
-];
+export const isMockSearchEnabled = import.meta.env.VITE_USE_MOCK_SEARCH === 'true';
+
+type SearchStatus = 'idle' | 'loading' | 'success' | 'success-empty' | 'error';
 
 interface SpatialFilter {
   enabled: boolean;
@@ -28,86 +19,161 @@ interface SearchStore {
   query: string;
   scene2Query: string;
   taskMode: TaskMode;
-  modelEngine: ModelEngine;
+  retrievalMode: RetrievalMode;
   simReorder: boolean;
   advancedMode: boolean;
+  status: SearchStatus;
   isLoading: boolean;
+  error: string | null;
   results: KeyframeResult[];
-  selectedResultId: string;
+  selectedResultId: string | null;
   isVideoModalOpen: boolean;
 
   scene1Spatial: SpatialFilter;
   scene2Spatial: SpatialFilter;
   visualQuery: { imageUrl: string };
 
-  setQuery: (q: string) => void;
-  setScene2Query: (q: string) => void;
-  setTaskMode: (m: TaskMode) => void;
-  setModelEngine: (e: ModelEngine) => void;
-  setSimReorder: (s: boolean) => void;
-  setAdvancedMode: (a: boolean) => void;
-  selectResult: (id: string) => void;
+  setQuery: (query: string) => void;
+  setScene2Query: (query: string) => void;
+  setTaskMode: (taskMode: TaskMode) => void;
+  setRetrievalMode: (retrievalMode: RetrievalMode) => void;
+  setSimReorder: (simReorder: boolean) => void;
+  setAdvancedMode: (advancedMode: boolean) => void;
+  selectResult: (keyframeId: string) => void;
   setVideoModalOpen: (open: boolean) => void;
-  executeSearch: () => void;
+  executeSearch: () => Promise<void>;
   runMockSearch: () => void;
 
   updateSpatialState: (scene: 'scene1' | 'scene2', patch: Partial<SpatialFilter>) => void;
-  toggleObjectInSpatial: (scene: 'scene1' | 'scene2', obj: string) => void;
+  toggleObjectInSpatial: (scene: 'scene1' | 'scene2', object: string) => void;
   toggleColorInSpatial: (scene: 'scene1' | 'scene2', color: string) => void;
   clearSpatialState: (scene: 'scene1' | 'scene2') => void;
   updateVisualQuery: (patch: { imageUrl: string }) => void;
 }
 
+let latestRequestId = 0;
+
+const emptySpatialFilter = (): SpatialFilter => ({
+  enabled: true,
+  logic: 'AND',
+  selectedObjects: [],
+  selectedColors: [],
+  maxObjectsText: '',
+});
+
 export const useSearchStore = create<SearchStore>((set, get) => ({
   query: '',
   scene2Query: '',
-  taskMode: 'KIS',
-  modelEngine: 'use all',
+  taskMode: 'kis',
+  retrievalMode: 'hybrid',
   simReorder: true,
   advancedMode: false,
+  status: 'idle',
   isLoading: false,
-  results: initialMockResults,
-  selectedResultId: '1',
+  error: null,
+  results: [],
+  selectedResultId: null,
   isVideoModalOpen: false,
 
-  scene1Spatial: {
-    enabled: true,
-    logic: 'AND',
-    selectedObjects: [],
-    selectedColors: [],
-    maxObjectsText: '',
-  },  
-  scene2Spatial: {
-    enabled: true,
-    logic: 'AND',
-    selectedObjects: [],
-    selectedColors: [],
-    maxObjectsText: '',
-  },
+  scene1Spatial: emptySpatialFilter(),
+  scene2Spatial: emptySpatialFilter(),
   visualQuery: { imageUrl: '' },
 
   setQuery: (query) => set({ query }),
   setScene2Query: (scene2Query) => set({ scene2Query }),
   setTaskMode: (taskMode) => set({ taskMode }),
-  setModelEngine: (modelEngine) => set({ modelEngine }),
+  setRetrievalMode: (retrievalMode) => set({ retrievalMode }),
   setSimReorder: (simReorder) => set({ simReorder }),
   setAdvancedMode: (advancedMode) => set({ advancedMode }),
-  selectResult: (id) => set({ selectedResultId: id }),
-  setVideoModalOpen: (open) => set({ isVideoModalOpen: open }),
+  selectResult: (selectedResultId) => set({ selectedResultId }),
+  setVideoModalOpen: (isVideoModalOpen) => set({ isVideoModalOpen }),
 
-  executeSearch: () => {
-    set({ isLoading: true });
-    setTimeout(() => {
-      const current = [...get().results];
-      set({ results: current.reverse(), isLoading: false });
-    }, 300);
+  executeSearch: async () => {
+    const state = get();
+    const query = state.query.trim();
+    const requestId = ++latestRequestId;
+
+    if (!query && !state.visualQuery.imageUrl.trim()) {
+      set({
+        status: 'error',
+        isLoading: false,
+        error: 'Enter a text query or provide an image before searching.',
+        results: [],
+        selectedResultId: null,
+        isVideoModalOpen: false,
+      });
+      return;
+    }
+
+    const payload: SearchPayload = {
+      task_mode: state.taskMode,
+      query,
+      retrieval_mode: state.retrievalMode,
+      sim_reorder: state.simReorder,
+      top_k: 100,
+      spatial_filter: {
+        enabled: state.scene1Spatial.enabled,
+        logic: state.scene1Spatial.logic,
+        objects: state.scene1Spatial.selectedObjects,
+        colors: state.scene1Spatial.selectedColors,
+        max_objects_text: state.scene1Spatial.maxObjectsText || undefined,
+      },
+      visual_query: state.visualQuery.imageUrl
+        ? { image_url: state.visualQuery.imageUrl }
+        : undefined,
+    };
+
+    set({
+      status: 'loading',
+      isLoading: true,
+      error: null,
+      results: [],
+      selectedResultId: null,
+      isVideoModalOpen: false,
+    });
+
+    try {
+      const results = await searchApi.search(payload);
+      if (requestId !== latestRequestId) return;
+      set({
+        status: results.length > 0 ? 'success' : 'success-empty',
+        isLoading: false,
+        error: null,
+        results,
+        selectedResultId: results[0]?.keyframe_id ?? null,
+      });
+    } catch (error) {
+      if (requestId !== latestRequestId) return;
+      set({
+        status: 'error',
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Search failed.',
+        results: [],
+        selectedResultId: null,
+        isVideoModalOpen: false,
+      });
+    }
   },
 
   runMockSearch: () => {
-    set({ query: 'motorcycle on road', isLoading: true });
-    setTimeout(() => {
-      set({ results: initialMockResults, isLoading: false });
-    }, 200);
+    if (!isMockSearchEnabled) {
+      set({
+        status: 'error',
+        error: 'Fixture mode is disabled. Set VITE_USE_MOCK_SEARCH=true for local demos.',
+        results: [],
+        selectedResultId: null,
+      });
+      return;
+    }
+    set({
+      query: get().query || 'fixture demo search',
+      status: 'success',
+      isLoading: false,
+      error: null,
+      results: mockResults,
+      selectedResultId: mockResults[0]?.keyframe_id ?? null,
+      isVideoModalOpen: false,
+    });
   },
 
   updateSpatialState: (scene, patch) =>
@@ -118,33 +184,30 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
       },
     })),
 
-  toggleObjectInSpatial: (scene, obj) =>
+  toggleObjectInSpatial: (scene, object) =>
     set((state) => {
       const key = scene === 'scene1' ? 'scene1Spatial' : 'scene2Spatial';
-      const cur = state[key].selectedObjects;
-      const next = cur.includes(obj) ? cur.filter((x) => x !== obj) : [...cur, obj];
-      return { [key]: { ...state[key], selectedObjects: next } };
+      const current = state[key].selectedObjects;
+      const selectedObjects = current.includes(object)
+        ? current.filter((value) => value !== object)
+        : [...current, object];
+      return { [key]: { ...state[key], selectedObjects } };
     }),
 
   toggleColorInSpatial: (scene, color) =>
     set((state) => {
       const key = scene === 'scene1' ? 'scene1Spatial' : 'scene2Spatial';
-      const cur = state[key].selectedColors;
-      const next = cur.includes(color) ? cur.filter((x) => x !== color) : [...cur, color];
-      return { [key]: { ...state[key], selectedColors: next } };
+      const current = state[key].selectedColors;
+      const selectedColors = current.includes(color)
+        ? current.filter((value) => value !== color)
+        : [...current, color];
+      return { [key]: { ...state[key], selectedColors } };
     }),
 
   clearSpatialState: (scene) =>
-    set((state) => {
+    set((_state) => {
       const key = scene === 'scene1' ? 'scene1Spatial' : 'scene2Spatial';
-      return {
-        [key]: {
-          ...state[key],
-          selectedObjects: [],
-          selectedColors: [],
-          maxObjectsText: '',
-        },
-      };
+      return { [key]: emptySpatialFilter() };
     }),
 
   updateVisualQuery: (patch) =>

@@ -18,7 +18,7 @@ export const SortableItem: FC<SortableItemProps> = ({ item, index, onRemove }) =
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id });
+  } = useSortable({ id: item.keyframe_id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -44,7 +44,7 @@ export const SortableItem: FC<SortableItemProps> = ({ item, index, onRemove }) =
       <button
         type="button"
         className="sub-remove-btn"
-        onClick={() => onRemove(item.id)}
+        onClick={() => onRemove(item.keyframe_id)}
         title="Xóa"
       >
         <X size={14} />

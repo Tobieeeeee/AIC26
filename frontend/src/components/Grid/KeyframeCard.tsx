@@ -12,16 +12,16 @@ export function KeyframeCard({ item, index = 0 }: KeyframeCardProps) {
   const { advancedMode, selectedResultId, selectResult, setVideoModalOpen } = useSearchStore();
   const { addItem, items } = useSubmissionStore();
 
-  const isSelected = selectedResultId === item.id;
-  const isAdded = items.some((s) => s.id === item.id);
+  const isSelected = selectedResultId === item.keyframe_id;
+  const isAdded = items.some((s) => s.keyframe_id === item.keyframe_id);
 
   const handleCardClick = () => {
-    selectResult(item.id);
+    selectResult(item.keyframe_id);
   };
 
   const handleOpenVideo = (e: MouseEvent) => {
     e.stopPropagation();
-    selectResult(item.id);
+    selectResult(item.keyframe_id);
     setVideoModalOpen(true);
   };
 

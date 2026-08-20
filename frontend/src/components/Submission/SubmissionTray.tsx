@@ -100,13 +100,13 @@ export function SubmissionTray() {
             onDragEnd={handleDragEnd}
           >
             <SortableContext
-              items={items.map((i) => i.id)}
+              items={items.map((i) => i.keyframe_id)}
               strategy={verticalListSortingStrategy}
             >
               <div className="tray-pills-wrap-dnd">
                 {items.map((item, index) => (
                   <SortableItem
-                    key={item.id}
+                    key={item.keyframe_id}
                     item={item}
                     index={index}
                     onRemove={removeItem}

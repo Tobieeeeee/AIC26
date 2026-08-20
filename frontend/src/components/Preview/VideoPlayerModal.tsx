@@ -7,8 +7,8 @@ export function VideoPlayerModal() {
   const { isVideoModalOpen, setVideoModalOpen, results, selectedResultId } = useSearchStore();
   const { addItem, items } = useSubmissionStore();
 
-  const currentItem = results.find((r) => r.id === selectedResultId) || results[0];
-  const isAdded = currentItem ? items.some((s) => s.id === currentItem.id) : false;
+  const currentItem = results.find((r) => r.keyframe_id === selectedResultId);
+  const isAdded = currentItem ? items.some((s) => s.keyframe_id === currentItem.keyframe_id) : false;
 
   // Đóng modal khi bấm phím ESC
   useEffect(() => {

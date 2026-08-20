@@ -91,3 +91,7 @@ agent_task/
 
 # Local developer shortcuts
 requirements-dev.txt
+
+# Frontend install/build outputs
+frontend/node_modules/
+frontend/dist/

@@ -1,24 +1,26 @@
 import { useEffect, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Search, Languages } from 'lucide-react';
-import type { ModelEngine } from '../../types/competition';
+import type { RetrievalMode } from '../../types/competition';
 
 interface QueryBarProps {
   id: string;
   variant?: 'scene1' | 'scene2';
   placeholder?: string;
   query: string;
-  onQueryChange: (val: string) => void;
+  onQueryChange: (value: string) => void;
   onSearch: () => void;
   isLoading?: boolean;
-  modelEngine: ModelEngine;
-  onModelEngineChange: (engine: ModelEngine) => void;
+  retrievalMode: RetrievalMode;
+  onRetrievalModeChange: (mode: RetrievalMode) => void;
   translateEnabled: boolean;
   onTranslateToggle: (enabled: boolean) => void;
   translateLang: string;
   onTranslateLangChange: (lang: string) => void;
   isMain?: boolean;
 }
+
+const retrievalModes: RetrievalMode[] = ['hybrid', 'semantic', 'lexical', 'object'];
 
 export function QueryBar({
   id,
@@ -28,8 +30,8 @@ export function QueryBar({
   onQueryChange,
   onSearch,
   isLoading = false,
-  modelEngine,
-  onModelEngineChange,
+  retrievalMode,
+  onRetrievalModeChange,
   translateEnabled,
   onTranslateToggle,
   translateLang,
@@ -38,12 +40,11 @@ export function QueryBar({
 }: QueryBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Phím tắt Ctrl+K / Cmd+K focus vào ô search chính
   useEffect(() => {
     if (!isMain) return;
-    const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
+    const handleGlobalKeyDown = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
         inputRef.current?.focus();
       }
     };
@@ -51,10 +52,9 @@ export function QueryBar({
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [isMain]);
 
-  // Bắt phím Enter
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && query.trim() !== '') {
-      e.preventDefault();
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' && query.trim() !== '') {
+      event.preventDefault();
       onSearch();
     }
   };
@@ -73,12 +73,11 @@ export function QueryBar({
             className="w-full bg-transparent text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none text-sm"
             placeholder={placeholder}
             value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
+            onChange={(event) => onQueryChange(event.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isLoading}
           />
         </div>
-
         {isMain && (
           <button
             type="button"
@@ -98,13 +97,13 @@ export function QueryBar({
           <input
             type="checkbox"
             checked={translateEnabled}
-            onChange={(e) => onTranslateToggle(e.target.checked)}
+            onChange={(event) => onTranslateToggle(event.target.checked)}
             className="rounded border-slate-300 text-rose-500"
           />
           <Languages size={14} />
           <select
             value={translateLang}
-            onChange={(e) => onTranslateLangChange(e.target.value)}
+            onChange={(event) => onTranslateLangChange(event.target.value)}
             className="bg-transparent border border-slate-300 dark:border-slate-700 rounded px-1.5 py-0.5 text-xs"
           >
             <option value="vi">Vietnamese</option>
@@ -112,19 +111,18 @@ export function QueryBar({
           </select>
         </label>
 
-        <div className="flex items-center gap-3">
-          {(['ClipVideo', 'ClipLAION', 'Aladin', 'use all'] as const).map((engine) => (
-            <label key={engine} className="flex items-center gap-1 cursor-pointer">
-              <input
-                type="radio"
-                name={`${id}-engine`}
-                checked={modelEngine === engine}
-                onChange={() => onModelEngineChange(engine)}
-              />
-              <span>{engine}</span>
-            </label>
-          ))}
-        </div>
+        <label className="flex items-center gap-2">
+          <span>Retrieval</span>
+          <select
+            value={retrievalMode}
+            onChange={(event) => onRetrievalModeChange(event.target.value as RetrievalMode)}
+            disabled={isLoading}
+          >
+            {retrievalModes.map((mode) => (
+              <option key={mode} value={mode}>{mode}</option>
+            ))}
+          </select>
+        </label>
       </div>
     </div>
   );

@@ -1,9 +1,9 @@
 import type { FormEvent } from 'react';
 import { Search, X } from 'lucide-react';
 import { useSearchStore } from '../../stores/useSearchStore';
-import type { ModelEngine } from '../../types/competition';
+import type { RetrievalMode } from '../../types/competition';
 
-const modelEngines: ModelEngine[] = ['ClipVideo', 'ClipLAION', 'Aladin', 'use all'];
+const retrievalModes: RetrievalMode[] = ['hybrid', 'semantic', 'lexical', 'object'];
 
 export function SearchWorkspace() {
   const {
@@ -11,21 +11,35 @@ export function SearchWorkspace() {
     setQuery,
     scene2Query,
     setScene2Query,
-    modelEngine,
-    setModelEngine,
+    retrievalMode,
+    setRetrievalMode,
     advancedMode,
     executeSearch,
     isLoading,
   } = useSearchStore();
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    executeSearch();
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    void executeSearch();
   };
 
-  /* ------------------------------------------------------------- */
-  /* GIAO DIỆN CHUẨN KHI ADVANCED OFF (Giống hình cuối cùng)       */
-  /* ------------------------------------------------------------- */
+  const retrievalControl = (
+    <label className="retrieval-mode-control">
+      <span>Retrieval</span>
+      <select
+        value={retrievalMode}
+        onChange={(event) => setRetrievalMode(event.target.value as RetrievalMode)}
+        disabled={isLoading}
+      >
+        {retrievalModes.map((mode) => (
+          <option key={mode} value={mode}>
+            {mode}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
   if (!advancedMode) {
     return (
       <form className="okchok-search-card" onSubmit={handleSubmit}>
@@ -36,10 +50,10 @@ export function SearchWorkspace() {
             className="search-input-control"
             placeholder="Describe the scene you are looking for..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(event) => setQuery(event.target.value)}
             disabled={isLoading}
           />
-          <button type="submit" className="search-submit-btn">
+          <button type="submit" className="search-submit-btn" disabled={isLoading || !query.trim()}>
             <Search size={18} />
           </button>
         </div>
@@ -47,47 +61,29 @@ export function SearchWorkspace() {
         <div className="search-options-row">
           <label className="translate-option">
             <input type="checkbox" defaultChecked />
-            <span>文A Translate</span>
+            <span>Translate</span>
           </label>
-
           <select defaultValue="Vietnamese" className="lang-dropdown">
             <option value="Vietnamese">Vietnamese</option>
             <option value="English">English</option>
           </select>
-
-          <div className="models-radio-list">
-            {modelEngines.map((m) => (
-              <label key={m} className="model-radio-item">
-                <input
-                  type="radio"
-                  name="model-select"
-                  value={m}
-                  checked={modelEngine === m}
-                  onChange={() => setModelEngine(m)}
-                />
-                <span>{m}</span>
-              </label>
-            ))}
-          </div>
+          {retrievalControl}
         </div>
       </form>
     );
   }
 
-  /* ------------------------------------------------------------- */
-  /* GIAO DIỆN KHI ADVANCED ON (Thanh tìm kiếm đôi)                */
-  /* ------------------------------------------------------------- */
   return (
     <form className="dual-vision-search-header" onSubmit={handleSubmit}>
-      {/* Scene 1 (Viền Đỏ ⏳) */}
       <div className="dual-search-col">
         <div className="curved-search-input red-border">
-          <span className="hourglass-tag">⏳</span>
+          <span className="hourglass-tag">1</span>
           <input
             type="text"
             placeholder="Describe the scene you are looking for..."
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(event) => setQuery(event.target.value)}
+            disabled={isLoading}
           />
           {query && (
             <button type="button" className="btn-clear-x" onClick={() => setQuery('')}>
@@ -96,38 +92,20 @@ export function SearchWorkspace() {
           )}
         </div>
         <div className="dual-sub-options">
-          <label><input type="checkbox" defaultChecked /> <span>🌐</span></label>
-          <select defaultValue="Italian" className="mini-lang-select">
-            <option value="Italian">Italian</option>
-            <option value="English">English</option>
-            <option value="Vietnamese">Vietnamese</option>
-          </select>
-          <div className="mini-radios">
-            {modelEngines.map((m) => (
-              <label key={m}>
-                <input
-                  type="radio"
-                  name="v-model-1"
-                  value={m}
-                  checked={modelEngine === m}
-                  onChange={() => setModelEngine(m)}
-                />
-                {m}
-              </label>
-            ))}
-          </div>
+          <label><input type="checkbox" defaultChecked /> Translate</label>
+          {retrievalControl}
         </div>
       </div>
 
-      {/* Scene 2 (Viền Xanh Lục ⌛) */}
       <div className="dual-search-col">
         <div className="curved-search-input green-border">
-          <span className="hourglass-tag">⌛</span>
+          <span className="hourglass-tag">2</span>
           <input
             type="text"
             placeholder="Describe the next scene (optional)..."
             value={scene2Query}
-            onChange={(e) => setScene2Query(e.target.value)}
+            onChange={(event) => setScene2Query(event.target.value)}
+            disabled={isLoading}
           />
           {scene2Query && (
             <button type="button" className="btn-clear-x" onClick={() => setScene2Query('')}>
@@ -136,20 +114,7 @@ export function SearchWorkspace() {
           )}
         </div>
         <div className="dual-sub-options">
-          <label><input type="checkbox" defaultChecked /> <span>🌐</span></label>
-          <select defaultValue="Italian" className="mini-lang-select">
-            <option value="Italian">Italian</option>
-            <option value="English">English</option>
-            <option value="Vietnamese">Vietnamese</option>
-          </select>
-          <div className="mini-radios">
-            {modelEngines.map((m) => (
-              <label key={`v2-${m}`}>
-                <input type="radio" name="v-model-2" defaultChecked={m === 'use all'} />
-                {m}
-              </label>
-            ))}
-          </div>
+          <span>Temporal scene 2</span>
         </div>
       </div>
     </form>

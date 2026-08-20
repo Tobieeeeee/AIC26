@@ -2,45 +2,54 @@ import { useSearchStore } from '../../stores/useSearchStore';
 import { KeyframeCard } from './KeyframeCard';
 
 export function ResultGrid() {
-  const { results, advancedMode, runMockSearch } = useSearchStore();
+  const { results, advancedMode, runMockSearch, status, error } = useSearchStore();
+  const mockMode = import.meta.env.VITE_USE_MOCK_SEARCH === 'true';
 
-  /* Khi ADVANCED OFF: Lưới phẳng đa cột responsive */
   if (!advancedMode) {
     return (
       <div className="okchok-grid-wrapper">
         <div className="okchok-grid-topbar">
           <div className="grid-heading-text">
-            <span>▦</span> Ranked Keyframes
+            <span>•</span> Ranked Keyframes
           </div>
-          <button type="button" className="btn-fixture-search" onClick={runMockSearch}>
-            🔍 Fixture Search
-          </button>
+          {mockMode && (
+            <button type="button" className="btn-fixture-search" onClick={runMockSearch}>
+              Fixture Search (dev)
+            </button>
+          )}
         </div>
 
         <div className="okchok-cards-layout">
-          {results.map((item, idx) => (
-            <KeyframeCard key={item.id} item={item} index={idx} />
+          {status === 'loading' && <p className="grid-state-message">Searching…</p>}
+          {status === 'error' && <p className="grid-state-message error">{error}</p>}
+          {status === 'success-empty' && <p className="grid-state-message">No matching keyframes.</p>}
+          {status === 'idle' && <p className="grid-state-message">Enter a query to search.</p>}
+          {results.map((item, index) => (
+            <KeyframeCard key={item.keyframe_id} item={item} index={index} />
           ))}
         </div>
       </div>
     );
   }
 
-  /* Khi ADVANCED ON: Nhóm kết quả theo Video ID */
-  const groupedVideos = results.reduce<Record<string, typeof results>>((acc, item) => {
-    if (!acc[item.video_id]) acc[item.video_id] = [];
-    acc[item.video_id].push(item);
-    return acc;
+  const groupedVideos = results.reduce<Record<string, typeof results>>((groups, item) => {
+    if (!groups[item.video_id]) groups[item.video_id] = [];
+    groups[item.video_id].push(item);
+    return groups;
   }, {});
 
   return (
     <div className="vision-grouped-results">
+      {status === 'loading' && <p className="grid-state-message">Searching…</p>}
+      {status === 'error' && <p className="grid-state-message error">{error}</p>}
+      {status === 'success-empty' && <p className="grid-state-message">No matching keyframes.</p>}
+      {status === 'idle' && <p className="grid-state-message">Enter a query to search.</p>}
       {Object.entries(groupedVideos).map(([videoId, frames]) => (
         <div key={videoId} className="vision-video-row-lane">
           <div className="vision-row-tag">{videoId}</div>
           <div className="vision-cards-horizontal">
-            {frames.map((frame, i) => (
-              <KeyframeCard key={frame.id} item={frame} index={i} />
+            {frames.map((frame, index) => (
+              <KeyframeCard key={frame.keyframe_id} item={frame} index={index} />
             ))}
           </div>
         </div>
