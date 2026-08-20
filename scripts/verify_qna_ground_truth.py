@@ -168,6 +168,35 @@ def main() -> None:
     if int(end_frame) < int(start_frame):
         raise SystemExit("end_frame nho hon start_frame.")
 
+    # Validate against the real data before writing. Both checks exist
+    # because both mistakes actually happened during the first verification
+    # pass, and each silently makes the query score 0 forever.
+    # Deliberate private access: this reuses the registry's already-tested
+    # CSV loading (including its keyframe-ref normalization) rather than
+    # re-reading map_keyframes here, and adding a public accessor would mean
+    # editing shared ingestion code that is outside this work's scope.
+    frame_map = registry._load_frame_map(video_id)
+    if not frame_map:
+        raise SystemExit(
+            f"video_id {video_id!r} khong ton tai (khong tim thay map_keyframes CSV).\n"
+            f"  Kiem tra lai chinh ta -- vi du 'L030_V072' vs 'L30_V072'."
+        )
+    frame_indices = [m.frame_idx for m in frame_map.values()]
+    inside = [f for f in frame_indices if int(start_frame) <= f <= int(end_frame)]
+    if not inside:
+        print()
+        print("!" * 78)
+        print(f"CANH BAO: khong co keyframe nao cua {video_id} nam trong "
+              f"[{start_frame},{end_frame}].")
+        print("  He thong chi xuat ra duoc frame_idx cua cac keyframe co san,")
+        print("  nen khoang nay se KHONG BAO GIO cham duoc diem.")
+        print("  Nen lay frame_idx cua keyframe dau va cuoi ma dap an con thay duoc.")
+        print("!" * 78)
+        if input("Van muon ghi? (go 'yes' de ghi): ").strip().lower() != "yes":
+            raise SystemExit("da huy, khong ghi ground truth.")
+    else:
+        print(f"  (kiem tra: {len(inside)} keyframe nam trong khoang -- cham diem duoc)")
+
     entry = {
         "video_id": video_id,
         "start_frame": int(start_frame),
