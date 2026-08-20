@@ -58,6 +58,31 @@ def _build_trake_alignment_strategy(name: str):
     return strategies[name]()
 
 
+def _resolve_trake_semantic_service(service: Any) -> Any:
+    """Return something exposing ``.text_encoder`` and ``.index``, which
+    TRAKE's dense scoring needs but plain ``.search()`` does not provide.
+
+    Accepts either shape, because ``create_app`` documents its services as
+    injectable and both are legitimate injections:
+
+    - ``LazyFaissSemanticService`` (the production default) hides them behind
+      a lazy ``retriever()`` so the model/index still load on first use only.
+    - A plain ``SemanticRetriever`` already exposes them directly -- this is
+      exactly what the real-data integration tests construct.
+
+    Raises ``RuntimeError`` (-> HTTP 503) for a service supporting neither,
+    rather than letting an ``AttributeError`` surface as an opaque 500.
+    """
+    if hasattr(service, "retriever"):
+        return service.retriever()
+    if hasattr(service, "text_encoder") and hasattr(service, "index"):
+        return service
+    raise RuntimeError(
+        "configured semantic service does not support TRAKE dense scoring "
+        "(needs either a retriever() method or .text_encoder/.index attributes)"
+    )
+
+
 class LazyFaissSemanticService:
     """Load the persisted Phase 03 index and encoder only on first search."""
 
@@ -518,7 +543,7 @@ def create_app(
         strategy = _build_trake_alignment_strategy(strategy_name)
 
         try:
-            trake_semantic_service = semantic_service.retriever()
+            trake_semantic_service = _resolve_trake_semantic_service(semantic_service)
             chains = search_trake(
                 query,
                 alignment_strategy=strategy,

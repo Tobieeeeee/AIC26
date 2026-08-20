@@ -165,6 +165,55 @@ def test_trake_search_none_markers_serialize_as_json_null(monkeypatch) -> None:
     assert None in frames
 
 
+def test_trake_search_accepts_a_plain_retriever_shaped_service(monkeypatch) -> None:
+    """A plain SemanticRetriever already exposes .text_encoder/.index -- the
+    exact shape TRAKE needs, and what the real-data integration tests
+    construct. The route must accept it directly, not only the production
+    LazyFaissSemanticService's lazy retriever() wrapper."""
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=_FakeTrakeRetriever(),  # no retriever(); has .text_encoder/.index
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        )
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 200
+    assert response.json()["count"] >= 1
+
+
+def test_trake_search_returns_503_not_500_for_a_search_only_service(monkeypatch) -> None:
+    """Regression: a service exposing only .search() (e.g. an older or custom
+    injection) previously produced an opaque AttributeError -> HTTP 500. It
+    must fail as a clear, actionable 503 instead."""
+
+    class _SearchOnlyService:
+        def search(self, query, top_k=5):
+            return []
+
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=_SearchOnlyService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        ),
+        raise_server_exceptions=False,
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 503
+    assert "dense scoring" in response.json()["detail"]
+
+
 def test_trake_search_returns_503_when_semantic_service_unconfigured(monkeypatch) -> None:
     monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
     monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)

@@ -3,8 +3,12 @@ inter-event gap constraints, produce ranked candidate chains for that video.
 
 Three interchangeable strategies port the course lab's three real AIC 2025
 team algorithms exactly: ATLAS (``dp_align``), Lucifer (``dp_align_soft``),
-U-CESE (``two_pointer_clips``) -- see docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md
-and E:\\AIC\\11_TRAKE\\lab11\\trake_align.py (kept outside the repo).
+U-CESE (``two_pointer_clips``). The course lab's own ``trake_align.py`` is
+kept outside this repository (course material, not ours to redistribute);
+every fact this module relies on from it is restated in
+docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md and
+docs/AIC_TRAKE_BENCHMARK_RESULTS.md, so no local copy is needed to read,
+maintain, or verify this code.
 
 Each strategy operates on ONE video's ``TrakeVideoScoreMatrix`` at a time --
 video shortlisting already happened via ``search_kis()`` in orchestration

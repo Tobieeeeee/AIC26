@@ -256,6 +256,81 @@ def test_lucifer_skip_beats_atlas_when_an_event_is_genuinely_unfindable() -> Non
     assert lucifer_score.final_score >= atlas_score.final_score
 
 
+def test_trake_full_pipeline_end_to_end_including_submission_export(tmp_path: Path) -> None:
+    """Phase 09 exit gate: ONE real query through EVERY stage, no mocks --
+    event contract -> shortlist -> dense scoring -> alignment -> official
+    evaluator -> never-blank fallback -> validated submission row -> file
+    export -> read back.
+
+    This is the only place the Phase 07 submission module
+    (``mvr.submission.trake_export``) is exercised against real retrieval
+    output rather than synthetic fixtures. The API route (Phase 08)
+    deliberately does NOT run the never-blank fallback -- it is a
+    submission-time concern -- so without this test that module would have
+    no real-data caller anywhere.
+    """
+    from mvr.evaluation.trake import evaluate_trake
+    from mvr.retrieval.trake import search_trake
+    from mvr.retrieval.trake_align import AtlasAlignment
+    from mvr.submission.trake_export import (
+        apply_never_blank_fallback,
+        export_local_trake_verification_json,
+        load_local_trake_verification_json,
+        validate_trake_prediction,
+    )
+
+    semantic_service, registry = _real_services()
+    benchmark_query = _build_benchmark_queries()[0]  # traffic_accident_night, k=4
+
+    # 1-4. contract -> shortlist -> dense scoring -> alignment
+    chains = search_trake(
+        benchmark_query.query,
+        alignment_strategy=AtlasAlignment(),
+        semantic_service=semantic_service,
+        aic_registry=registry,
+    )
+    assert chains, "real query must produce at least one candidate chain"
+
+    # 5. official evaluator against the internal GT
+    score = evaluate_trake(chains, benchmark_query.gt)
+
+    # 6-7. never-blank fallback -> validated submission row.
+    # fps comes from the organizer's own map_keyframes CSV via the registry,
+    # not guessed -- the same source every frame_idx in the GT came from.
+    top_chain = chains[0]
+    fps = registry.resolve_frame(top_chain.video_id, "1").fps
+    row = apply_never_blank_fallback(top_chain, benchmark_query.query.gaps, video_fps=fps)
+    validate_trake_prediction(row, k=len(benchmark_query.query.events))
+
+    # 8-9. export to a real file, then read it back
+    export_path = tmp_path / "trake_e2e_export.json"
+    export_local_trake_verification_json([row], export_path, query_id=benchmark_query.query_id)
+    round_tripped = load_local_trake_verification_json(export_path)
+
+    print(
+        f"\n=== TRAKE full-pipeline E2E ({benchmark_query.query_id}, internal GT) ===\n"
+        f"  chains returned : {len(chains)}\n"
+        f"  final_score     : {score.final_score:.3f}\n"
+        f"  R@1 / R@20      : {score.recall_at_k[1]:.3f} / {score.recall_at_k[20]:.3f}\n"
+        f"  top chain       : {top_chain.video_id} {top_chain.frames}\n"
+        f"  ground truth    : {benchmark_query.gt.video_id} {benchmark_query.gt.frames}\n"
+        f"  fps (from CSV)  : {fps}\n"
+        f"  submitted row   : {row.frames} interpolated={row.is_interpolated}\n"
+        f"  exported bytes  : {export_path.stat().st_size}"
+    )
+
+    assert round_tripped == [row], "exported submission row must survive a file round-trip"
+    assert export_path.stat().st_size > 0
+    # The pipeline must actually find something, not just execute: this
+    # query's correct video is verified reachable (see
+    # docs/AIC_TRAKE_BENCHMARK_RESULTS.md), so a total-zero result means a
+    # real regression, not a hard query.
+    assert score.final_score > 0.0, (
+        "the full pipeline scored 0.0 on a query whose correct answer is "
+        "verified reachable -- investigate before trusting this run"
+    )
+
+
 def test_trake_real_data_benchmark_across_all_strategies(tmp_path: Path) -> None:
     from mvr.evaluation.trake_benchmark import run_trake_benchmark_query, summarize_trake_benchmark
     from mvr.retrieval.trake import search_trake
