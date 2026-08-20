@@ -419,7 +419,7 @@ Completed:
 Verification:
 
 - Focused ASR suite after BOM regression coverage: 15 passed, 1 skipped.
-- Full regression suite: 223 passed, 6 skipped, 0 failed.
+- Full regression suite after syncing `origin/main`: 253 passed, 6 skipped, 0 failed.
 - Python compileall and `git diff --check`: passed.
 - Dependency resolution reproduced an upstream blocker: clean installation of
   `chunkformer==1.2.2` reaches its unconditional `deepspeed>=0.14` dependency,
