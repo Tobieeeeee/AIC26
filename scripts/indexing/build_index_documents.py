@@ -27,6 +27,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mapping-csv", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--clip-root", type=Path)
+    parser.add_argument("--embeddings-root", type=Path)
+    parser.add_argument(
+        "--required-embedding-providers",
+        default="",
+        help="Comma-separated provider IDs that must be present and valid",
+    )
     parser.add_argument("--objects-root", type=Path)
     parser.add_argument("--ocr-root", type=Path)
     parser.add_argument("--asr-root", type=Path)
@@ -46,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         mapping_csv=args.mapping_csv,
         output_root=args.output_root,
         clip_root=args.clip_root,
+        embeddings_root=args.embeddings_root,
         objects_root=args.objects_root,
         ocr_root=args.ocr_root,
         asr_root=args.asr_root,
@@ -58,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
             ),
             asr=AsrFilterConfig(min_conf=args.asr_min_conf),
             clip_expected_dimension=args.clip_expected_dimension,
+            required_embedding_providers=tuple(
+                provider.strip()
+                for provider in args.required_embedding_providers.split(",")
+                if provider.strip()
+            ),
         ),
     )
     print(

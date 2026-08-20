@@ -1,0 +1,7 @@
+{
+  "canonical_mapping": "ingest/keyframe_mapping.csv",
+  "expected_keyframes": 5,
+  "fasttest_root": "artifacts/fasttest",
+  "lexical_manifest": "indexes/lexical/manifest.json",
+  "processed_root": "processed"
+}

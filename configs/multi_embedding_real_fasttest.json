@@ -1,0 +1,54 @@
+{
+  "run_id": "real-three-provider-fasttest-v1",
+  "status": "real_fasttest_complete",
+  "canonical_mapping": "artifacts/fasttest_real_3models/ingest/keyframe_mapping.csv",
+  "keyframe_root": "artifacts/fasttest_real_3models",
+  "output_root": "artifacts/fasttest_real_3models",
+  "expected_keyframes": 5,
+  "provider_specs": "configs/embedding_providers.json",
+  "provider_order": ["metaclip2", "perception_encoder", "beit3"],
+  "providers": {
+    "metaclip2": {
+      "runtime_image": "mvr-embedding-metaclip2:real-fasttest",
+      "model": "facebook/metaclip-2-worldwide-b16",
+      "revision": "8cc8591f32b43a809f3325192d3b77aa56968ddb",
+      "artifact_directory": "artifacts/fasttest_real_3models/features/embeddings/metaclip2"
+    },
+    "perception_encoder": {
+      "runtime_image": "mvr-embedding-perception-encoder:real-fasttest",
+      "checkpoint": "../dataset_aic/models/multi_embedding/assets/perception_encoder/PE-Core-L14-336.pt",
+      "revision": "ee1fdb467ab42497fa2e60e94a79e9d7383c1cbd",
+      "artifact_directory": "artifacts/fasttest_real_3models/features/embeddings/perception_encoder"
+    },
+    "beit3": {
+      "runtime_image": "mvr-embedding-beit3:real-fasttest",
+      "checkpoint": "../dataset_aic/models/multi_embedding/assets/beit3/beit3_base_itc_patch16_224.pth",
+      "tokenizer": "../dataset_aic/models/multi_embedding/assets/beit3/beit3.spm",
+      "source_revision": "69961945a2fd283f2beed74d1f3c543265c9930c",
+      "artifact_directory": "artifacts/fasttest_real_3models/features/embeddings/beit3",
+      "checkpoint_sha256": "d483a41d92b9aea7ef87d17551413b8c22faae927110666b01ac3aa7a199a25b",
+      "tokenizer_sha256": "6f5e2fefcf793761a76a6bfb8ad35489f9c203b25557673284b6d032f41043f4",
+      "status": "ready"
+    }
+  },
+  "indexes": {
+    "backend": "faiss",
+    "policy": "create",
+    "allow_overwrite": false,
+    "namespaces": {
+      "beit3": "dev__l21_fast5_real__beit3",
+      "metaclip2": "dev__l21_fast5_real__metaclip2",
+      "perception_encoder": "dev__l21_fast5_real__perception_encoder"
+    }
+  },
+  "retrieval": {
+    "top_k": 5,
+    "rrf_k": 60,
+    "failure_policy": "fail_closed_no_provider_fallback"
+  },
+  "queries": [
+    {"id": "Q1", "text": "women receiving pension payments at an office"},
+    {"id": "Q2", "text": "a damaged car and rescuer at a traffic accident"},
+    {"id": "Q3", "text": "a white police van parked on a street"}
+  ]
+}
