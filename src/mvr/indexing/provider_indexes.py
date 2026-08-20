@@ -111,8 +111,15 @@ class FaissProviderBackend:
     ) -> Sequence[str]:
         if vectors.shape != (len(metadata), contract.dimension):
             raise ProviderIndexError("backend batch dimension mismatch")
-        existing_ids = {row["keyframe_id"] for row in self._metadata}
-        duplicates = [str(row["keyframe_id"]) for row in metadata if row["keyframe_id"] in existing_ids]
+        # (video_id, keyframe_id): on the id alone every video after the
+        # first reported its whole batch as duplicate, because 842 videos
+        # each contain a keyframe called "034".
+        existing_ids = {(row["video_id"], row["keyframe_id"]) for row in self._metadata}
+        duplicates = [
+            f"{row['video_id']}/{row['keyframe_id']}"
+            for row in metadata
+            if (row["video_id"], row["keyframe_id"]) in existing_ids
+        ]
         if duplicates:
             return duplicates
         self._vectors.extend(np.asarray(row, dtype=np.float32) for row in vectors)

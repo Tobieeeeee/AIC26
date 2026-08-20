@@ -37,7 +37,10 @@ class MultiEmbeddingFasttestError(ValueError):
 class AblationConfig:
     run_id: str
     queries: tuple[dict[str, str], ...]
-    canonical_ids: frozenset[str]
+    # (video_id, keyframe_id). A keyframe_id alone does not identify a
+    # keyframe: 842 of the organizer's videos contain one called "034",
+    # so a result from the wrong video would validate against this set.
+    canonical_ids: frozenset[tuple[str, str]]
     expected_keyframes: int = 5
     rrf_k: int = 60
     top_k: int = 5
@@ -118,7 +121,10 @@ def run_ablation_suite(
                         f"{ablation_id} provider coverage mismatch"
                     )
                 for provider_id, results in response.ranked_lists.items():
-                    if any(result.keyframe_id not in config.canonical_ids for result in results):
+                    if any(
+                        (result.video_id, result.keyframe_id) not in config.canonical_ids
+                        for result in results
+                    ):
                         raise MultiEmbeddingFasttestError(
                             f"{provider_id} returned a non-canonical identity"
                         )
@@ -172,7 +178,10 @@ def run_ablation_suite(
         "run_id": config.run_id,
         "provider_sets": [list(providers) for _, providers in ABLATIONS],
         "expected_keyframes": config.expected_keyframes,
-        "canonical_ids": sorted(config.canonical_ids),
+        "canonical_ids": [
+            f"{video_id}/{keyframe_id}"
+            for video_id, keyframe_id in sorted(config.canonical_ids)
+        ],
         "query_set_version": config.query_set_version,
         "ground_truth_version": config.ground_truth_version,
         "representative_ground_truth": config.representative_ground_truth,
