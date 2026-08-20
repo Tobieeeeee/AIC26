@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 import torch
 import torchvision
 from torchvision.transforms import functional as F
@@ -11,7 +11,7 @@ class FasterRCNN:
         self.score_threshold = score_threshold
         self.nms_threshold = nms_threshold
         self.model_name = model_name
-        
+
         # Load the model with pretrained weights
         if model_name == "fasterrcnn_resnet50_fpn":
             weights = torchvision.models.detection.FasterRCNN_ResNet50_FPN_Weights.DEFAULT
@@ -19,12 +19,12 @@ class FasterRCNN:
             self.categories = weights.meta["categories"]
         else:
             raise ValueError(f"Unsupported model: {model_name}")
-            
+
         self.model.to(self.device)
         self.model.eval()
 
     @torch.no_grad()
-    def detect(self, image_path: Path | str) -> list[dict[str, Any]]:
+    def detect(self, image_path: Union[Path, str]) -> list[dict[str, Any]]:
         try:
             image = Image.open(image_path).convert("RGB")
         except Exception as e:
@@ -32,11 +32,11 @@ class FasterRCNN:
 
         img_tensor = F.to_tensor(image).unsqueeze(0).to(self.device)
         predictions = self.model(img_tensor)[0]
-        
+
         boxes = predictions["boxes"].cpu().numpy()
         scores = predictions["scores"].cpu().numpy()
         labels = predictions["labels"].cpu().numpy()
-        
+
         results = []
         for box, score, label in zip(boxes, scores, labels):
             if score >= self.score_threshold:
