@@ -47,6 +47,7 @@ artifacts/verification/*
 artifacts/processed_*/
 
 # Model weights / databases / generated outputs
+/models/
 *.pt
 *.pth
 *.ckpt

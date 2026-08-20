@@ -389,6 +389,66 @@ Blockers:
 
 ---
 
+# Post-baseline work: per-keyframe ASR features
+
+Status: CODE COMPLETE; CPU REAL RUNTIME VERIFIED
+
+Branch: `feat/keyframe-asr`
+
+Completed:
+
+- Added a provider-separated per-keyframe pipeline under
+  `src/mvr/enrichment/asr/`: authoritative mapping adapters, FFmpeg mono 16 kHz
+  window decoding, Silero VAD, nearby-region merge, exact Vietnamese
+  ChunkFormer wrapping, canonical JSON/artifact validation, atomic writes,
+  manifest/reporting, resume, and force behavior.
+- Preserved the required semantic contract: every keyframe independently runs
+  `[t-3s,t+3s]` (clamped) -> VAD -> ASR only on speech regions. No full-video
+  transcript alignment path was introduced.
+- Reused the existing repo ingestion `keyframe_mapping.csv` and
+  `video_metadata.csv` contracts and the existing organizer
+  `AicDatasetRegistry`. Organizer `map_keyframes` supplies `n`, `pts_time`, and
+  `frame_idx`; because it has no `shot_id`, canonical organizer ASR artifacts
+  explicitly use `null` rather than guessing.
+- Added `build-asr-features` to `mvr.cli`, optional `asr` dependencies and
+  defaults, a pinned CPU Dockerfile, detailed runtime documentation, 15 offline
+  tests, and one opt-in real integration test.
+- No lab implementation was migrated for this task, and OCR/object/visual/
+  retrieval behavior was not modified.
+
+Verification:
+
+- Focused ASR suite after BOM regression coverage: 15 passed, 1 skipped.
+- Full regression suite after syncing `origin/main`: 253 passed, 6 skipped, 0 failed.
+- Python compileall and `git diff --check`: passed.
+- Dependency resolution reproduced an upstream blocker: clean installation of
+  `chunkformer==1.2.2` reaches its unconditional `deepspeed>=0.14` dependency,
+  whose isolated build cannot import the already installed Torch on the local
+  Windows/Python 3.13 host. The Dockerfile applies the minimal isolated Linux
+  workaround: pinned CPU Torch first, then pinned DeepSpeed with build
+  isolation disabled, then the project ASR extra.
+- Built `mvr-asr:cpu` successfully from `docker/asr/Dockerfile.cpu`.
+- Ran a real Docker smoke test over five authoritative keyframe mappings from
+  `L21_V001` and its original video. The pinned Silero VAD and exact
+  `khanhld/chunkformer-ctc-large-vie` revision loaded successfully on CPU.
+- Smoke manifest: 5 keyframes total, 4 with speech, 1 without speech, 0 failed,
+  4 segments, 4 ASR calls, and 69.8 seconds elapsed. `errors.json` contained no
+  errors or warnings. All five canonical per-keyframe JSON artifacts were
+  generated, including the required empty artifact for the no-speech frame.
+- A second real run over keyframes 6-10 loaded the model entirely from the
+  read-only cache and produced 5 speech artifacts, 8 segments, 8 ASR calls,
+  and 0 failures in 73.2 seconds. It exposed and then regression-verified CSV
+  header handling for both UTF-8 and UTF-8-with-BOM organizer mappings.
+- A third real run over keyframes 11-20 produced 10 speech artifacts, 14
+  segments, 14 ASR calls, and 0 failures in 88.0 seconds. Across all three
+  runs, 20 real `L21_V001` keyframes have now been verified.
+
+Remaining runtime gates:
+
+- GPU visibility and CUDA inference have not been verified.
+- The 20-keyframe smoke runs verify execution and schema, not ASR quality or
+  word-error rate. Full-dataset inference was intentionally not run.
+
 ## Task05A v1 — Feature Filtering & Index Document Preparation
 
 Status: COMPLETE
@@ -447,12 +507,11 @@ Blockers:
 
 # Current active phase
 
-Task05A v1 is COMPLETE on `feat/filtering`. Phases 01–06 (reuse baseline) are
-COMPLETE and merged via PR #1. The
+None. Phases 01–06 (reuse baseline) are COMPLETE and merged via PR #1. The
 Textual KIS competition-ready task pack (Tasks 01–09) is also COMPLETE on
 `feat/kis-competition-ready`.
 
-Next action: human review of `feat/filtering`.
+Next action: human review of `feat/kis-competition-ready`.
 
 Stop gate: do not begin Task05B/C/D, Q&A, TRAKE, Frontend, VLM, advanced
 reranking, or deployment without explicit approval.

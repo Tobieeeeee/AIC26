@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Sequence
 
+from .enrichment.asr.audio import FfmpegAudioWindowProvider
+from .enrichment.asr.chunkformer import (
+    DEFAULT_MODEL_REVISION,
+    ChunkFormerASRProvider,
+)
+from .enrichment.asr.pipeline import ASRPipelineConfig, build_asr_features
+from .enrichment.asr.vad import SileroVADProvider
 from .enrichment.embeddings.openclip import OpenClipEncoder
 from .evaluation.benchmark import (
     KisBenchmarkQuery,
@@ -21,7 +27,6 @@ from .ingestion.pipeline import run_pipeline
 from .retrieval.frame_refinement import RefinementWindowConfig, refine_top_candidates
 from .retrieval.kis import KisCandidate, search_kis
 from .retrieval.semantic import SemanticRetriever
-from .enrichment.ocr.scene_text import process_video_ocr
 
 
 KIS_BENCHMARK_TOP_K = 100
@@ -120,6 +125,100 @@ def _add_build_aic_index_parser(subparsers: argparse._SubParsersAction) -> None:
         default="auto",
     )
     parser.set_defaults(command="build-aic-index")
+
+
+def _non_negative_float(value: str) -> float:
+    parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
+
+
+def _add_build_asr_features_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "build-asr-features",
+        help="Build VAD-gated Vietnamese ASR JSON independently per keyframe",
+    )
+    parser.add_argument("--dataset-root", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--pre-seconds", type=_non_negative_float, default=3.0)
+    parser.add_argument("--post-seconds", type=_non_negative_float, default=3.0)
+    parser.add_argument("--vad-threshold", type=float, default=0.5)
+    parser.add_argument("--min-speech-duration-ms", type=_positive_int, default=250)
+    parser.add_argument("--min-silence-duration-ms", type=_positive_int, default=150)
+    parser.add_argument("--merge-gap-ms", type=int, default=250)
+    parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+    parser.add_argument(
+        "--videos",
+        nargs="+",
+        default=None,
+        help="Optional video IDs (space- or comma-separated).",
+    )
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--allow-download",
+        action="store_true",
+        help="Allow Hugging Face model download; default is local-files-only.",
+    )
+    parser.add_argument("--model-revision", default=DEFAULT_MODEL_REVISION)
+    parser.set_defaults(command="build-asr-features")
+
+
+def _normalize_video_args(values: Sequence[str] | None) -> list[str] | None:
+    if values is None:
+        return None
+    video_ids = [
+        item.strip()
+        for value in values
+        for item in value.split(",")
+        if item.strip()
+    ]
+    return video_ids or None
+
+
+def _run_build_asr_features(
+    *,
+    dataset_root: Path,
+    output: Path,
+    pre_seconds: float,
+    post_seconds: float,
+    vad_threshold: float,
+    min_speech_duration_ms: int,
+    min_silence_duration_ms: int,
+    merge_gap_ms: int,
+    device: str,
+    videos: Sequence[str] | None,
+    force: bool,
+    allow_download: bool,
+    model_revision: str | None,
+) -> None:
+    if merge_gap_ms < 0:
+        raise ValueError("merge_gap_ms must be non-negative")
+    vad = SileroVADProvider(
+        threshold=vad_threshold,
+        min_speech_duration_ms=min_speech_duration_ms,
+        min_silence_duration_ms=min_silence_duration_ms,
+    )
+    asr = ChunkFormerASRProvider(
+        device=device,
+        revision=model_revision,
+        allow_download=allow_download,
+    )
+    manifest = build_asr_features(
+        dataset_root,
+        output,
+        audio_provider=FfmpegAudioWindowProvider(),
+        vad_provider=vad,
+        asr_provider=asr,
+        config=ASRPipelineConfig(
+            pre_seconds=pre_seconds,
+            post_seconds=post_seconds,
+            merge_gap_ms=merge_gap_ms,
+            force=force,
+        ),
+        videos=_normalize_video_args(videos),
+    )
+    print(json.dumps(manifest, indent=2, ensure_ascii=False))
 
 
 def _add_enrich_ocr_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -276,6 +375,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     _add_build_index_parser(subparsers)
     _add_search_parser(subparsers)
     _add_build_aic_index_parser(subparsers)
+    _add_build_asr_features_parser(subparsers)
     _add_benchmark_kis_parser(subparsers)
     _add_enrich_ocr_parser(subparsers)
     values = vars(parser.parse_args(argv))
@@ -298,11 +398,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     if command == "build-aic-index":
         _run_build_aic_index(**values)
         return
+    if command == "build-asr-features":
+        _run_build_asr_features(**values)
+        return
     if command == "benchmark-kis":
         _run_benchmark_kis(**values)
         return
     if command == "enrich-ocr":
-        from .enrichment.ocr.scene_text import process_video_ocr
         mapping_csv = values.pop("mapping_csv")
         video_root = values.pop("video_root")
         output = values.pop("output")
