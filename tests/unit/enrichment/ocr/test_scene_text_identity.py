@@ -173,3 +173,25 @@ def test_finding_no_video_at_all_raises_instead_of_reporting_success(
             video_root=tmp_path / "empty",
             output_dir=tmp_path / "out",
         )
+
+
+# -- docker_ocr's anchor lookup ----------------------------------------
+
+
+def test_the_anchor_lookup_is_keyed_by_video_and_keyframe() -> None:
+    """`_build_anchor_lookup` is built over every video at once, so on
+    keyframe_id alone the entry for "034" was whichever of 842 videos was
+    read last. The OCR request then carried that video's anchor_frame_idx
+    and anchor_timestamp -- and frame_idx is the number the competition
+    scores on."""
+    from mvr.enrichment.ocr.docker_ocr import _build_anchor_lookup
+
+    keyframes = [
+        _keyframe("L21_V001", "034", shot_id=34, frame_idx=1745),
+        _keyframe("L21_V002", "034", shot_id=34, frame_idx=900),
+    ]
+
+    lookup = _build_anchor_lookup(keyframes)
+
+    assert lookup[("L21_V001", "034")]["frame_idx"] == 1745
+    assert lookup[("L21_V002", "034")]["frame_idx"] == 900
