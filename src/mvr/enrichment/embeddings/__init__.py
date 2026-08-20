@@ -12,6 +12,12 @@ from .artifacts import (
     sha256_file,
     write_manifest,
 )
+from .provider_specs import (
+    ProviderSpec,
+    ProviderSpecError,
+    ProviderSpecRegistry,
+    load_provider_specs,
+)
 
 __all__ = [
     "EmbeddingArtifactError",
@@ -24,4 +30,8 @@ __all__ = [
     "load_provider_artifact",
     "sha256_file",
     "write_manifest",
+    "ProviderSpec",
+    "ProviderSpecError",
+    "ProviderSpecRegistry",
+    "load_provider_specs",
 ]

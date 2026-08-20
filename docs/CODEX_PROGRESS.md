@@ -644,14 +644,46 @@ Blockers:
 - None for the schema/discovery layer. Provider model specifications and
   inference remain deliberately deferred to Tasks 05–08.
 
+# Multi-Embedding Task 05 — Locked Provider Specifications
+
+Status: COMPLETE
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added a runtime-readable, versioned provider matrix for BEiT-3 base ITC,
+  distilled MetaCLIP-2 worldwide B/16, and PE Core L/14 336.
+- Locked provider-specific image/text entry points, source/checkpoint revisions,
+  preprocessing, tokenizers, dimensions, dtype, normalization, similarity,
+  licenses, access constraints, and dependency environments.
+- Added strict no-download config parsing and Task 04 artifact-compatibility
+  validation.
+- Documented only authoritative repository/model-card evidence and explicit
+  upstream reproducibility risks. No model was substituted or downloaded.
+
+Verification:
+
+- Provider contract plus Task 04/Task05A/Task05B regression: 77 passed.
+- Python compilation and `git diff --check`: passed.
+
+Risks:
+
+- Microsoft's BEiT-3 blob has no published immutable revision/SHA256 and its
+  official dependency list is partially unpinned. Task 06 must isolate the
+  runtime and hash the downloaded file before accepting real artifacts.
+- MetaCLIP-2 is CC-BY-NC-4.0; competition/deployment use must comply.
+- PE's official source omits a `huggingface-hub` pin. Task 08 must record the
+  resolved isolated environment.
+
 # Current active phase
 
-Multi-Embedding Task 04 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 05 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 05 provider specification locking using authoritative
-upstream sources.
+Next action: begin Task 06 BEiT-3 offline extraction using only the locked
+provider contract.
 
 The user explicitly approved automatic continuation through Task 16 for this
 task pack. Expensive full-corpus execution remains separately approval-gated.

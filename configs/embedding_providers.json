@@ -1,0 +1,152 @@
+{
+  "schema_version": "1.0",
+  "providers": [
+    {
+      "model_id": "beit3",
+      "status": "ready",
+      "model_name": "BEiT-3 base ITC patch16 224",
+      "checkpoint_or_pretrained": "beit3_base_itc_patch16_224.pth",
+      "model_revision": null,
+      "checkpoint_sha256": null,
+      "source_repository": "https://github.com/microsoft/unilm",
+      "source_revision": "69961945a2fd283f2beed74d1f3c543265c9930c",
+      "official_sources": [
+        "https://github.com/microsoft/unilm/blob/69961945a2fd283f2beed74d1f3c543265c9930c/beit3/README.md",
+        "https://github.com/microsoft/unilm/blob/69961945a2fd283f2beed74d1f3c543265c9930c/beit3/modeling_finetune.py",
+        "https://github.com/microsoft/unilm/blob/69961945a2fd283f2beed74d1f3c543265c9930c/beit3/datasets.py"
+      ],
+      "image_encoder_entry_point": "timm.create_model('beit3_base_patch16_224_retrieval'); model(image=..., only_infer=True)[0]",
+      "text_encoder_entry_point": "timm.create_model('beit3_base_patch16_224_retrieval'); model(text_description=..., padding_mask=..., only_infer=True)[1]",
+      "image_preprocessing": {
+        "size": [224, 224],
+        "resize": "torchvision.transforms.Resize; bicubic interpolation=3",
+        "color": "RGB via torchvision default_loader",
+        "rescale": "ToTensor [0,1]",
+        "mean": [0.5, 0.5, 0.5],
+        "std": [0.5, 0.5, 0.5]
+      },
+      "tokenizer": {
+        "entry_point": "transformers.XLMRobertaTokenizer",
+        "model": "official beit3.spm from microsoft/unilm",
+        "max_length": 64,
+        "padding_mask": "1 for padding positions"
+      },
+      "embedding_dimension": 768,
+      "dtype": "float32",
+      "normalized": true,
+      "similarity_metric": "inner_product",
+      "license": "MIT (UniLM code); checkpoint distributed by Microsoft under the repository release",
+      "access_requirements": "Public direct-download checkpoint and tokenizer; no account or gated approval documented",
+      "dependencies": [
+        "provider environment: pytorch/pytorch:1.8.1-cuda11.1-cudnn8-devel",
+        "timm==0.4.12",
+        "torchscale @ git+https://github.com/microsoft/torchscale.git",
+        "transformers (upstream requirement is unpinned)",
+        "sentencepiece (upstream requirement is unpinned)",
+        "Pillow (upstream requirement is unpinned)"
+      ],
+      "reproducibility_notes": "Microsoft publishes a stable checkpoint filename and URL but no immutable checkpoint revision or SHA256. The source is pinned; the downloaded checkpoint must be hashed and recorded before a production artifact is accepted. The official dependency file also leaves several packages unpinned, so this provider must run in an isolated compatibility environment and pass Task 06 runtime tests.",
+      "blocker_reason": null
+    },
+    {
+      "model_id": "metaclip2",
+      "status": "ready",
+      "model_name": "Distilled MetaCLIP 2 worldwide ViT-B/16",
+      "checkpoint_or_pretrained": "facebook/metaclip-2-worldwide-b16",
+      "model_revision": "8cc8591f32b43a809f3325192d3b77aa56968ddb",
+      "checkpoint_sha256": null,
+      "source_repository": "https://github.com/facebookresearch/MetaCLIP",
+      "source_revision": "f47f7841f6a91cc5676729a3d125519393d87d1e",
+      "official_sources": [
+        "https://github.com/facebookresearch/MetaCLIP/blob/f47f7841f6a91cc5676729a3d125519393d87d1e/README.md",
+        "https://huggingface.co/facebook/metaclip-2-worldwide-b16/tree/8cc8591f32b43a809f3325192d3b77aa56968ddb",
+        "https://huggingface.co/facebook/metaclip-2-worldwide-b16/blob/8cc8591f32b43a809f3325192d3b77aa56968ddb/config.json",
+        "https://huggingface.co/facebook/metaclip-2-worldwide-b16/blob/8cc8591f32b43a809f3325192d3b77aa56968ddb/preprocessor_config.json"
+      ],
+      "image_encoder_entry_point": "transformers.AutoModel.from_pretrained(...).get_image_features",
+      "text_encoder_entry_point": "transformers.AutoModel.from_pretrained(...).get_text_features",
+      "image_preprocessing": {
+        "entry_point": "transformers.AutoProcessor.from_pretrained",
+        "size": [224, 224],
+        "resize": "resize and center crop; bicubic resample=3",
+        "color": "convert RGB",
+        "rescale_factor": 0.00392156862745098,
+        "mean": [0.48145466, 0.4578275, 0.40821073],
+        "std": [0.26862954, 0.26130258, 0.27577711]
+      },
+      "tokenizer": {
+        "entry_point": "transformers.AutoProcessor.from_pretrained",
+        "class": "XLMRobertaTokenizer",
+        "model": "facebook/xlm-v-base assets embedded in the pinned checkpoint repository",
+        "max_length": 77
+      },
+      "embedding_dimension": 512,
+      "dtype": "float32",
+      "normalized": true,
+      "similarity_metric": "inner_product",
+      "license": "CC-BY-NC-4.0",
+      "access_requirements": "Public, ungated Hugging Face repository; use must satisfy attribution and non-commercial restrictions",
+      "dependencies": [
+        "python>=3.10,<3.13",
+        "torch==2.5.1",
+        "torchvision==0.20.1",
+        "transformers==4.57.1",
+        "sentencepiece==0.2.0",
+        "Pillow==11.0.0"
+      ],
+      "reproducibility_notes": "The Hugging Face repository revision pins weights, config, processor, and tokenizer together. Runtime must request this revision explicitly and must not mix it with MetaCLIP 1 or another worldwide checkpoint.",
+      "blocker_reason": null
+    },
+    {
+      "model_id": "perception_encoder",
+      "status": "ready",
+      "model_name": "Perception Encoder Core L/14 336",
+      "checkpoint_or_pretrained": "facebook/PE-Core-L14-336:PE-Core-L14-336.pt",
+      "model_revision": "ee1fdb467ab42497fa2e60e94a79e9d7383c1cbd",
+      "checkpoint_sha256": "0cdab5b338cbaa1e7a5dcd1b2fb4c9f4d5df1abd289564658edbab64a650e7e8",
+      "source_repository": "https://github.com/facebookresearch/perception_models",
+      "source_revision": "65a4a17a587b6a89eaa0dc08f231c2cb1c285f9f",
+      "official_sources": [
+        "https://github.com/facebookresearch/perception_models/blob/65a4a17a587b6a89eaa0dc08f231c2cb1c285f9f/apps/pe/README.md",
+        "https://github.com/facebookresearch/perception_models/blob/65a4a17a587b6a89eaa0dc08f231c2cb1c285f9f/core/vision_encoder/pe.py",
+        "https://github.com/facebookresearch/perception_models/blob/65a4a17a587b6a89eaa0dc08f231c2cb1c285f9f/core/vision_encoder/transforms.py",
+        "https://huggingface.co/facebook/PE-Core-L14-336/blob/ee1fdb467ab42497fa2e60e94a79e9d7383c1cbd/PE-Core-L14-336.pt"
+      ],
+      "image_encoder_entry_point": "core.vision_encoder.pe.CLIP.from_config('PE-Core-L14-336').encode_image(normalize=True)",
+      "text_encoder_entry_point": "core.vision_encoder.pe.CLIP.from_config('PE-Core-L14-336').encode_text(normalize=True)",
+      "image_preprocessing": {
+        "entry_point": "core.vision_encoder.transforms.get_image_transform",
+        "size": [336, 336],
+        "resize": "squash to square; bilinear; center_crop=false",
+        "color": "convert RGB",
+        "rescale": "ToTensor [0,1]",
+        "mean": [0.5, 0.5, 0.5],
+        "std": [0.5, 0.5, 0.5]
+      },
+      "tokenizer": {
+        "entry_point": "core.vision_encoder.transforms.get_text_tokenizer",
+        "class": "core.vision_encoder.tokenizer.SimpleTokenizer",
+        "context_length": 32
+      },
+      "embedding_dimension": 1024,
+      "dtype": "float32",
+      "normalized": true,
+      "similarity_metric": "inner_product",
+      "license": "Apache-2.0 for PE code and PE model",
+      "access_requirements": "Public, ungated Hugging Face checkpoint; no token required",
+      "dependencies": [
+        "python==3.12",
+        "torch==2.5.1",
+        "torchvision==0.20.1",
+        "numpy==2.1.2",
+        "einops==0.8.1",
+        "timm==1.0.15",
+        "pillow==11.0.0",
+        "huggingface-hub (imported by source; upstream requirements omit a version)",
+        "perception_models @ git+https://github.com/facebookresearch/perception_models.git@65a4a17a587b6a89eaa0dc08f231c2cb1c285f9f"
+      ],
+      "reproducibility_notes": "The 2.68 GB checkpoint revision and SHA256 are pinned. The official source requirements omit a huggingface-hub pin; Task 08 must isolate and record the resolved environment before accepting real artifacts.",
+      "blocker_reason": null
+    }
+  ]
+}
