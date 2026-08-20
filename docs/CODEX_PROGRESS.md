@@ -981,17 +981,47 @@ Execution blockers:
   prepared; embedding model assets are not all local; GPU/resource estimates
   are not measured. No extraction or index construction was launched.
 
+# Multi-Embedding Task 16 — Final Release Gate
+
+Status: CODE/STRUCTURAL GATE PASS; OPERATIONAL RELEASE BLOCKED
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added a reproducible architecture and Git-hygiene release audit.
+- Verified provider dimensions/routing/indexability, ID-keyed RRF, fusion
+  separation, and unchanged Task05B lexical fields.
+- Added the final task-to-commit, provider provenance, command, count,
+  limitation, approval, and rollback handoff report.
+- Confirmed no lint, type-check, formatter, or dependency/security scanner is
+  configured; no fabricated substitute result is claimed.
+
+Verification:
+
+- Static release audit: PASS; all 10 architecture and hygiene checks passed.
+- Python compilation and `git diff --check`: PASS.
+- Full repository pytest in the CI dependency set: PASS, 429 passed and 9
+  opt-in/real-runtime tests skipped.
+- `pip check` in `mvr-asr:prepush`: FAIL because that ASR image preinstalls
+  `torchaudio 2.5.1+cpu` while the broad semantic extra resolves newer Torch;
+  this is separate from the configured CI pytest gate.
+
+Operational blockers:
+
+- Real-weight three-provider five-keyframe inference is unavailable locally.
+- Full-corpus execution and representative-ground-truth evaluation remain
+  approval- and resource-gated.
+
 # Current active phase
 
-Multi-Embedding Task 15 implementation is COMPLETE on
-`feat/rebuild-embedding-models`; full execution remains approval-gated.
-Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
-baseline) and the Textual KIS task pack are also complete.
+Multi-Embedding Tasks 04–16 are implementation-complete on
+`feat/rebuild-embedding-models`. The code/structural gate passes; operational
+competition release remains blocked by the documented real-model/full-corpus
+gates. Task05A/Task05B remain complete and regression-verified.
 
-Next action: begin Task 16 final release gate.
-
-The user explicitly approved automatic continuation through Task 16 for this
-task pack. Expensive full-corpus execution remains separately approval-gated.
+Next action: provision isolated provider runtimes and run real-weight
+five-keyframe acceptance before requesting approval for a full build.
 
 # Resume instruction
 
