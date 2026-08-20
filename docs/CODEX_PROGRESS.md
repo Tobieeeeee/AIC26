@@ -776,13 +776,45 @@ Limitations:
   inference is skipped. No checkpoint, vector, cache, or generated artifact was
   downloaded or committed.
 
+# Multi-Embedding Task 09 — Task05A Multi-Embedding Validation
+
+Status: COMPLETE
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Migrated Task05A from one legacy CLIP vector flag to deterministic discovery
+  and independent validation of every provider under `features/embeddings/`.
+- Added provider-specific locators and indexability while retaining the legacy
+  aggregate flag as exactly `any(indexability["embeddings"].values())`.
+- Validated mapping checksum/identity/cardinality, manifest dimension/dtype/
+  normalization, locator bounds, finite vectors, and required/optional policy.
+- Kept the pre-Task04 CLIP artifact as an explicit compatibility adapter when
+  no provider artifact exists; provider failures never fall back to it.
+- Added negative, isolation, deterministic reordered-mapping, aggregate-flag,
+  and five-keyframe three-provider coverage. ASR auxiliary JSON exclusion
+  remains regression-tested.
+
+Verification:
+
+- Focused Task05A suite: 28 passed.
+- Task05A/Task05B/fasttest regression: 61 passed.
+- Existing ignored five-keyframe structural/lexical fasttest: PASS with 5
+  canonical documents, zero invalid schema, and zero missing/extra/duplicates.
+- Python compilation and `git diff --check`: passed.
+
+Blockers:
+
+- None.
+
 # Current active phase
 
-Multi-Embedding Task 08 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 09 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 09 Task05A multi-embedding validation.
+Next action: begin Task 10 provider-specific indexes.
 
 The user explicitly approved automatic continuation through Task 16 for this
 task pack. Expensive full-corpus execution remains separately approval-gated.

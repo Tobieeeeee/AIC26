@@ -334,8 +334,18 @@ def test_builder_emits_one_document_per_mapping_and_independent_flags(tmp_path: 
     assert first["ocr"]["texts"][0]["text"] == "123"
     assert any(item["text"] == "GIÁ VÀNG" for item in first["ocr"]["texts"])
     assert first["asr"]["joined"] == "Xin chào"
-    assert first["indexability"] == {"lexical": True, "object": True, "vector": True}
-    assert second["indexability"] == {"lexical": False, "object": True, "vector": False}
+    assert first["indexability"] == {
+        "lexical": True,
+        "object": True,
+        "vector": True,
+        "embeddings": {"clip": True},
+    }
+    assert second["indexability"] == {
+        "lexical": False,
+        "object": True,
+        "vector": False,
+        "embeddings": {"clip": False},
+    }
     assert result.manifest["asr"]["confidence_field"] is None
     assert result.manifest["asr"]["confidence_filter_active"] is False
     assert result.manifest["document_count"] == 2
