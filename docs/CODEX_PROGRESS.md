@@ -865,13 +865,42 @@ Limitations:
   locally, so real-weight three-provider query inference was not run. No model
   downloads were initiated.
 
+# Multi-Embedding Task 12 — Independent Semantic Retrieval
+
+Status: COMPLETE
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added provider-matched query encoding and index routing with one common
+  result contract and three independent ranked lists.
+- Added canonical metadata projection, top-k caps, 1-based contiguous ranks,
+  metric-aware ordering, deterministic keyframe tie-breaks, and within-provider
+  duplicate suppression.
+- Added explicit fail-closed/degraded policies with provider coverage/errors;
+  no provider fallback, raw-score normalization, or fusion was introduced.
+- Added a persistent FAISS search adapter and real-backend round-trip coverage.
+
+Verification:
+
+- Focused independent retrieval suite: 10 passed.
+- Task10–12 regression plus real FAISS build/search integration: 31 passed.
+- Five-document, three-provider ranked-list acceptance fixture: passed with
+  complete identities and matching `model_id` values.
+- Python compilation and `git diff --check`: passed.
+
+Blockers:
+
+- None. Retrieval-quality evaluation remains out of scope for this task.
+
 # Current active phase
 
-Multi-Embedding Task 11 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 12 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 12 independent semantic retrieval.
+Next action: begin Task 13 model-level RRF.
 
 The user explicitly approved automatic continuation through Task 16 for this
 task pack. Expensive full-corpus execution remains separately approval-gated.

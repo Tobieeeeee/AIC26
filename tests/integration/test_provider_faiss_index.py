@@ -9,6 +9,7 @@ from mvr.indexing.provider_indexes import (
     FaissProviderBackend,
     ProviderIndexContract,
 )
+from mvr.retrieval.provider_semantic import FaissProviderSearchBackend
 
 
 def test_real_faiss_provider_backend_persists_isolated_collection(tmp_path: Path) -> None:
@@ -38,3 +39,8 @@ def test_real_faiss_provider_backend_persists_isolated_collection(tmp_path: Path
     assert index.ntotal == 2
     assert (target / "vectors.npy").is_file()
     assert (target / "metadata.json").is_file()
+    hits = FaissProviderSearchBackend(tmp_path).search(
+        contract, np.asarray([1.0, 0.0], dtype=np.float32), top_k=2
+    )
+    assert [hit.metadata["keyframe_id"] for hit in hits] == ["K1", "K2"]
+    assert hits[0].score == pytest.approx(1.0)
