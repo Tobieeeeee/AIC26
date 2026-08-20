@@ -894,13 +894,41 @@ Blockers:
 
 - None. Retrieval-quality evaluation remains out of scope for this task.
 
+# Multi-Embedding Task 13 — Model-Level Semantic RRF
+
+Status: COMPLETE
+
+Branch: `feat/rebuild-embedding-models`
+
+Completed:
+
+- Added pure semantic RRF keyed by `keyframe_id`, using positive 1-based ranks
+  and configurable `rrf_k` with default 60.
+- Preserved canonical identity metadata and provider-rank provenance; raw
+  provider scores do not enter the fusion calculation.
+- Added deterministic duplicate warnings, identity conflict rejection,
+  missing-provider policy handling, global tie-breaks, and serialization.
+- Kept semantic model fusion separate from legacy BM25/object hybrid fusion.
+
+Verification:
+
+- Focused semantic RRF suite: 14 passed.
+- Task12/13 plus legacy hybrid RRF regression: 30 passed.
+- Hand-computed scores, raw-score invariance, provider-order permutations, and
+  byte-equivalent deterministic serialization: passed.
+- Python compilation and `git diff --check`: passed.
+
+Blockers:
+
+- None. No quality claim or `rrf_k` tuning was performed.
+
 # Current active phase
 
-Multi-Embedding Task 12 is COMPLETE on `feat/rebuild-embedding-models`.
+Multi-Embedding Task 13 is COMPLETE on `feat/rebuild-embedding-models`.
 Task05A/Task05B remain complete and regression-verified. Phases 01–06 (reuse
 baseline) and the Textual KIS task pack are also complete.
 
-Next action: begin Task 13 model-level RRF.
+Next action: begin Task 14 fasttest and ablation.
 
 The user explicitly approved automatic continuation through Task 16 for this
 task pack. Expensive full-corpus execution remains separately approval-gated.
