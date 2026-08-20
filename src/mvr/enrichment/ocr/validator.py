@@ -5,31 +5,30 @@ from pathlib import Path
 def validate_ocr_output(mapping_csv: Path, output_dir: Path) -> bool:
     print(f"Validating OCR output in {output_dir}")
 
-    # Load mapping
+    # Load mapping, keyed on (video_id, keyframe_id).
+    #
+    # A keyframe_id alone does not identify a keyframe. The organizer's
+    # 166,550 keyframes carry only 632 distinct ids -- "001" exists in ~850
+    # videos -- so keying on the id alone reported a duplicate at row 309 of
+    # the real mapping (L21_V001, then L21_V002) and refused to validate
+    # anything. It is the same composite key the Elasticsearch _id and the
+    # retrieval fusion already use.
     keyframe_mappings = {}
     with mapping_csv.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            keyframe_id = row["keyframe_id"]
+            identity = (row["video_id"], row["keyframe_id"])
 
-            if keyframe_id in keyframe_mappings:
-                print(f"ERROR: Duplicate keyframe_id in mapping: {keyframe_id}")
+            if identity in keyframe_mappings:
+                video_id, keyframe_id = identity
+                print(f"ERROR: Duplicate keyframe in mapping: {video_id}/{keyframe_id}")
                 return False
 
-            keyframe_mappings[keyframe_id] = {
+            keyframe_mappings[identity] = {
                 "video_id": row["video_id"],
                 "shot_id": int(row["shot_id"]),
                 "frame_idx": int(row["frame_idx"]),
                 "timestamp": float(row["timestamp"]),
-            }
-    with mapping_csv.open("r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            keyframe_mappings[row["keyframe_id"]] = {
-                "video_id": row["video_id"],
-                "shot_id": int(row["shot_id"]),
-                "frame_idx": int(row["frame_idx"]),
-                "timestamp": float(row["timestamp"])
             }
 
     # Check manifest
@@ -53,14 +52,15 @@ def validate_ocr_output(mapping_csv: Path, output_dir: Path) -> bool:
             json_count += 1
             keyframe_id = json_file.stem
 
-            if keyframe_id not in keyframe_mappings:
-                print(f"ERROR: Keyframe {keyframe_id} not in mapping CSV")
+            if (video_id, keyframe_id) not in keyframe_mappings:
+                print(f"ERROR: Keyframe {video_id}/{keyframe_id} not in mapping CSV")
                 return False
 
-            expected = keyframe_mappings[keyframe_id]
-            if expected["video_id"] != video_id:
-                print(f"ERROR: Keyframe {keyframe_id} belongs to {expected['video_id']}, but found in {video_id}")
-                return False
+            expected = keyframe_mappings[(video_id, keyframe_id)]
+            # The old "belongs to another video" check lived here because the
+            # lookup was ambiguous. Under the composite key it cannot fail:
+            # a JSON filed under the wrong video now misses the lookup above
+            # instead, and says so naming both.
 
             with json_file.open("r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -129,6 +129,9 @@ def validate_ocr_output(mapping_csv: Path, output_dir: Path) -> bool:
                     )
                     return False
 
+    # Now a true row count. Keyed on keyframe_id alone this was the number of
+    # *distinct ids* -- 632 for the organizer's 166,550 keyframes -- so the
+    # completeness check was comparing against the wrong number as well.
     if json_count != len(keyframe_mappings):
         print(f"ERROR: JSON count {json_count} != canonical keyframe count {len(keyframe_mappings)}")
         return False

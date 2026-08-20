@@ -1009,6 +1009,34 @@ Three things that are currently unmeasurable at n=1:
 - **Prompt and model changes**, which currently have no way to show whether
   they helped.
 
+### The review, and the final set
+
+17 candidates were generated from 571 cached frames and checked by eye
+against their OCR text. **14 accepted, 3 rejected — 82.4% rule precision.**
+Recorded here because `artifacts/qna*/` is gitignored, so the artifact
+itself does not survive a fresh clone.
+
+| # | Answer | Why rejected |
+|---|---|---|
+| 2 | `HỘl VÓl` | `"trách nhiệm xã hội với người độc thân"` — `xã hội` is the noun *society*, not the unit `xã` plus a name. The rule cannot see the difference. |
+| 3 | `Sơn` | `"tỉnh Sơn"` is OCR damage; the province is Lạng Sơn. The expectation is not a real place, so a model using world knowledge would be marked wrong **for being right**. |
+| 10 | `Kursk Belarus` | Spans two headlines — Kursk is a Russian oblast, Belarus a country. `_NAME` kept walking past a token that ended in a colon. |
+
+Case 3 is the one worth remembering: an expectation can be *self-consistent
+with its context* and still be a bad benchmark item. The module's claim that
+"OCR errors cancel out, because both the expectation and the model see the
+same X" holds only while the damaged span is not also a plausible-looking
+wrong answer. When it is, the better model loses.
+
+Case 10 exposes a fixable rule bug — `_NAME` should stop at a token followed
+by `:` — left alone under the deadline, since rejecting three candidates by
+eye costs minutes and re-running the generator does not change the 14.
+
+The set is correlated more than its count suggests, and this is stated in
+the artifact itself: cases 8 and 9 are one headline on adjacent keyframes,
+and 14/15/16 are three questions about a single frame. **Effective n is
+nearer 11 than 14.** Still an order of magnitude better than n=1.
+
 ## 3n. The mapping adapter, and a file nobody opened
 
 `scripts/build_keyframe_mapping.py` generates `keyframe_mapping.csv` from

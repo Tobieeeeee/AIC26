@@ -50,6 +50,11 @@ artifacts/processed_*/
 # cannot silently start tracking competition-derived prompts.
 artifacts/qna*/*
 !artifacts/qna/.gitkeep
+# The canonical keyframe mapping is generated, not authored: 14.5 MB, and
+# every image_path is absolute on the machine that built it, so a committed
+# copy would point at directories no teammate has. Regenerate in ~11s with
+# `python scripts/build_keyframe_mapping.py --dataset-root <your root>`.
+artifacts/keyframe_mapping.csv
 
 # Model weights / databases / generated outputs
 /models/
