@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import importlib
+import math
+import sys
+import types
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -13,6 +16,16 @@ from .provider_specs import ProviderSpec
 
 class Beit3DependencyError(RuntimeError):
     """Raised when the isolated BEiT-3 runtime is unavailable."""
+
+
+def _install_torch_six_inf_compat() -> None:
+    """Provide the sole legacy torch._six symbol used by pinned UniLM code."""
+    try:
+        importlib.import_module("torch._six")
+    except ImportError:
+        compatibility_module = types.ModuleType("torch._six")
+        compatibility_module.inf = math.inf
+        sys.modules["torch._six"] = compatibility_module
 
 
 class Beit3ImageEncoder:
@@ -39,6 +52,7 @@ class Beit3ImageEncoder:
         try:
             torch = importlib.import_module("torch")
             timm = importlib.import_module("timm")
+            _install_torch_six_inf_compat()
             importlib.import_module("modeling_finetune")
             transforms = importlib.import_module("torchvision.transforms")
         except ImportError as exc:

@@ -1013,15 +1013,50 @@ Operational blockers:
 - Full-corpus execution and representative-ground-truth evaluation remain
   approval- and resource-gated.
 
+# Real three-provider five-keyframe acceptance follow-up
+
+Status: PASS FOR REAL FASTTEST; FULL-CORPUS RELEASE REMAINS APPROVAL-GATED
+
+Completed:
+
+- Resolved the exact BEiT-3 base ITC checkpoint and `beit3.spm` through the
+  current official Microsoft UniLM README, pinned their observed SHA256 values,
+  and built an isolated CPU runtime without substituting another model.
+- Ran real image and text inference for BEiT-3, MetaCLIP-2, and Perception
+  Encoder on the same five canonical IDs. Each provider produced five valid,
+  unique, normalized vectors with zero missing/extra/duplicate/invalid rows.
+- Regenerated provider manifests with adapter, device, batch size,
+  preprocessing, latency, and per-shard SHA256 evidence.
+- Passed Task05A provider-specific indexability, created three isolated FAISS
+  indexes, ran three provider-specific text query paths, proved cross-provider
+  route rejection, and fused independent ranked lists with rank-only RRF k=60.
+- Ran the full-corpus dry run only; no expensive extraction/index build was
+  launched.
+
+Verification:
+
+- Focused offline/provider unit tests: 29 passed.
+- Real BEiT-3 opt-in integration: 1 passed.
+- Full regression: 430 passed, 9 skipped.
+- Three artifact audits, Task05A, three indexes, three queries, cross-routing
+  guard, RRF, structural release audit, and `git diff --check`: PASS.
+- Full details: `REAL_THREE_PROVIDER_FASTTEST_REPORT.md`.
+
+Remaining boundary:
+
+- GPU compatibility, non-dry-run full-corpus execution, and representative
+  ground-truth quality evaluation remain unverified and approval-gated.
+
 # Current active phase
 
 Multi-Embedding Tasks 04–16 are implementation-complete on
-`feat/rebuild-embedding-models`. The code/structural gate passes; operational
-competition release remains blocked by the documented real-model/full-corpus
-gates. Task05A/Task05B remain complete and regression-verified.
+`feat/rebuild-embedding-models`. The code/structural gate and real three-provider
+five-keyframe gate pass; operational competition release remains blocked by the
+documented GPU/full-corpus/quality-evaluation gates. Task05A/Task05B remain
+complete and regression-verified.
 
-Next action: provision isolated provider runtimes and run real-weight
-five-keyframe acceptance before requesting approval for a full build.
+Next action: resolve the full-corpus commands and resource plan, then request
+explicit approval before any non-dry-run full build.
 
 # Resume instruction
 

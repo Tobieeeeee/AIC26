@@ -7,11 +7,14 @@
       "model_name": "BEiT-3 base ITC patch16 224",
       "checkpoint_or_pretrained": "beit3_base_itc_patch16_224.pth",
       "model_revision": null,
-      "checkpoint_sha256": null,
+      "checkpoint_sha256": "d483a41d92b9aea7ef87d17551413b8c22faae927110666b01ac3aa7a199a25b",
       "source_repository": "https://github.com/microsoft/unilm",
       "source_revision": "69961945a2fd283f2beed74d1f3c543265c9930c",
       "official_sources": [
         "https://github.com/microsoft/unilm/blob/69961945a2fd283f2beed74d1f3c543265c9930c/beit3/README.md",
+        "https://github.com/microsoft/unilm/tree/master/beit3",
+        "https://github.com/addf400/files/releases/download/beit3/beit3_base_itc_patch16_224.pth",
+        "https://github.com/addf400/files/releases/download/beit3/beit3.spm",
         "https://github.com/microsoft/unilm/blob/69961945a2fd283f2beed74d1f3c543265c9930c/beit3/modeling_finetune.py",
         "https://github.com/microsoft/unilm/blob/69961945a2fd283f2beed74d1f3c543265c9930c/beit3/datasets.py"
       ],
@@ -45,7 +48,7 @@
         "sentencepiece (upstream requirement is unpinned)",
         "Pillow (upstream requirement is unpinned)"
       ],
-      "reproducibility_notes": "Microsoft publishes a stable checkpoint filename and URL but no immutable checkpoint revision or SHA256. The source is pinned; the downloaded checkpoint must be hashed and recorded before a production artifact is accepted. The official dependency file also leaves several packages unpinned, so this provider must run in an isolated compatibility environment and pass Task 06 runtime tests.",
+      "reproducibility_notes": "The source is pinned at an immutable commit. Microsoft UniLM's current official README redirects the stable checkpoint and tokenizer names to GitHub Release assets; the downloaded base-ITC checkpoint is locked here by its observed SHA256. The official dependency file leaves several packages unpinned, so this provider must run in an isolated compatibility environment and pass Task 06 runtime tests.",
       "blocker_reason": null
     },
     {

@@ -28,12 +28,15 @@ normalizes by mean/std 0.5. Evidence: [official model table and tokenizer](https
 [paired retrieval implementation](https://github.com/microsoft/unilm/blob/69961945a2fd283f2beed74d1f3c543265c9930c/beit3/modeling_finetune.py),
 and [official preprocessing](https://github.com/microsoft/unilm/blob/69961945a2fd283f2beed74d1f3c543265c9930c/beit3/datasets.py).
 
-Microsoft's blob distribution does not expose an immutable checkpoint revision
-or published SHA256, and its requirements leave several packages unpinned.
-Therefore Task 06 must use an isolated compatibility environment, hash the
-downloaded checkpoint, and record the resolved environment before accepting a
-real artifact. This is an explicit reproducibility risk, not permission to
-replace BEiT-3 with another checkpoint.
+The current official UniLM README links the exact checkpoint and tokenizer to
+GitHub Release assets. The accepted local copies are locked by observed SHA256:
+`d483a41d92b9aea7ef87d17551413b8c22faae927110666b01ac3aa7a199a25b`
+for the checkpoint and
+`6f5e2fefcf793761a76a6bfb8ad35489f9c203b25557673284b6d032f41043f4`
+for `beit3.spm`. The source revision remains pinned independently because the
+release URLs themselves do not encode the UniLM source commit. The partially
+unpinned upstream requirements are handled by the isolated, recorded runtime;
+this is not permission to replace BEiT-3 with another checkpoint.
 
 ## MetaCLIP-2
 

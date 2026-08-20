@@ -1,6 +1,6 @@
 {
   "run_id": "real-three-provider-fasttest-v1",
-  "status": "blocked_missing_beit3_official_assets",
+  "status": "real_fasttest_complete",
   "canonical_mapping": "artifacts/fasttest_real_3models/ingest/keyframe_mapping.csv",
   "keyframe_root": "artifacts/fasttest_real_3models",
   "output_root": "artifacts/fasttest_real_3models",
@@ -26,7 +26,9 @@
       "tokenizer": "C:/Code_Save/.vscode/dataset_aic/models/multi_embedding/assets/beit3/beit3.spm",
       "source_revision": "69961945a2fd283f2beed74d1f3c543265c9930c",
       "artifact_directory": "artifacts/fasttest_real_3models/features/embeddings/beit3",
-      "status": "blocked: official Microsoft asset URLs are inaccessible"
+      "checkpoint_sha256": "d483a41d92b9aea7ef87d17551413b8c22faae927110666b01ac3aa7a199a25b",
+      "tokenizer_sha256": "6f5e2fefcf793761a76a6bfb8ad35489f9c203b25557673284b6d032f41043f4",
+      "status": "ready"
     }
   },
   "indexes": {
@@ -43,5 +45,10 @@
     "top_k": 5,
     "rrf_k": 60,
     "failure_policy": "fail_closed_no_provider_fallback"
-  }
+  },
+  "queries": [
+    {"id": "Q1", "text": "women receiving pension payments at an office"},
+    {"id": "Q2", "text": "a damaged car and rescuer at a traffic accident"},
+    {"id": "Q3", "text": "a white police van parked on a street"}
+  ]
 }

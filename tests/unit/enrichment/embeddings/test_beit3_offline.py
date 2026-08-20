@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
+import math
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +12,7 @@ import pytest
 from mvr.enrichment.embeddings.beit3 import (
     Beit3DependencyError,
     Beit3ImageEncoder,
+    _install_torch_six_inf_compat,
 )
 from mvr.enrichment.embeddings.offline import (
     OfflineEmbeddingError,
@@ -24,6 +27,22 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 SPEC = load_provider_specs(REPO_ROOT / "configs" / "embedding_providers.json").get(
     "beit3"
 )
+
+
+def test_legacy_torch_six_inf_compatibility_is_minimal(monkeypatch):
+    monkeypatch.delitem(sys.modules, "torch._six", raising=False)
+
+    _install_torch_six_inf_compat()
+
+    assert sys.modules["torch._six"].inf == math.inf
+    assert set(vars(sys.modules["torch._six"])) >= {
+        "__doc__",
+        "__loader__",
+        "__name__",
+        "__package__",
+        "__spec__",
+        "inf",
+    }
 
 
 class FakeBeit3Encoder:
@@ -125,6 +144,13 @@ def test_fake_beit3_writes_shape_dtype_normalization_and_identity(tmp_path):
     assert manifest["checkpoint_sha256"] == "a" * 64
     assert manifest["source_revision"] == SPEC.source_revision
     assert manifest["model_revision"] is None
+    assert manifest["execution"]["adapter"].endswith("FakeBeit3Encoder")
+    assert manifest["execution"]["batch_size"] == 1
+    assert manifest["execution"]["latency_ms"] > 0
+    assert set(manifest["execution"]["vector_files_sha256"]) == {
+        "L21_V001.npy",
+        "L21_V002.npy",
+    }
 
 
 def test_mapping_and_checksum_are_deterministic(tmp_path):

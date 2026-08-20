@@ -1,169 +1,156 @@
 # Real Three-Provider Fasttest Report
 
-Status: **BLOCKED** — two real providers passed, but the exact official BEiT-3
-checkpoint and tokenizer are unavailable. Task05A, index creation, online text
-retrieval, and RRF were intentionally not started after that provider blocker.
+Status: **PASS for the five-keyframe real-runtime gate**. BEiT-3,
+MetaCLIP-2, and Perception Encoder all completed real image inference, real text
+inference, provider-specific validation/indexing, independent retrieval, and
+rank-only RRF on the same five canonical keyframes.
 
-## Repository state
+This is a runtime/integration result, not a retrieval-quality claim. The final
+full-corpus release gate remains blocked until the operator configures and
+explicitly approves the full build and a representative ground-truth benchmark
+is available.
+
+## Repository and data boundary
 
 - Branch: `feat/rebuild-embedding-models` (not `main`).
-- Original worktree: clean.
-- Structural baseline before this run: `429 passed, 9 skipped`; `git diff --check`
-  passed.
-- Real outputs are under ignored `artifacts/fasttest_real_3models`; the original
-  `artifacts/fasttest` was not modified.
+- Canonical mapping:
+  `artifacts/fasttest_real_3models/ingest/keyframe_mapping.csv`.
+- Mapping SHA256:
+  `96169f5dd3b7d2ba8a239e049ccc260986a8a6c126bd9742175c7acab5d6ef5b`.
+- Input: five real 1280x720 keyframes from `L21_V010` and `L21_V025`.
+- Runtime outputs: ignored `artifacts/fasttest_real_3models/` only.
+- Earlier generated evidence was preserved under the ignored
+  `backup_pre_execution_metadata_20260821/` directory before regeneration.
+- No checkpoint, tokenizer, vector, index, cache, dataset, or generated report
+  was staged.
 
-## Original fasttest inventory
+| keyframe_id | video_id | frame_id | shot_id | timestamp |
+|---|---|---:|---:|---:|
+| L21_V010_S0007_K01 | L21_V010 | 578 | 7 | 23.12 |
+| L21_V010_S0014_K01 | L21_V010 | 822 | 14 | 32.88 |
+| L21_V010_S0034_K01 | L21_V010 | 2290 | 34 | 91.60 |
+| L21_V025_S0011_K01 | L21_V025 | 771 | 11 | 30.84 |
+| L21_V025_S0187_K01 | L21_V025 | 17274 | 187 | 690.96 |
 
-The recursive inventory contained 99 files (6,904,923 bytes): 74 JSON, 20 JPEG,
-3 CSV, and 2 NPY files. The five canonical images are real 1280x720 RGB frames.
-The existing 512-dimensional CLIP vectors are real legacy OpenCLIP outputs, while
-the Task14 K1-K5 ablation vectors/rankings are synthetic injected fixtures. No
-BEiT-3, MetaCLIP-2, Perception Encoder, or provider-specific FAISS artifact was
-present before this run.
+## Locked providers and runtime evidence
 
-Authoritative mapping:
-`artifacts/fasttest/ingest/keyframe_mapping.csv`, SHA256
-`fb3148fe1f1f6d98a879d4d26146615caffe04e0939f456c434524bad4691c51`.
+All providers ran on CPU in separate Python 3.12 / Torch 2.5.1 CPU images.
+Every output manifest records the concrete adapter, requested device, batch
+size, preprocessing contract, extraction latency, mapping hash, and SHA256 of
+each vector shard.
 
-## Selected canonical keyframes
+| Provider | Exact model / revision | Dimension | Offline latency | Artifact audit |
+|---|---|---:|---:|---|
+| BEiT-3 | `beit3_base_itc_patch16_224.pth`; UniLM `69961945a2fd283f2beed74d1f3c543265c9930c` | 768 | 12,318.08 ms | PASS, 5/5 |
+| MetaCLIP-2 | `facebook/metaclip-2-worldwide-b16@8cc8591f32b43a809f3325192d3b77aa56968ddb` | 512 | 17,128.56 ms | PASS, 5/5 |
+| Perception Encoder | `facebook/PE-Core-L14-336@ee1fdb467ab42497fa2e60e94a79e9d7383c1cbd` | 1024 | 46,391.26 ms | PASS, 5/5 |
 
-| keyframe_id | video_id | frame_id | shot_id | timestamp | image_path |
-|---|---|---:|---:|---:|---|
-| L21_V010_S0007_K01 | L21_V010 | 578 | 7 | 23.12 | keyframes/L21_V010/L21_V010_S0007_K01.jpg |
-| L21_V010_S0014_K01 | L21_V010 | 822 | 14 | 32.88 | keyframes/L21_V010/L21_V010_S0014_K01.jpg |
-| L21_V010_S0034_K01 | L21_V010 | 2290 | 34 | 91.6 | keyframes/L21_V010/L21_V010_S0034_K01.jpg |
-| L21_V025_S0011_K01 | L21_V025 | 771 | 11 | 30.84 | keyframes/L21_V025/L21_V025_S0011_K01.jpg |
-| L21_V025_S0187_K01 | L21_V025 | 17274 | 187 | 690.96 | keyframes/L21_V025/L21_V025_S0187_K01.jpg |
+For every provider the audit result is:
 
-Validation: 5 rows, 5 unique IDs, 5 existing/readable real images, two videos,
-zero missing images, and zero duplicates.
+```text
+expected keyframes = 5
+valid vectors      = 5
+unique IDs         = 5
+missing IDs        = 0
+extra IDs          = 0
+duplicates         = 0
+invalid vectors    = 0
+```
 
-## Runtime isolation and hardware
+Provider manifest SHA256 values:
 
-Host physical RAM is 33,945,935,872 bytes. No NVIDIA runtime was detected;
-both completed providers used CPU inference. The combined ASR image was not
-modified.
+- BEiT-3:
+  `adf7bf1070f501e48d5dcad39c066f5244219f34328309fff27ca8475055f04d`.
+- MetaCLIP-2:
+  `44334adc8cf13f0cf38389f311f317a45b0549ba9d719b54a0d5a4bfd6e13064`.
+- Perception Encoder:
+  `d9c48ca79b5c7f7ca826a467dff743a70a7f855d3623c387aff2cfe1a52ee85e`.
 
-| Provider | Runtime | Python / Torch | Provider packages | `pip check` |
-|---|---|---|---|---|
-| MetaCLIP-2 | external `.venv` plus `mvr-embedding-metaclip2:real-fasttest` (`sha256:356b2ed6…`, 334,031,603 bytes) | 3.12.14 / 2.5.1+cpu | torchvision 0.20.1+cpu, transformers 4.57.1, NumPy 2.1.2, Pillow 11.0.0, sentencepiece 0.2.0 | PASS |
-| Perception Encoder | `mvr-embedding-perception-encoder:real-fasttest` (`sha256:ce6270e…`, 303,915,265 bytes) | 3.12.14 / 2.5.1+cpu | torchvision 0.20.1+cpu, timm 1.0.15, einops 0.8.1, NumPy 2.1.2, Pillow 11.0.0 | PASS |
-| BEiT-3 | not created because the asset gate failed first | N/A | N/A | NOT RUN |
+### BEiT-3 source resolution
 
-## Exact models and real offline evidence
+The current official Microsoft UniLM BEiT-3 page publishes working GitHub
+Release URLs for the exact base ITC checkpoint and `beit3.spm` tokenizer. The
+runtime uses the pinned UniLM source revision and the official checkpoint pair;
+it does not use a third-party model substitute.
 
-The task prompt's `768768` BEiT-3 dimension is a typo. The authoritative provider
-configuration and pinned Microsoft source both specify 768.
+- Checkpoint size: 445,674,625 bytes.
+- Checkpoint SHA256:
+  `d483a41d92b9aea7ef87d17551413b8c22faae927110666b01ac3aa7a199a25b`.
+- Tokenizer size: 1,356,293 bytes.
+- Tokenizer SHA256:
+  `6f5e2fefcf793761a76a6bfb8ad35489f9c203b25557673284b6d032f41043f4`.
+- Container image digest:
+  `sha256:b6670d30d49bd6b45c6af83d9bc5c9b4014eaa48311cd372f62eeb006c16fece`.
+- The minimal `torch._six.inf` compatibility shim is limited to the single
+  legacy symbol imported by the pinned UniLM source.
 
-### MetaCLIP-2 — PASS
+## Task05A and provider-specific indexes
 
-- Model: `facebook/metaclip-2-worldwide-b16` at revision
-  `8cc8591f32b43a809f3325192d3b77aa56968ddb` (CC-BY-NC-4.0, public access
-  succeeded). Model weights SHA256:
-  `5ba4b60a28a3f563b0d2cf1f3de14298b6592ca9cbe53b2694936ff8bb7b5eba`.
-- Executed adapter: `MetaClip2ImageEncoder.encode_images`, using
-  `AutoProcessor` and `AutoModel.get_image_features` from the pinned repository.
-- Real command used the production `scripts/run_feature_extraction.py`, explicit
-  `--allow-model-downloads`, `--device cpu`, batch size 5, and only the
-  `metaclip2` provider.
-- Wall time including first model download: 195.6 seconds.
-- Artifact: two shards `(3, 512)` and `(2, 512)`, float32, all finite/nonzero,
-  all five rows unique, norms 0.99999994-1.0.
-- Shard SHA256: `L21_V010.npy`
-  `613077117bfb1946f70fad11458a67e0a68989441882943a1221eb13afe3e31c`;
-  `L21_V025.npy`
-  `4027772b59da612a13a7ab03c0e1433dc1bd55fd424fa4379e7ef6e81f873c9d`.
-- Audit: expected/valid 5/5; missing/extra/duplicates/invalid 0/0/0/0.
-  Manifest SHA256:
-  `95ebd374134705ced3ee22f4b5f440a444cbabc6c35ad8c8fca265e3f242a938`.
+Task05A generated five documents. Every document has:
 
-### Perception Encoder — PASS
+```json
+{
+  "indexability": {
+    "vector": true,
+    "embeddings": {
+      "beit3": true,
+      "metaclip2": true,
+      "perception_encoder": true
+    }
+  }
+}
+```
 
-- Model: `facebook/PE-Core-L14-336:PE-Core-L14-336.pt`, revision
-  `ee1fdb467ab42497fa2e60e94a79e9d7383c1cbd`, source revision
-  `65a4a17a587b6a89eaa0dc08f231c2cb1c285f9f`.
-- Checkpoint: 2,684,747,432 bytes; SHA256
-  `0cdab5b338cbaa1e7a5dcd1b2fb4c9f4d5df1abd289564658edbab64a650e7e8`
-  (matches the lock).
-- Executed adapter: `PerceptionEncoderImageEncoder.encode_images`, official
-  `CLIP.from_config("PE-Core-L14-336", checkpoint_path=...)`, and official
-  `get_image_transform`. Load reported no missing or unexpected keys.
-- Real command used the production feature runner with `--device cpu`, batch
-  size 5, explicit local checkpoint, and only `perception_encoder`.
-- Wall time: 62.3 seconds.
-- Artifact: two shards `(3, 1024)` and `(2, 1024)`, float32, all
-  finite/nonzero, all five rows unique, norms exactly 1.0.
-- Shard SHA256: `L21_V010.npy`
-  `d9c6dc7da0d27f652a28cbb38d165bb75794c18e52411fd41fc5e251d37ba8ce`;
-  `L21_V025.npy`
-  `8dc861c02d7f6198602e46c8932899e6b6a808b586fc6ef409c50713cf0529aa`.
-- Audit: expected/valid 5/5; missing/extra/duplicates/invalid 0/0/0/0.
-  Manifest SHA256:
-  `b72848b695b6d9dc420476fe7299d66888cd03cb738f926786b1f99f4d05f16f`.
+Each provider reports vectors expected/valid/invalid `5/5/0`, with zero
+mapping mismatch, missing ID, extra ID, or duplicate ID. Three independent
+FAISS `IndexFlatIP` collections were created using normalized float32 vectors:
 
-### BEiT-3 — BLOCKED
+- `dev__l21_fast5_real__beit3`: dimension 768, indexed 5, failed 0.
+- `dev__l21_fast5_real__metaclip2`: dimension 512, indexed 5, failed 0.
+- `dev__l21_fast5_real__perception_encoder`: dimension 1024, indexed 5,
+  failed 0.
 
-- Required checkpoint: `beit3_base_itc_patch16_224.pth`; required tokenizer:
-  official `beit3.spm`; source revision
-  `69961945a2fd283f2beed74d1f3c543265c9930c`; expected dimension 768.
-- The exact official Microsoft Azure URLs return HTTP 409 because public access
-  is disabled. A previously published SAS URL returns HTTP 403
-  `AuthenticationFailed`. No matching local asset exists under `C:\Code_Save`,
-  Downloads, or the read-only source labs.
-- Third-party reuploads were rejected because Microsoft publishes no immutable
-  checkpoint hash, so byte identity cannot be established. No substitute,
-  mock, random vector, or fallback provider was used.
+The production routing guard rejected a BEiT-3 query vector sent to the
+MetaCLIP-2 index: `query provider beit3 cannot search metaclip2 index`.
 
-## Downstream gates
+## Real online queries and RRF
 
-Task05A multi-provider validation: NOT RUN. Provider-specific FAISS indexes:
-NOT BUILT. Online text encoders and queries: NOT RUN. Cross-provider routing
-proof: NOT RUN. RRF(k=60): NOT RUN. This is deliberate: the failure policy
-requires stopping before downstream fusion when any provider fails.
+All three provider-specific text encoders generated finite, normalized vectors
+with their own dimensions. Each provider returned an independent 1-based ranked
+list before fusion. RRF used only ranks, with `k = 60`; raw cross-model
+similarity scores were not fused.
 
-The reserved create-only namespaces are:
-`dev__l21_fast5_real__beit3`, `dev__l21_fast5_real__metaclip2`, and
-`dev__l21_fast5_real__perception_encoder`. No existing index was deleted or
-overwritten.
+| Query | RRF rank 1 | Original frame | Total measured latency |
+|---|---|---:|---:|
+| Q1: women receiving pension payments at an office | `L21_V010_S0007_K01` | 578 | 73,193.25 ms |
+| Q2: a damaged car and rescuer at a traffic accident | `L21_V010_S0014_K01` | 822 | 543.67 ms |
+| Q3: a white police van parked on a street | `L21_V025_S0011_K01` | 771 | 487.22 ms |
 
-## Tests and Git hygiene
+Q1 includes first-load time for all three model runtimes. Q2 and Q3 are warm
+measurements. These five images were selected for engineering validation, not
+representative accuracy evaluation, so no provider or three-model superiority
+claim is made.
 
-- Pre-run full suite: `429 passed, 9 skipped` — PASS.
-- MetaCLIP real artifact audit — PASS.
-- Perception Encoder real artifact audit — PASS.
-- Provider runtime `pip check` — PASS for the two created runtimes.
-- Post-change full suite in the isolated CI container: `429 passed, 9 skipped`
-  in 18.07 seconds — PASS; container `pip check` — PASS. The general suite
-  keeps opt-in tests skipped until their provider-specific environment variables
-  are supplied.
-- Activated MetaCLIP-2 opt-in real test: `1 passed` in 138.32 seconds — PASS.
-- Activated Perception Encoder opt-in real test: `1 passed` in 77.14 seconds —
-  PASS.
-- Activated BEiT-3 opt-in real test: NOT RUN/BLOCKED by the missing official
-  checkpoint and tokenizer.
-- `audit_multi_embedding_release.py`: structural gate PASS, operational gate
-  BLOCKED. Its static blocker list does not discover the separate real artifact
-  root, so this report and the two provider audit JSON files are the real-runtime
-  evidence for MetaCLIP-2 and PE.
-- `git diff --check`: PASS. Release audit found no staged/tracked banned artifact,
-  oversized file, or suspicious secret. The output root is explicitly ignored.
-- Full-corpus dry run: NOT RUN because the prompt permits it only after the real
-  three-provider five-keyframe acceptance gate passes.
+## Verification
 
-Generated checkpoints, caches, vectors, images, reports, and indexes remain
-untracked. Tracked changes are the provider Dockerfiles, real-fasttest config,
-and this report.
+- Offline/provider unit tests: `29 passed`.
+- Real BEiT-3 opt-in integration: `1 passed`.
+- Three provider identity/artifact audits: PASS.
+- Task05A provider validation: PASS.
+- Three provider-specific FAISS indexes: PASS.
+- Three real text-query paths plus independent retrieval: PASS.
+- Cross-provider rejection and RRF `k=60`: PASS.
+- Full regression: `430 passed, 9 skipped` in 18.81 seconds.
+- `git diff --check`: PASS.
+- Structural multi-embedding release audit: PASS.
+- Full-corpus dry run: PASS as a dry run; source archive audit found 7,800
+  expected/unique keyframes across 29 videos with zero missing/extra/duplicate.
 
-## Required unblock action
+## Remaining release blockers
 
-Provide the exact official Microsoft files
-`beit3_base_itc_patch16_224.pth` and `beit3.spm` (or a renewed official download
-URL) and place them at the paths in `configs/multi_embedding_real_fasttest.json`.
-The checkpoint SHA256 must be captured before execution. Then resume at the
-BEiT-3 runtime/model-load gate; do not rerun or replace the two valid provider
-artifacts unless their inputs change.
-
-Recommendation: **not ready for the full-corpus dry run acceptance gate** until
-BEiT-3 real image/text inference, Task05A, three indexes, three query paths, and
-RRF all pass on these same five IDs.
+The fasttest gate is complete. A non-dry-run full-corpus build was not launched
+because it requires explicit approval and resolved commands/paths. The static
+release audit therefore correctly keeps the operational release gate blocked
+for full-corpus extraction, per-provider audits, full indexes, online smoke,
+and representative-ground-truth evaluation. In particular, this report does
+not convert the five-keyframe smoke result into a competition-quality claim.

@@ -6,6 +6,7 @@ import json
 import math
 import re
 import shutil
+import time
 import uuid
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
@@ -128,6 +129,7 @@ def extract_embedding_artifacts(
     checkpoint_sha256: str | None = None,
 ) -> Path:
     """Extract one provider without exposing partial output as successful."""
+    extraction_started = time.perf_counter()
     if spec.status != "ready":
         raise OfflineEmbeddingError(
             f"provider {spec.model_id} is blocked: {spec.blocker_reason}"
@@ -197,6 +199,17 @@ def extract_embedding_artifacts(
                 "source_repository": spec.source_repository,
                 "source_revision": spec.source_revision,
                 "checkpoint_sha256": checkpoint_sha256 or spec.checkpoint_sha256,
+                "execution": {
+                    "adapter": f"{type(encoder).__module__}.{type(encoder).__qualname__}",
+                    "device_request": str(getattr(encoder, "device_request", "unknown")),
+                    "batch_size": batch_size,
+                    "latency_ms": (time.perf_counter() - extraction_started) * 1000.0,
+                    "image_preprocessing": spec.image_preprocessing,
+                    "vector_files_sha256": {
+                        path.name: sha256_file(path)
+                        for path in sorted(staging.glob("*.npy"))
+                    },
+                },
             }
         )
         (staging / "manifest.json").write_text(
