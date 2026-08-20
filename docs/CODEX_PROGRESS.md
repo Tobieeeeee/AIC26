@@ -505,15 +505,71 @@ Blockers:
 - None for Task05A v1 implementation. The upstream branch identity mismatch and
   absent ASR artifact are recorded limitations, not silently repaired.
 
+## Task05B v1 — Elasticsearch/BM25 Lexical Index and Retrieval
+
+Status: COMPLETE
+
+Branch: `feat/lexical`
+
+Completed:
+
+- Added a Task05B-only Elasticsearch projection/index builder under
+  `src/mvr/indexing/lexical_index.py`. It reads only Task05A processed
+  documents and trusts `indexability.lexical` without recomputing it.
+- Projected canonical `keyframe_id`, `video_id`, `frame_idx`, nullable
+  `shot_id`, `timestamp`, `ocr.joined -> ocr_text`, and
+  `asr.joined -> asr_text`; Elasticsearch `_id` is exactly `keyframe_id`.
+- Added an isolated default-BM25 mapping with exactly two text fields,
+  `ocr_text` and `asr_text`. No custom analyzer, boost, or combined text field
+  was introduced.
+- Added create/recreate, bulk failure reporting, one final refresh, exact
+  count/ID-set auditing, and a provenance manifest under the generated
+  fasttest lexical-index artifact directory.
+- Added deterministic Task05B retrieval under
+  `src/mvr/retrieval/lexical_bm25.py`: equal-weight `multi_match` over the two
+  fields, `_score DESC`, then `keyframe_id ASC`, strict query/top-k validation,
+  and canonical result mapping.
+- Added reproducible build and verification CLIs under `scripts/indexing/`.
+- Reused the existing repository Elasticsearch 8.x client/bulk lifecycle
+  conventions while keeping the legacy Lab 6 vector/object/boosted mapping and
+  retrieval path unchanged.
+- Real Elasticsearch 8.11.4 fasttest acceptance indexed all 5 lexical Task05A
+  documents with 0 failed, missing, extra, or duplicate IDs.
+- Field projection audit passed for every required identity/text field, and
+  `combined_text` was absent.
+- OCR-oriented `TIN CHÍNH`, ASR-oriented `đàn bò ở lâm đồng`, and no-match
+  `quasarxylophone987654321` retrieval smoke tests passed. Repeated retrieval
+  preserved deterministic ordering. No retrieval-quality claim was made.
+
+Tests:
+
+- Focused Task05B suite: 25 passed.
+- Indexing/retrieval unit suites during implementation: 99 passed, 8 skipped.
+- Full regression: 288 passed, 14 skipped, 0 failed.
+- Python compileall, CLI help, `git diff --check`, identity/cardinality,
+  manifest, scope, and generated-artifact staging audits: passed.
+
+Known limitations:
+
+- Baseline uses Elasticsearch default text analysis/BM25 only.
+- No field-weight or language-analyzer ablation was performed.
+- The real acceptance corpus has only five keyframes and demonstrates
+  engineering behavior, not retrieval quality.
+
+Blockers:
+
+- None for Task05B v1.
+
 # Current active phase
 
-None. Phases 01–06 (reuse baseline) are COMPLETE and merged via PR #1. The
+Task05B v1 is COMPLETE on `feat/lexical`. Phases 01–06 (reuse baseline) are
+COMPLETE and merged via PR #1. The
 Textual KIS competition-ready task pack (Tasks 01–09) is also COMPLETE on
 `feat/kis-competition-ready`.
 
-Next action: human review of `feat/kis-competition-ready`.
+Next action: human review of `feat/lexical`.
 
-Stop gate: do not begin Task05B/C/D, Q&A, TRAKE, Frontend, VLM, advanced
+Stop gate: do not begin Task05C/D, Q&A, TRAKE, Frontend, VLM, advanced
 reranking, or deployment without explicit approval.
 
 # Resume instruction
