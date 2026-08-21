@@ -155,7 +155,7 @@ def test_search_kis_accepts_top_k_above_100_for_trake_shortlisting() -> None:
     plain KIS callers are unaffected since the public API/CLI never pass
     more than 100."""
     mapping = {f"kf-{i}": i for i in range(300)}
-    resolver = KeyframeFrameIndexResolver(mapping)
+    resolver = _resolver(mapping, videos=("L21_V001",))
     hits = [_hit("L21_V001", f"kf-{i}", score=1.0 - i / 1000) for i in range(300)]
     service = _FakeMultimodalService(hits)
 

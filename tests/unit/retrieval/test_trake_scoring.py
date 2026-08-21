@@ -40,7 +40,9 @@ def test_build_video_score_matrix_scores_match_manual_dot_product() -> None:
         {"video_id": "V2", "frame_id": "kfOther", "timestamp": 1.0},
     ]
     faiss_index = _FakeFaissIndex(vectors, metadata)
-    resolver = KeyframeFrameIndexResolver({"kfA": 300, "kfB": 100, "kfC": 200, "kfOther": 999})
+    resolver = KeyframeFrameIndexResolver(
+        {("V1", "kfA"): 300, ("V1", "kfB"): 100, ("V1", "kfC"): 200, ("V2", "kfOther"): 999}
+    )
     event_text_vectors = np.array(
         [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]], dtype=np.float32
     )
@@ -67,7 +69,7 @@ def test_build_video_score_matrix_excludes_unresolvable_frames() -> None:
         {"video_id": "V1", "frame_id": "unknown-pipeline-format", "timestamp": 2.0},
     ]
     faiss_index = _FakeFaissIndex(vectors, metadata)
-    resolver = KeyframeFrameIndexResolver({"known": 42})  # "unknown-pipeline-format" is not mapped
+    resolver = KeyframeFrameIndexResolver({("V1", "known"): 42})  # "unknown-pipeline-format" is not mapped
     event_text_vectors = np.array([[1.0, 0.0]], dtype=np.float32)
 
     matrix = build_video_score_matrix(
@@ -85,7 +87,7 @@ def test_build_video_score_matrix_returns_none_for_video_with_no_indexed_frames(
         [np.array([1.0, 0.0], dtype=np.float32)],
         [{"video_id": "OTHER_VIDEO", "frame_id": "kf", "timestamp": 1.0}],
     )
-    resolver = KeyframeFrameIndexResolver({"kf": 1})
+    resolver = KeyframeFrameIndexResolver({("OTHER_VIDEO", "kf"): 1})
     event_text_vectors = np.array([[1.0, 0.0]], dtype=np.float32)
 
     matrix = build_video_score_matrix(
