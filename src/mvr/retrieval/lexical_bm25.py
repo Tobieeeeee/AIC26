@@ -103,7 +103,12 @@ def map_task05b_lexical_response(
         if not isinstance(source, Mapping):
             raise RuntimeError("malformed search response: missing _source")
         keyframe_id = _source_string(source, "keyframe_id")
-        if raw_hit.get("_id") != keyframe_id:
+        video_id = _source_string(source, "video_id")
+        # `_id` là cặp video/keyframe, không phải keyframe trần -- xem
+        # `LexicalIndexDocument.document_id`, phía sinh ra nó. Một `_id` trần
+        # nghĩa là index được dựng bằng code trước PR #8, nơi "034" của 842
+        # video cùng ghi vào một document; đọc tiếp sẽ giấu mất mất mát đó.
+        if raw_hit.get("_id") != f"{video_id}/{keyframe_id}":
             raise RuntimeError("malformed search response: _id/keyframe_id mismatch")
         raw_score = raw_hit.get("_score")
         if isinstance(raw_score, bool) or not isinstance(raw_score, (int, float)):
@@ -122,7 +127,7 @@ def map_task05b_lexical_response(
             (
                 score,
                 keyframe_id,
-                _source_string(source, "video_id"),
+                video_id,
                 int(_source_int(source, "frame_idx")),
                 _source_int(source, "shot_id", nullable=True),
                 float(timestamp_value),
