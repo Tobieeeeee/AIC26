@@ -38,10 +38,10 @@ cd AIC26
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 
-.venv\Scripts\python.exe scriptsuild_keyframe_mapping.py ^
+.venv\Scripts\python.exe scripts\build_keyframe_mapping.py ^
     --dataset-root <DATA> --output artifacts\keyframe_mapping.csv
 
-.venv\Scripts\python.exe scriptsuild_qna_index_from_organizer_features.py ^
+.venv\Scripts\python.exe scripts\build_qna_index_from_organizer_features.py ^
     --dataset-root <DATA> --output artifacts\indexes\qna_organizer_all
 ```
 
@@ -158,7 +158,7 @@ Sửa một chữ rồi chạy lại cả script là mất 40 giây nạp model.
 nạp một lần rồi mỗi lần thử chỉ **0,2 giây**:
 
 ```powershell
-python scriptsnswer_queries.py --interactive
+python scripts\answer_queries.py --interactive
 ```
 
 ```
