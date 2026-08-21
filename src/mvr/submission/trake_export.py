@@ -54,9 +54,25 @@ class TrakePredictionRow:
 
 
 def validate_trake_prediction(row: TrakePredictionRow, k: int) -> None:
-    """Raise ``InvalidTrakePredictionError`` on any contract violation:
-    wrong marker count, non-strictly-increasing frames, or a negative frame
-    number. Never silently drops or coerces bad data."""
+    """Raise ``InvalidTrakePredictionError`` on any contract violation: a
+    blank/`.mp4`-suffixed video_id, wrong marker count, non-strictly-
+    increasing frames, or a negative frame number. Never silently drops or
+    coerces bad data.
+
+    ``video_id`` is never blank and never carries a ``.mp4`` suffix
+    anywhere in this codebase (matches ``mvr.submission.qna_export``'s own
+    identical check, and the organizer's own published rule at
+    https://sotuyenaic.oj.io.vn/: "Ten file video khong co phan duoi
+    .mp4") -- this is a real invariant of the data, not an organizer-only
+    quirk, so it belongs in the shared validator rather than duplicated
+    only at the official-export boundary.
+    """
+    if not isinstance(row.video_id, str) or not row.video_id.strip():
+        raise InvalidTrakePredictionError(f"video_id must not be blank, got {row.video_id!r}")
+    if row.video_id.lower().endswith(".mp4"):
+        raise InvalidTrakePredictionError(
+            f"video_id must not carry a .mp4 suffix, got {row.video_id!r}"
+        )
     if len(row.frames) != k or len(row.is_interpolated) != k:
         raise InvalidTrakePredictionError(
             f"expected {k} markers, got frames={len(row.frames)} "
@@ -276,14 +292,21 @@ def export_official_trake_submission_csv(
     to Q&A's free-text answer column, which TRAKE does not have).
 
     Every row MUST already be null-free (``apply_never_blank_fallback()``)
-    and validated (``validate_trake_prediction()``) before reaching this
-    function -- it does not call either itself, so a caller cannot forget
-    to and silently submit a row with a gap.
+    before reaching this function -- a ``None`` in ``row.frames`` is not a
+    valid ``int`` and will fail to write correctly. Validation itself
+    (blank/`.mp4` video_id, marker count, negative/non-increasing frames)
+    is NOT solely the caller's responsibility: every row is re-validated
+    here too via ``validate_trake_prediction()``, so a caller that forgets
+    cannot silently produce a submission the organizer's grader would
+    reject or mis-score (found and fixed after a real PR review: a row
+    with a blank ``video_id`` and out-of-order frames was previously
+    written through unchanged).
 
-    Raises ``InvalidTrakePredictionError`` if ``rows`` is empty or exceeds
-    the organizer's 100-row cap, or if rows disagree on marker count (the
-    organizer compares Frame ID count against the query's own declared
-    event count, so a mixed-k file is already broken before upload).
+    Raises ``InvalidTrakePredictionError`` if ``rows`` is empty, exceeds
+    the organizer's 100-row cap, disagrees on marker count across rows
+    (the organizer compares Frame ID count against the query's own
+    declared event count, so a mixed-k file is already broken before
+    upload), or if any individual row fails ``validate_trake_prediction()``.
     """
     if not rows:
         raise InvalidTrakePredictionError("cannot submit an empty TRAKE result file")
@@ -298,6 +321,7 @@ def export_official_trake_submission_csv(
                 f"mixed marker counts in one submission file: {k} vs. {len(row.frames)} "
                 f"({row.video_id})"
             )
+        validate_trake_prediction(row, k)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", newline="", encoding="utf-8") as handle:

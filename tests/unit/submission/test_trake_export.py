@@ -129,6 +129,27 @@ def test_validate_rejects_negative_frame() -> None:
         validate_trake_prediction(row, k=3)
 
 
+def test_validate_rejects_blank_video_id() -> None:
+    row = TrakePredictionRow("", (1, 5, 10), (False, False, False))
+
+    with pytest.raises(InvalidTrakePredictionError):
+        validate_trake_prediction(row, k=3)
+
+
+def test_validate_rejects_whitespace_only_video_id() -> None:
+    row = TrakePredictionRow("   ", (1, 5, 10), (False, False, False))
+
+    with pytest.raises(InvalidTrakePredictionError):
+        validate_trake_prediction(row, k=3)
+
+
+def test_validate_rejects_video_id_with_mp4_suffix() -> None:
+    row = TrakePredictionRow("L21_V001.mp4", (1, 5, 10), (False, False, False))
+
+    with pytest.raises(InvalidTrakePredictionError):
+        validate_trake_prediction(row, k=3)
+
+
 # -- export round-trip ---------------------------------------------------------
 
 
@@ -263,3 +284,61 @@ def test_official_csv_rejects_mixed_marker_counts_in_one_file(tmp_path: Path) ->
 
     with pytest.raises(InvalidTrakePredictionError):
         export_official_trake_submission_csv(rows, tmp_path / "out.csv")
+
+
+# -- defense-in-depth: the official exporter must not trust its caller ---------
+#
+# Found in PR #11 review: export_official_trake_submission_csv() only checked
+# row count and cross-row marker-count consistency, never calling
+# validate_trake_prediction() on each row -- so a row with a blank video_id
+# and out-of-order frames (9, 3) was written through unchanged as ",9,3\n",
+# an invalid organizer submission with no error raised anywhere. Reproduced
+# first, then fixed by validating every row inside the exporter itself.
+
+
+def test_official_csv_rejects_a_blank_video_id(tmp_path: Path) -> None:
+    rows = [TrakePredictionRow("", (3, 9), (False, False))]
+
+    with pytest.raises(InvalidTrakePredictionError):
+        export_official_trake_submission_csv(rows, tmp_path / "out.csv")
+
+
+def test_official_csv_rejects_out_of_order_frames(tmp_path: Path) -> None:
+    """The exact case found during PR #11 review: video_id='' with
+    frames (9, 3) was silently written as ',9,3'."""
+    rows = [TrakePredictionRow("L21_V001", (9, 3), (False, False))]
+
+    with pytest.raises(InvalidTrakePredictionError):
+        export_official_trake_submission_csv(rows, tmp_path / "out.csv")
+
+
+def test_official_csv_rejects_a_negative_frame(tmp_path: Path) -> None:
+    rows = [TrakePredictionRow("L21_V001", (-1, 9), (False, False))]
+
+    with pytest.raises(InvalidTrakePredictionError):
+        export_official_trake_submission_csv(rows, tmp_path / "out.csv")
+
+
+def test_official_csv_rejects_video_id_with_mp4_suffix(tmp_path: Path) -> None:
+    rows = [TrakePredictionRow("L21_V001.mp4", (3, 9), (False, False))]
+
+    with pytest.raises(InvalidTrakePredictionError):
+        export_official_trake_submission_csv(rows, tmp_path / "out.csv")
+
+
+def test_official_csv_never_writes_a_partial_file_when_a_later_row_is_invalid(
+    tmp_path: Path,
+) -> None:
+    """Validation must happen before any bytes are written -- a bad row
+    anywhere in the batch must not leave a truncated, half-written CSV on
+    disk that could be mistaken for a valid (short) submission."""
+    rows = [
+        TrakePredictionRow("L21_V001", (100, 200), (False, False)),  # valid
+        TrakePredictionRow("", (300, 400), (False, False)),  # invalid: blank video_id
+    ]
+    path = tmp_path / "out.csv"
+
+    with pytest.raises(InvalidTrakePredictionError):
+        export_official_trake_submission_csv(rows, path)
+
+    assert not path.exists()
