@@ -300,6 +300,23 @@ def _write_submission(rows: list[dict], kind: str, out: Path) -> None:
         write_review_file(rows, review)
         print(f"đã ghi {out} và {review.name}  (điền cột answer)")
 
+
+def batch_output_filename(path: Path, kind: str) -> str:
+    """The organizer's ``query-<stt>-<kind>.csv`` for a batch query file.
+
+    ``path`` is the pack's own name, ``query-p1-23-kis.txt`` -- writing
+    that stem straight to disk produces exactly the filename the
+    organizer's required directory listing does not contain. Falls back
+    to the file's own stem when it doesn't follow the convention: one
+    oddly-named query should cost that query, not crash everything still
+    queued behind it in the batch.
+    """
+    try:
+        return resolve_output_name(path.stem, kind)
+    except SubmissionFormatError:
+        return f"{path.stem}.csv"
+
+
 def interactive(searcher: "Searcher", args) -> int:
     """Try a description, see the frames, fix the wording, try again.
 
@@ -527,17 +544,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         elapsed = time.perf_counter() - start
 
+        out_name = batch_output_filename(path, kind)
         if kind == "kis":
-            out = args.output / f"{path.stem}.csv"
+            out = args.output / out_name
             write_kis_submission([(r["video_id"], r["frame_idx"]) for r in rows], out)
             written.append(out.name)
             print(f"{path.name:24} -> {out.name:24} {len(rows):3d} dòng  {elapsed:.1f}s")
         else:
-            out = args.output / f"{path.stem}.csv"
+            out = args.output / out_name
             write_qna_submission(
                 [(r["video_id"], r["frame_idx"], "") for r in rows], out
             )
-            review = args.output / f"{path.stem}.review.csv"
+            review = args.output / (out_name[: -len(".csv")] + ".review.csv")
             write_review_file(rows, review)
             written.append(out.name)
             print(
