@@ -17,13 +17,20 @@
 - `_id` của Elasticsearch index Task05B là `f"{video_id}/{keyframe_id}"`, do `LexicalIndexDocument.document_id` sinh ra. Đây là nguồn sự thật duy nhất; không viết lại chuỗi này bằng tay ở nơi khác.
 - Commit **không** được có trailer `Co-Authored-By`. Author duy nhất là `ipvfml <256519431+ipvfml@users.noreply.github.com>`.
 - Máy phát triển không có GPU, không có Docker, không có Elasticsearch chạy thật. Mọi test bắt buộc phải chạy được offline; test cần Elasticsearch thật phải `skipif` theo biến môi trường.
-- Chạy test bằng `python -m pytest` từ `D:\AIC26`.
+- Chạy test bằng `./.venv/Scripts/python.exe -m pytest` từ `D:\AIC26`. Python toàn cục **không** có pytest.
+- Baseline trước khi bắt đầu: `737 passed, 1 skipped` trên `origin/main` = `1b15f36`.
 
 ## Phạm vi
 
-Kế hoạch này chỉ phủ **Phase A** của spec (mục 4.1 → 4.5). Giai đoạn C (dựng lại bộ đo ablation, mục 6 của spec) cần một Elasticsearch chạy thật nên sẽ có kế hoạch riêng khi đồng đội dựng xong T3.
+Kế hoạch này chỉ phủ **Phase A** của spec (mục 4.1 → 4.5). Giai đoạn C (dựng lại bộ
+đo ablation, mục 6 của spec) cần một Elasticsearch chạy thật nên sẽ có kế hoạch riêng
+khi đồng đội dựng xong T3.
 
-Task 1–2 chạy được ngay. Task 3–5 **bị chặn** cho tới khi PR Q&A merge lên `main`, vì `src/mvr/retrieval/qna_fusion.py` chưa có trên `main`.
+Cả 5 task đều chạy được: PR Q&A đã merge (`origin/main` = `1b15f36`), nên
+`src/mvr/retrieval/qna_fusion.py` đã có trên `main` và nhánh làm việc đã rebase lên đó.
+
+Thứ tự khuyến nghị: Task 1 → Task 2 → Task 3 → Task 4 → Task 5. Task 1 và Task 2 độc
+lập với nhau; Task 4 cần Task 3, Task 5 cần cả hai.
 
 ---
 
@@ -117,7 +124,7 @@ def test_bare_keyframe_id_as_elasticsearch_id_is_rejected() -> None:
 
 - [ ] **Step 2: Chạy test để xác nhận nó fail**
 
-Run: `python -m pytest tests/unit/retrieval/test_task05b_lexical.py::test_reader_accepts_the_id_the_writer_actually_produces -v`
+Run: `./.venv/Scripts/python.exe -m pytest tests/unit/retrieval/test_task05b_lexical.py::test_reader_accepts_the_id_the_writer_actually_produces -v`
 
 Expected: FAIL với `RuntimeError: malformed search response: _id/keyframe_id mismatch`.
 
@@ -192,13 +199,13 @@ def _hit(
 
 - [ ] **Step 5: Chạy lại toàn bộ file test**
 
-Run: `python -m pytest tests/unit/retrieval/test_task05b_lexical.py -v`
+Run: `./.venv/Scripts/python.exe -m pytest tests/unit/retrieval/test_task05b_lexical.py -v`
 
 Expected: tất cả PASS, gồm hai test mới.
 
 - [ ] **Step 6: Chạy toàn bộ test suite để bắt hồi quy**
 
-Run: `python -m pytest tests/unit -q`
+Run: `./.venv/Scripts/python.exe -m pytest tests/unit -q`
 
 Expected: không có test nào fail thêm so với trước khi sửa. Nếu có, đọc kỹ trước khi
 nới lỏng bất cứ điều gì — một test fail ở đây nhiều khả năng là một fixture khác cũng
@@ -208,7 +215,7 @@ nới lỏng bất cứ điều gì — một test fail ở đây nhiều khả 
 
 ```bash
 git stash
-python -m pytest tests/unit/retrieval/test_task05b_lexical.py::test_reader_accepts_the_id_the_writer_actually_produces -v
+./.venv/Scripts/python.exe -m pytest tests/unit/retrieval/test_task05b_lexical.py::test_reader_accepts_the_id_the_writer_actually_produces -v
 git stash pop
 ```
 
@@ -290,7 +297,7 @@ viết, để khớp đúng chữ ký `bulk_fn`/`scan_fn` mà các test lân c�
 
 - [ ] **Step 2: Chạy test để xác nhận nó fail**
 
-Run: `python -m pytest "tests/unit/indexing/test_task05b.py::test_index_is_created_with_a_diacritic_folding_vietnamese_analyzer" -v`
+Run: `./.venv/Scripts/python.exe -m pytest "tests/unit/indexing/test_task05b.py::test_index_is_created_with_a_diacritic_folding_vietnamese_analyzer" -v`
 
 Expected: FAIL với `ImportError: cannot import name 'LEXICAL_SETTINGS'`.
 
@@ -341,7 +348,7 @@ Rồi trong `create_lexical_index`:
 
 - [ ] **Step 4: Chạy test để xác nhận nó pass**
 
-Run: `python -m pytest tests/unit/indexing/test_task05b.py -v`
+Run: `./.venv/Scripts/python.exe -m pytest tests/unit/indexing/test_task05b.py -v`
 
 Expected: tất cả PASS. Test cũ `create_call[1]["mappings"] == LEXICAL_MAPPINGS` vẫn
 đúng vì nó so với chính hằng số đã đổi.
@@ -411,14 +418,14 @@ def test_unaccented_query_matches_accented_vietnamese_text() -> None:
 
 - [ ] **Step 6: Xác nhận integration test được skip sạch trên máy này**
 
-Run: `python -m pytest tests/integration/test_task05b_analyzer.py -v`
+Run: `./.venv/Scripts/python.exe -m pytest tests/integration/test_task05b_analyzer.py -v`
 
 Expected: SKIPPED, không ERROR. Nếu ERROR thì có import chạy trước `skipif` — kiểm tra
 lại rằng mọi import `elasticsearch` nằm **trong** thân hàm test.
 
 - [ ] **Step 7: Chạy toàn bộ suite**
 
-Run: `python -m pytest tests/unit -q`
+Run: `./.venv/Scripts/python.exe -m pytest tests/unit -q`
 
 Expected: không fail thêm.
 
@@ -439,11 +446,6 @@ Schema version 1.1: existing indexes need a reindex to pick this up."
 ---
 
 ### Task 3: `FusedRetriever` nhận hai chuỗi truy vấn
-
-> **CHẶN.** Task này cần `src/mvr/retrieval/qna_fusion.py`, hiện chỉ có trên nhánh
-> `feat/qna-competition-ready`. Chỉ bắt đầu sau khi PR Q&A merge lên `main` và nhánh
-> làm việc đã rebase lên `origin/main` mới. Kiểm tra bằng:
-> `git cat-file -e origin/main:src/mvr/retrieval/qna_fusion.py && echo READY`
 
 **Files:**
 - Modify: `src/mvr/retrieval/qna_fusion.py:65` (tên lớp), `:88-140` (`search_hybrid`)
@@ -522,7 +524,7 @@ def test_the_old_class_name_still_works() -> None:
 
 - [ ] **Step 2: Chạy test để xác nhận fail**
 
-Run: `python -m pytest tests/unit/retrieval/test_qna_fused_retriever.py -k "own_query or omitting or old_class" -v`
+Run: `./.venv/Scripts/python.exe -m pytest tests/unit/retrieval/test_qna_fused_retriever.py -k "own_query or omitting or old_class" -v`
 
 Expected: FAIL với `ImportError: cannot import name 'FusedRetriever'`.
 
@@ -583,7 +585,7 @@ Phần còn lại của phương thức giữ nguyên.
 
 - [ ] **Step 4: Chạy test để xác nhận pass**
 
-Run: `python -m pytest tests/unit/retrieval/test_qna_fused_retriever.py -v`
+Run: `./.venv/Scripts/python.exe -m pytest tests/unit/retrieval/test_qna_fused_retriever.py -v`
 
 Expected: tất cả PASS, gồm ba test mới.
 
@@ -605,9 +607,7 @@ as an alias."
 
 ### Task 4: `search_kis` chuyển tiếp truy vấn lexical
 
-> **CHẶN.** Phụ thuộc Task 3.
-
-`search_kis` chỉ được truyền `lexical_query` khi nó khác `None`. Truyền vô điều kiện
+Phụ thuộc Task 3. `search_kis` chỉ được truyền `lexical_query` khi nó khác `None`. Truyền vô điều kiện
 sẽ làm `ElasticsearchMultimodalService.search_hybrid` — chưa nhận tham số này —
 `TypeError`.
 
@@ -666,7 +666,7 @@ def test_a_service_without_lexical_query_support_is_not_broken() -> None:
 
 - [ ] **Step 2: Chạy test để xác nhận fail**
 
-Run: `python -m pytest tests/unit/retrieval/test_kis.py -k "lexical_query or without_lexical" -v`
+Run: `./.venv/Scripts/python.exe -m pytest tests/unit/retrieval/test_kis.py -k "lexical_query or without_lexical" -v`
 
 Expected: test đầu FAIL (`lexical_query` là `None` vì `search_kis` chưa nhận tham số);
 test thứ hai PASS sẵn.
@@ -688,7 +688,7 @@ Thêm `lexical_query: str | None = None,` vào cuối danh sách tham số keywo
 
 - [ ] **Step 4: Chạy test để xác nhận pass**
 
-Run: `python -m pytest tests/unit/retrieval/test_kis.py -v`
+Run: `./.venv/Scripts/python.exe -m pytest tests/unit/retrieval/test_kis.py -v`
 
 Expected: tất cả PASS.
 
@@ -706,7 +706,7 @@ not accept the parameter -- keeps working."
 
 ### Task 5: Bật nhánh lexical cho KIS smoke test
 
-> **CHẶN.** Phụ thuộc Task 3 và Task 4.
+Phụ thuộc Task 3 và Task 4.
 
 `run_real_data_kis_smoke.py` đang truyền `multimodal_service=None`, nên KIS baseline
 hôm nay là FAISS đơn thuần: nhánh lexical mà cả kế hoạch này phục vụ chưa từng được
@@ -797,7 +797,7 @@ the numbers. Still None when no Elasticsearch is configured."
 | 4.3 Analyzer tiếng Việt | Task 2 |
 | 4.4 Bật lexical cho KIS | Task 5 |
 | 4.5 Test | nằm trong từng task |
-| 5 Phụ thuộc nhánh git | ghi ở "Phạm vi" và ở đầu Task 3 |
+| 5 Phụ thuộc nhánh git | đã hết hiệu lực: PR Q&A merge rồi, ghi ở "Phạm vi" |
 | 6 Giai đoạn C | ngoài phạm vi kế hoạch này, nêu rõ ở "Phạm vi" |
 | 7 Ngoài phạm vi | không có task, đúng ý định |
 
