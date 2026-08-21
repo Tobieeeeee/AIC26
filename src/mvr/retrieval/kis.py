@@ -109,6 +109,7 @@ def search_kis(
     pipeline_resolver: KeyframeFrameIndexResolver | None = None,
     aic_registry: Any | None = None,
     overfetch: int | None = None,
+    lexical_query: str | None = None,
 ) -> list[KisCandidate]:
     """Run one KIS query against the existing retrieval baseline.
 
@@ -117,6 +118,11 @@ def search_kis(
     back to semantic-only FAISS search. Never builds an index or loads a
     model itself -- both services are the same lazily-initialized singletons
     the plain `/search/*` routes already use.
+
+    ``query`` feeds the dense branch and must be English: the encoder is
+    OpenCLIP ``RN50/openai``. ``lexical_query`` feeds BM25 and should be the
+    original Vietnamese, because the OCR and ASR indexed under it are
+    Vietnamese. Leave it None to send one string to both, as before.
     """
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query must be a non-empty string")
@@ -133,8 +139,12 @@ def search_kis(
     fetch_count = overfetch if overfetch is not None else max(top_k * 3, 30)
 
     if multimodal_service is not None:
+        # Only forwarded when given: `ElasticsearchMultimodalService.search_hybrid`
+        # does not accept this parameter, and passing it unconditionally would
+        # TypeError on the /search/hybrid route that still uses that service.
+        extra = {} if lexical_query is None else {"lexical_query": lexical_query}
         raw_hits: Sequence[Mapping[str, Any]] = multimodal_service.search_hybrid(
-            query.strip(), top_k=fetch_count, rrf_k=60
+            query.strip(), top_k=fetch_count, rrf_k=60, **extra
         )
     else:
         raw_hits = [

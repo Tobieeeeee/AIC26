@@ -289,3 +289,46 @@ def test_kis_candidate_to_answer_matches_evaluator_identity() -> None:
     )
 
     assert candidate.to_answer() == KisAnswer(video_id="L21_V001", frame_id=261)
+
+
+# -- the Vietnamese query the lexical branch needs ----------------------
+
+
+def test_lexical_query_is_forwarded_when_given() -> None:
+    seen: dict[str, object] = {}
+
+    class _Service:
+        def search_hybrid(self, query, *, top_k, rrf_k, lexical_query=None):
+            seen["query"] = query
+            seen["lexical_query"] = lexical_query
+            return []
+
+    search_kis(
+        "a red motorbike",
+        top_k=10,
+        semantic_service=None,
+        multimodal_service=_Service(),
+        lexical_query="xe máy màu đỏ",
+    )
+
+    assert seen == {"query": "a red motorbike", "lexical_query": "xe máy màu đỏ"}
+
+
+def test_a_service_without_lexical_query_support_is_not_broken() -> None:
+    """`ElasticsearchMultimodalService` chưa nhận tham số này. Truyền vô điều
+    kiện sẽ TypeError và làm hỏng route /search/hybrid đang chạy."""
+    seen: dict[str, object] = {}
+
+    class _OldService:
+        def search_hybrid(self, query, *, top_k, rrf_k):
+            seen["query"] = query
+            return []
+
+    search_kis(
+        "a red motorbike",
+        top_k=10,
+        semantic_service=None,
+        multimodal_service=_OldService(),
+    )
+
+    assert seen["query"] == "a red motorbike"
