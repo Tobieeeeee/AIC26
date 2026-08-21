@@ -70,9 +70,13 @@ for candidate in (REPOSITORY_ROOT, REPOSITORY_ROOT / "src"):
 
 from mvr.submission.official import (  # noqa: E402
     MAX_ROWS,
+    SubmissionFormatError,
+    query_number,
+    submission_filename,
     write_kis_submission,
     write_qna_submission,
 )
+from mvr.retrieval.kis import resolve_keyframe_ref  # noqa: E402
 
 DEFAULT_INDEX = "artifacts/indexes/qna_organizer_all"
 DEFAULT_MAPPING = "artifacts/keyframe_mapping.csv"
@@ -88,6 +92,51 @@ def _force_utf8_output() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):  # pragma: no cover
             pass
+
+
+def resolve_output_name(typed: str, kind: str) -> str:
+    """What the operator types after ``:w kis`` -> the organizer's filename.
+
+    Accepts a bare number (``23``) or the pack's own name for the query
+    (``query-p1-23-kis``, with or without ``.csv``); either way the file
+    written carries the organizer's required name, ``query-23-kis.csv``,
+    never the pack's ``p1-`` prefix.
+    """
+    text = typed.strip()
+    if text.isdigit():
+        return submission_filename(text, kind)
+    return submission_filename(query_number(text), kind)
+
+
+def insert_top_row(rows: list[dict], video_id: str, frame_idx: int) -> list[dict]:
+    """Put a manually-identified frame at rank 1.
+
+    Used when the operator has already found the right keyframe by eye and
+    typed it in with ``:top`` -- searching again would be slower and could
+    push the known-correct frame back down the list. A row for the same
+    ``(video_id, frame_idx)`` already present is moved rather than
+    duplicated: a repeated line wastes one of the 100 slots for nothing.
+    """
+    existing = next(
+        (
+            row
+            for row in rows
+            if (row["video_id"], row["frame_idx"]) == (video_id, frame_idx)
+        ),
+        None,
+    )
+    rest = [row for row in rows if row is not existing]
+    top = {
+        "rank": 1,
+        "video_id": video_id,
+        "frame_idx": frame_idx,
+        "score": existing["score"] if existing else None,
+        "image_path": existing["image_path"] if existing else "",
+    }
+    out = [top, *rest]
+    for i, row in enumerate(out, start=1):
+        row["rank"] = i
+    return out
 
 
 def classify(path: Path) -> str | None:
@@ -222,14 +271,34 @@ Lệnh:
   <mô tả tiếng Anh>        tìm và in top-10
   :n <số>                  đổi số kết quả hiển thị (mặc định 10)
   :v <số>                  đổi tối đa dòng mỗi video (0 = bỏ giới hạn)
-  :w kis <tên>             ghi kết quả gần nhất thành <tên>.csv (2 cột)
-  :w qa <tên>              ghi thành <tên>.csv (3 cột) + <tên>.review.csv
+  :w kis <stt>             ghi kết quả gần nhất -> query-<stt>-kis.csv
+  :w qa <stt>              ghi -> query-<stt>-qa.csv + query-<stt>-qa.review.csv
+  :top <video_id>_<keyframe_id> <kis|qa> <stt>
+                           chèn keyframe đã biết lên hạng 1 rồi ghi luôn
   :o                       mở ảnh của kết quả hạng 1
   :q                       thoát
 
 Mô tả cái NHÌN THẤY trong khung hình, bỏ tên riêng. CLIP chỉ đọc 77 token.
 """
 
+
+def _write_submission(rows: list[dict], kind: str, out: Path) -> None:
+    """Write the full top-k (not just what's on screen) to ``out``.
+
+    ``kind == "qa"`` also writes the sibling ``.review.csv`` a human fills
+    the answer column in -- shared by both ``:w`` and ``:top`` so the two
+    commands cannot drift into writing different columns.
+    """
+    if kind == "kis":
+        write_kis_submission([(r["video_id"], r["frame_idx"]) for r in rows], out)
+        print(f"đã ghi {out}  ({min(len(rows), MAX_ROWS)} dòng)")
+    else:
+        write_qna_submission(
+            [(r["video_id"], r["frame_idx"], "") for r in rows], out
+        )
+        review = out.with_suffix("").with_suffix(".review.csv")
+        write_review_file(rows, review)
+        print(f"đã ghi {out} và {review.name}  (điền cột answer)")
 
 def interactive(searcher: "Searcher", args) -> int:
     """Try a description, see the frames, fix the wording, try again.
@@ -289,27 +358,44 @@ def interactive(searcher: "Searcher", args) -> int:
         if line.startswith(":w "):
             parts = line[3:].split(maxsplit=1)
             if len(parts) != 2 or parts[0] not in ("kis", "qa"):
-                print("dùng: :w kis <tên>   hoặc   :w qa <tên>")
+                print("dùng: :w kis <stt>   hoặc   :w qa <stt>")
                 continue
             if not last:
                 print("chưa có kết quả nào để ghi")
                 continue
-            kind, name = parts[0], parts[1].strip().removesuffix(".csv")
-            out = args.output / f"{name}.csv"
-            # Writes the full top-k, not just the top_n on screen: the
-            # display is for reading, the submission is for scoring.
-            if kind == "kis":
-                write_kis_submission(
-                    [(r["video_id"], r["frame_idx"]) for r in last], out
+            kind, typed = parts[0], parts[1].strip()
+            try:
+                filename = resolve_output_name(typed, kind)
+            except SubmissionFormatError as exc:
+                print(f"tên không hợp lệ: {exc}")
+                continue
+            _write_submission(last, kind, args.output / filename)
+            continue
+
+        if line.startswith(":top "):
+            parts = line[5:].split()
+            if len(parts) != 3 or parts[1] not in ("kis", "qa"):
+                print("dùng: :top <video_id>_<keyframe_id> <kis|qa> <stt>")
+                continue
+            ref, kind, typed = parts
+            video_id, keyframe_id, frame_idx = resolve_keyframe_ref(
+                searcher.resolver, ref
+            )
+            if frame_idx is None:
+                print(
+                    f"không tra được {video_id}/{keyframe_id} trong "
+                    "keyframe_mapping.csv -- kiểm lại video_id/keyframe_id, "
+                    "không đoán"
                 )
-                print(f"đã ghi {out}  ({min(len(last), MAX_ROWS)} dòng)")
-            else:
-                write_qna_submission(
-                    [(r["video_id"], r["frame_idx"], "") for r in last], out
-                )
-                review = args.output / f"{name}.review.csv"
-                write_review_file(last, review)
-                print(f"đã ghi {out} và {review.name}  (điền cột answer)")
+                continue
+            last = insert_top_row(last, video_id, frame_idx)
+            print(f"{video_id}/{keyframe_id} -> frame {frame_idx}, đã đưa lên hạng 1")
+            try:
+                filename = resolve_output_name(typed, kind)
+            except SubmissionFormatError as exc:
+                print(f"tên không hợp lệ: {exc}")
+                continue
+            _write_submission(last, kind, args.output / filename)
             continue
 
         if line.startswith(":"):

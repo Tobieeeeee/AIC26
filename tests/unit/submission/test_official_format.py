@@ -22,6 +22,8 @@ from mvr.submission.official import (
     MAX_ANSWER_CHARS,
     MAX_ROWS,
     SubmissionFormatError,
+    query_number,
+    submission_filename,
     write_kis_submission,
     write_qna_submission,
 )
@@ -164,3 +166,51 @@ def test_an_empty_prediction_list_still_writes_a_file(tmp_path) -> None:
 
     assert path.is_file()
     assert path.read_bytes() == b""
+
+
+# -- File naming -------------------------------------------------------
+#
+# The organizer's "Cấu trúc thư mục yêu cầu" shows a plain sequential
+# number, not the package prefix their query files carry:
+#
+#     submission/
+#     ├── query-1-kis.csv
+#     ├── query-3-qa.csv
+#     └── query-4-trake.csv
+#
+# The query pack is named `query-p1-23-kis.txt`, so the `p1-` has to be
+# dropped on the way out or the submission is named something the
+# organizer never asked for.
+
+
+def test_submission_filename_uses_a_plain_number() -> None:
+    assert submission_filename(23, "kis") == "query-23-kis.csv"
+    assert submission_filename(3, "qa") == "query-3-qa.csv"
+    assert submission_filename(4, "trake") == "query-4-trake.csv"
+
+
+def test_submission_filename_accepts_a_numeric_string() -> None:
+    assert submission_filename("23", "kis") == "query-23-kis.csv"
+
+
+def test_submission_filename_rejects_an_unknown_kind() -> None:
+    with pytest.raises(SubmissionFormatError, match="dạng truy vấn"):
+        submission_filename(1, "kís")
+
+
+def test_submission_filename_rejects_a_non_numeric_stt() -> None:
+    # `p1-23` is the pack's name for the query, not its number. Letting it
+    # through would write `query-p1-23-kis.csv`, which is the exact name
+    # the organizer's directory listing does not contain.
+    with pytest.raises(SubmissionFormatError, match="stt"):
+        submission_filename("p1-23", "kis")
+
+
+def test_query_number_reads_the_number_out_of_a_pack_filename() -> None:
+    assert query_number("query-p1-23-kis.txt") == 23
+    assert query_number("query-4-trake.txt") == 4
+
+
+def test_query_number_rejects_a_name_it_cannot_parse() -> None:
+    with pytest.raises(SubmissionFormatError):
+        query_number("notes.txt")

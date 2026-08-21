@@ -25,6 +25,7 @@ plain form for simple answers (`L01_V028,3450,5`), so this writes that.
 from __future__ import annotations
 
 import csv
+import re
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -112,10 +113,57 @@ def write_qna_submission(
     return path
 
 
+#: The three tracks the organizer names. `trake` belongs to another
+#: teammate, but the filename rule is the same for all three.
+QUERY_KINDS = ("kis", "qa", "trake")
+
+#: The pack names a query `query-p1-23-kis.txt`; the organizer's required
+#: directory listing shows `query-23-kis.csv`. The `p1-` is the package,
+#: not the number, and it does not belong in the submission name.
+_PACK_NAME = re.compile("query-(?:p[0-9]+-)?([0-9]+)-(kis|qa|trake)", re.IGNORECASE)
+
+
+def submission_filename(stt: object, kind: object) -> str:
+    """``(23, "kis")`` -> ``"query-23-kis.csv"``.
+
+    `stt` must be a plain number. Passing the pack's own `p1-23` raises
+    rather than producing `query-p1-23-kis.csv`, which is precisely the
+    name the organizer's directory listing does not contain -- and a
+    misnamed file is a query scored zero on a system that found the frame.
+    """
+    kind_text = str(kind).strip().lower()
+    if kind_text not in QUERY_KINDS:
+        raise SubmissionFormatError(
+            f"dạng truy vấn không hợp lệ: {kind!r}; phải là một trong {QUERY_KINDS}"
+        )
+    stt_text = str(stt).strip()
+    if not re.fullmatch("[0-9]+", stt_text):
+        raise SubmissionFormatError(
+            f"stt phải là số, nhận {stt!r}. Tiền tố gói như 'p1-' không "
+            "thuộc tên file nộp"
+        )
+    return f"query-{int(stt_text)}-{kind_text}.csv"
+
+
+def query_number(name: object) -> int:
+    """``"query-p1-23-kis.txt"`` -> ``23``."""
+    stem = Path(str(name)).stem
+    match = _PACK_NAME.fullmatch(stem)
+    if match is None:
+        raise SubmissionFormatError(
+            f"không đọc được số thứ tự từ tên {name!r}; cần dạng "
+            "query-<stt>-<kis|qa|trake>"
+        )
+    return int(match.group(1))
+
+
 __all__ = [
     "MAX_ANSWER_CHARS",
+    "QUERY_KINDS",
     "MAX_ROWS",
     "SubmissionFormatError",
+    "query_number",
+    "submission_filename",
     "write_kis_submission",
     "write_qna_submission",
 ]
