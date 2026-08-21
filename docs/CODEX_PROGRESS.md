@@ -389,29 +389,116 @@ Blockers:
 
 ---
 
+# Post-baseline work: TRAKE Competition-Ready task pack
+
+Status: COMPLETE (all 9 phases)
+
+Branch: `feat/trake-competition-ready` (branched from `main` after PR #2
+merged), not yet pushed — pending user review of
+`docs/AIC_TRAKE_FINAL_REPORT.md` and explicit approval (per standing project
+rule: push happens once, at the end, only after that review).
+
+TRAKE (Temporal Retrieval & Alignment of Key Events,
+`TRAKE = KIS × k events, same video, correct order`) was explicitly approved
+by the project owner as post-baseline work, the same way the KIS pack was.
+It followed a separate local task pack at
+`agent_task/trake_competition_ready/` (kept out of Git, same convention as
+the KIS pack), executed one gated phase at a time with a stop-and-report
+boundary after each, plus a dedicated Phase 09 verification pass.
+
+Commits, in order:
+
+1. `e68f6b6` — Phase 01, repository contract audit + two prerequisite KIS
+   fixes → `docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md`
+2. `b12570f` — Phase 02, official TRAKE evaluator (partial R-Score,
+   Mean-Top-k-R, Final Score)
+3. `507284f` — Phase 03, event/gap input contract and gap-phrase translation
+4. `4127dc5` — Phase 04, dense per-video scoring and three chain-alignment
+   strategies (ATLAS, Lucifer, U-CESE)
+5. `8142468` — Phase 05, TRAKE orchestration (shortlist → dense score →
+   align → merge)
+6. `094da2d` + `a450913` + `04c9c0d` — Phase 06, real-data benchmark; fixed
+   three lab-reference defaults that made the comparison meaningless at
+   TRAKE's per-video scope; added a wide-gap query proving gap constraints
+   matter
+7. `a5535d4` — Phase 07, never-blank fallback, prediction validation, local
+   export
+8. `4d084b4` — Phase 08, `POST /search/trake` API route
+9. `70fb328` — Phase 09, end-to-end hardening (4 real bugs found and fixed)
+
+Completed:
+
+- Reused `search_kis()` unchanged for per-event video shortlisting — TRAKE's
+  k-events-per-query shape is concretely "call `search_kis()` k times."
+- Reused the existing FAISS index (`build-aic-index`) for dense per-video
+  scoring via `IndexFlatIP.reconstruct()` — no re-encoding, no new index type.
+- Implemented the official partial-credit TRAKE scoring formula, distinct
+  from KIS's exact-match formula and from the generic Recall@K/MRR helpers.
+- Ported and verified all three lab chain-alignment algorithms
+  (`dp_align`, `dp_align_soft`, `two_pointer_clips`), with all deviations
+  from the lab reference documented in `docs/LAB_REUSE_MAP.md`.
+- Ran a real parameter sweep (not guesses) to set every tuned default:
+  ATLAS `top_n=5`, Lucifer `min_sim=0.20`, U-CESE `topk=10`.
+- Exposed ranked chains through `POST /search/trake`, hardened in Phase 09
+  to accept either service shape the codebase produces (`.retriever()`
+  wrapper or a plain `.text_encoder`/`.index` retriever), returning a clear
+  503 instead of an opaque 500 for any other shape.
+- Implemented a never-blank submission fallback (interpolation for interior
+  gaps, phrase-table midpoints for edge gaps) so a chain is never submitted
+  with a raw blank marker.
+- Added a genuine no-mocks full-pipeline E2E test in Phase 09, closing a gap
+  where Phase 07's export module had no real-data caller.
+- Found and fixed 3 additional real issues during Phase 09's verification
+  pass: a leaked machine-specific absolute path in a committed docstring,
+  and leftover untracked trial-merge debris from an earlier unrelated
+  `git merge --abort`.
+
+Tests (current state, after Phase 09):
+
+- Working repo (`semantic` extras installed): 313 passed, 8 skipped, 0 failed.
+- CI-equivalent environment (`.[dev,api,semantic]` only, matching
+  `.github/workflows/ci.yml` exactly): same counts, 313 passed, 8 skipped,
+  0 failed.
+- Real full-pipeline E2E (`MVR_RUN_AIC_TRAKE_E2E=1`): PASS — query
+  `traffic_accident_night` (k=4), real measured `final_score=0.600`,
+  100 chains returned, export round-trip exact match.
+- Real `POST /search/trake` smoke: OpenAPI confirmed exactly 4 routes
+  registered; API import cost 0.47s.
+- Real 6-query benchmark over the real L21 corpus: ATLAS/Lucifer mean final
+  score 0.639 (tied), U-CESE 0.344; full results in
+  `docs/AIC_TRAKE_BENCHMARK_RESULTS.md` and `docs/AIC_TRAKE_FINAL_REPORT.md`.
+
+Remaining / explicitly out of scope:
+
+- **Queries must be English** — the index's OpenCLIP model is English-trained;
+  real competition queries will be Vietnamese. Documented, unresolved
+  operational gap, same limitation already noted for KIS.
+- No `mvr.cli` subcommand exists for TRAKE (API/library-only); not fabricated
+  per explicit instruction.
+- Ground truth is a small team-curated internal set, not organizer-labeled.
+- U-CESE intentionally does not enforce event order (a documented property of
+  the reference algorithm) — not selected as the production default partly
+  for this reason.
+- Q&A, Frontend, VLM, and deployment remain untouched per the pack's stop
+  gate.
+
+Blockers:
+
+- None.
+
 # Current active phase
 
-**TRAKE competition-ready task pack — Phase 01 in progress (2026-08-20).**
-Phases 01–06 (reuse baseline) are COMPLETE and merged via PR #1. The
-Textual KIS competition-ready task pack (Tasks 01–09) is COMPLETE and
-merged into `main` via PR #2, including the PR #2 hardening pass.
+**TRAKE competition-ready task pack — COMPLETE, pending user review before
+push (2026-08-21).** Phases 01–06 (reuse baseline) are COMPLETE and merged
+via PR #1. The Textual KIS competition-ready task pack (Tasks 01–09) is
+COMPLETE and merged into `main` via PR #2, including the PR #2 hardening
+pass. The TRAKE competition-ready task pack (Phases 01–09, including the
+dedicated Phase 09 verification pass) is COMPLETE on branch
+`feat/trake-competition-ready`; see the section above and
+`docs/AIC_TRAKE_FINAL_REPORT.md`.
 
-TRAKE (Temporal Retrieval & Alignment of Key Events, `TRAKE = KIS × k
-events, same video, correct order`) was explicitly approved by the project
-owner as post-baseline work, the same way the KIS pack was. It follows a
-separate local task pack at `agent_task/trake_competition_ready/` (kept out
-of Git, same convention as the KIS pack), executed one gated phase at a
-time with a stop-and-report boundary after each. Branch:
-`feat/trake-competition-ready`.
-
-Note on `AGENTS.md` §13: "Temporal Retrieval" and "Sequence Retrieval" are
-listed there as out of scope, but that list is explicitly scoped to *"the
-First Reuse Baseline"*, which is complete (see above). The KIS pack already
-established the same precedent — §13 also lists "submission adapter" as out
-of scope, yet `src/mvr/submission/kis_export.py` shipped on `main` as
-approved post-baseline work. TRAKE follows the same path.
-
-Next action: execute the TRAKE task pack, one phase at a time.
+Next action: user reviews `docs/AIC_TRAKE_FINAL_REPORT.md` and explicitly
+approves before this branch is pushed to `origin` — no push has happened yet.
 
 Stop gate: do not begin Q&A, Frontend, VLM, advanced reranking, or
 deployment without explicit approval.
@@ -426,4 +513,7 @@ codex/00_MASTER_PLAN.md
 docs/CODEX_PROGRESS.md
 docs/AIC_KIS_IMPLEMENTATION_NOTES.md
 docs/AIC_KIS_FINAL_REPORT.md
+docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md
+docs/AIC_TRAKE_BENCHMARK_RESULTS.md
+docs/AIC_TRAKE_FINAL_REPORT.md
 ```

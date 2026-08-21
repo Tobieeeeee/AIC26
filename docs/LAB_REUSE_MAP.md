@@ -271,6 +271,51 @@ here as required:
     skipped, and the regression scenario above now returns
     `(f0, None, f2)`.
 
+TRAKE Phase 06 (`docs/AIC_TRAKE_BENCHMARK_RESULTS.md`) measured that three of
+the ported defaults above were actively wrong at TRAKE's per-video scope
+(deviation 27) and produced a meaningless comparison until fixed. Recorded
+here as required by rule 18:
+
+30. **U-CESE `topk`: lab default `300` → measured default `10`.** The lab's
+    `two_pointer_clips(topk=300)` is a global per-event hit threshold across
+    an entire corpus scan; at the per-video scope introduced by deviation 27,
+    `300` exceeds the number of resolvable frames in almost any single video,
+    so every event collapsed onto the same frame and every chain scored
+    `0.000`. A real sweep (`topk` in `{1, 3, 5, 10, 20}`) found mean final
+    score peaking at `10` (`0.413`) and dropping off on both sides (`1`→
+    `0.190`, `3`→`0.300`, `5`→`0.380`, `20`→`0.253`). `10` is the measured
+    default, not a guess or the lab's own value.
+31. **Lucifer `min_sim`: lab default `0.05` → measured default `0.20`.** The
+    lab's `dp_align_soft(min_sim=0.05)` is below every real CLIP cosine
+    similarity observed in this corpus, so the skip mechanism (Lucifer's
+    entire distinguishing feature versus ATLAS) never fired — every Lucifer
+    chain was numerically identical to the corresponding ATLAS chain. A real
+    sweep found `0.20` correct (mean final score `0.639`, matching ATLAS) and
+    a sharp cliff just above it: `0.22`→`0.530`, `0.25`→`0.473`. This is
+    documented as a cliff, not a plateau — values are not interchangeable
+    within this range the way ATLAS's `top_n` is.
+32. **`top_n` (return N-best distinct chains per video) added to all three
+    strategies; lab reference returns only one.** Each lab function
+    (`dp_align`, `dp_align_soft`, `two_pointer_clips`) returns a single
+    best-scoring span. Wired unmodified into a real API/benchmark context,
+    this meant a video contributing only 1 of the 100-prediction budget's
+    slots even when several distinct valid chains existed in it, discarding
+    most of the budget by construction. Added `top_n` (default `5`) to all
+    three strategies to return the `N` best distinct chains per video
+    instead. In isolation this alone lifted ATLAS's mean final score from
+    `0.417` to `0.660` (later refined to `0.639` alongside the gap-phrase
+    fixes below); a sweep over `top_n` in `{5, 10, 20}` showed the score
+    plateauing across the whole range, so `5` (matching the lab's per-video
+    intuition most closely while still using the budget) was kept rather
+    than raised further.
+
+Separately, Phase 06 also measured that the gap-phrase table's own no-clue
+default (`(0, 300)` seconds) outperforms a hand-picked narrower default
+(`(0, 60)`): `0.639` vs `0.633` mean final score on the same 6-query set.
+This is not a lab-reference deviation (`GAP_PHRASE_TABLE` and its defaults are
+new TRAKE-owned code, not ported from the lab), so it is recorded here for
+completeness rather than as a numbered deviation.
+
 ## Status values
 
 ```text
