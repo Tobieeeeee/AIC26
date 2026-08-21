@@ -19,8 +19,23 @@ from .validation import identity_key
 from typing import Any
 
 
-TASK05B_SCHEMA_VERSION = "1.0"
+TASK05B_SCHEMA_VERSION = "1.1"
 SEARCHABLE_FIELDS = ["ocr_text", "asr_text"]
+
+#: Sao nguyên từ `elasticsearch_index.SETTINGS`, index Lab 6 vốn đã dùng đúng
+#: analyzer này cho tiếng Việt. `asciifolding` bỏ dấu ở CẢ lúc index lẫn lúc
+#: truy vấn, nên "Ha Noi" khớp "Hà Nội" theo cả hai chiều -- cần thiết vì OCR
+#: tiếng Việt sai dấu rất thường xuyên.
+LEXICAL_SETTINGS: dict[str, Any] = {
+    "analysis": {
+        "analyzer": {
+            "vi_folded": {
+                "tokenizer": "standard",
+                "filter": ["lowercase", "asciifolding"],
+            }
+        }
+    }
+}
 LEXICAL_MAPPINGS: dict[str, Any] = {
     "properties": {
         "keyframe_id": {"type": "keyword"},
@@ -28,8 +43,8 @@ LEXICAL_MAPPINGS: dict[str, Any] = {
         "frame_idx": {"type": "integer"},
         "shot_id": {"type": "integer"},
         "timestamp": {"type": "float"},
-        "ocr_text": {"type": "text"},
-        "asr_text": {"type": "text"},
+        "ocr_text": {"type": "text", "analyzer": "vi_folded"},
+        "asr_text": {"type": "text", "analyzer": "vi_folded"},
     }
 }
 
@@ -362,7 +377,11 @@ def create_lexical_index(
         client.indices.delete(index=index_name)
         exists = False
     if not exists:
-        client.indices.create(index=index_name, mappings=LEXICAL_MAPPINGS)
+        client.indices.create(
+            index=index_name,
+            mappings=LEXICAL_MAPPINGS,
+            settings=LEXICAL_SETTINGS,
+        )
 
 
 def _normalize_bulk_result(result: Any) -> tuple[int, list[Any]]:

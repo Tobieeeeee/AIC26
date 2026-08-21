@@ -64,7 +64,18 @@ def _write_processed(root: Path, documents: list[dict]) -> Path:
     return processed
 
 
-def test_task05b_mapping_uses_default_text_fields_without_combined_text() -> None:
+def test_task05b_mapping_has_two_analyzed_text_fields_and_nothing_else() -> None:
+    """Schema 1.1 thêm analyzer `vi_folded`; phần còn lại của giao kèo v1 giữ nguyên.
+
+    v1 cố ý không có analyzer -- `docs/CODEX_PROGRESS.md:522` ghi "no custom
+    analyzer, boost, or combined text field", và dòng 555 ghi rằng ablation
+    analyzer chưa từng được chạy. Đó là một khoảng trống được thừa nhận, không
+    phải một lựa chọn bác bỏ: dữ liệu OCR/ASR là tiếng Việt và OCR sai dấu rất
+    thường xuyên, nên không bỏ dấu thì truy vấn tiếng Việt đúng vẫn trượt.
+
+    Hai điều v1 khẳng định vẫn còn hiệu lực và vẫn được kiểm ở đây: không có
+    `combined_text`, và không có boost theo trường (BM25 mặc định, cân bằng).
+    """
     assert LEXICAL_MAPPINGS == {
         "properties": {
             "keyframe_id": {"type": "keyword"},
@@ -72,11 +83,14 @@ def test_task05b_mapping_uses_default_text_fields_without_combined_text() -> Non
             "frame_idx": {"type": "integer"},
             "shot_id": {"type": "integer"},
             "timestamp": {"type": "float"},
-            "ocr_text": {"type": "text"},
-            "asr_text": {"type": "text"},
+            "ocr_text": {"type": "text", "analyzer": "vi_folded"},
+            "asr_text": {"type": "text", "analyzer": "vi_folded"},
         }
     }
     assert "combined_text" not in LEXICAL_MAPPINGS["properties"]
+    assert not any(
+        "boost" in field for field in LEXICAL_MAPPINGS["properties"].values()
+    )
 
 
 def test_projection_preserves_identity_and_keeps_ocr_asr_separate() -> None:
@@ -269,3 +283,36 @@ def test_bulk_partial_failures_are_raised(tmp_path: Path) -> None:
             bulk_fn=lambda *args, **kwargs: (0, [{"index": {"status": 500}}]),
             scan_fn=lambda *args, **kwargs: [],
         )
+
+
+def test_index_is_created_with_a_diacritic_folding_vietnamese_analyzer(
+    tmp_path: Path,
+) -> None:
+    """OCR và ASR của corpus là tiếng Việt, và OCR sai dấu rất thường xuyên.
+    Không có `asciifolding` thì "Ha Noi" không khớp "Hà Nội", nên một truy vấn
+    tiếng Việt đúng vẫn trượt document đúng."""
+    from mvr.indexing.lexical_index import LEXICAL_SETTINGS
+
+    processed = _write_processed(tmp_path, [_document("frame-a")])
+    client = _Client(exists=False)
+    build_lexical_index(
+        client,
+        processed_root=processed,
+        index_name="lexical-v1",
+        recreate=False,
+        bulk_fn=lambda *args, **kwargs: (1, []),
+        scan_fn=lambda *args, **kwargs: [{"_id": "L21_V010/frame-a"}],
+    )
+
+    create_call = next(call for call in client.calls if call[0] == "create")
+    assert create_call[1]["settings"] == LEXICAL_SETTINGS
+    analyzer = LEXICAL_SETTINGS["analysis"]["analyzer"]["vi_folded"]
+    assert analyzer["filter"] == ["lowercase", "asciifolding"]
+    assert create_call[1]["mappings"]["properties"]["ocr_text"] == {
+        "type": "text",
+        "analyzer": "vi_folded",
+    }
+    assert create_call[1]["mappings"]["properties"]["asr_text"] == {
+        "type": "text",
+        "analyzer": "vi_folded",
+    }
