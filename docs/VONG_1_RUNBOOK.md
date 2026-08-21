@@ -76,7 +76,7 @@ cd D:\AIC26
 python -m pytest tests/unit -q
 ```
 
-Phải ra `773 passed`. Nếu không, dừng lại và sửa trước — đừng đợi tới lúc có đề.
+Phải ra `796 passed`. Nếu không, dừng lại và sửa trước — đừng đợi tới lúc có đề.
 
 Kiểm hai file bắt buộc:
 
@@ -88,7 +88,7 @@ dir artifacts\keyframe_mapping.csv                          # bảng tra frame
 Thiếu `keyframe_mapping.csv` thì sinh lại, 10 giây:
 
 ```powershell
-python scripts\build_keyframe_mapping.py --dataset-root D:\AIC26_data --output artifacts\keyframe_mapping.csv
+.venv\Scripts\python.exe scripts\build_keyframe_mapping.py --dataset-root D:\AIC26_data --output artifacts\keyframe_mapping.csv
 ```
 
 ---
@@ -135,12 +135,15 @@ Ba mẹo:
 ## 2. Chạy
 
 ```powershell
-python scripts\answer_queries.py --queries artifacts\queries --output artifacts\submissions
+.venv\Scripts\python.exe scripts\answer_queries.py --queries artifacts\queries --output artifacts\submissions
 ```
 
 Mất ~40 giây khởi động, rồi **0,2–2 giây mỗi truy vấn**. Chạy một lần cho cả gói, đừng chạy từng câu.
 
 Đọc kỹ output. Có dòng `CẢNH BÁO ... không có ....en.txt` nghĩa là truy vấn đó đang chạy bằng tiếng Việt và **sẽ được 0 điểm** — viết file `.en.txt` rồi chạy lại.
+
+Tên file ra **tự động đúng chuẩn BTC** — đề tên `query-p1-23-kis.txt` vẫn cho
+ra `query-23-kis.csv`, không phải đổi tay.
 
 Kết quả trong `artifacts\submissions\`:
 
@@ -158,7 +161,7 @@ Sửa một chữ rồi chạy lại cả script là mất 40 giây nạp model.
 nạp một lần rồi mỗi lần thử chỉ **0,2 giây**:
 
 ```powershell
-python scripts\answer_queries.py --interactive
+.venv\Scripts\python.exe scripts\answer_queries.py --interactive
 ```
 
 ```
@@ -169,15 +172,48 @@ python scripts\answer_queries.py --interactive
 > :o                      ← mở ảnh hạng 1 để xem có đúng không
 > :v 1                    ← mỗi video chỉ 1 dòng, trải rộng hơn
 > <sửa lại câu mô tả>     ← 0,2 giây
-> :w kis query-1-kis      ← ghi ra query-1-kis.csv
+> :w kis 1                ← ghi ra query-1-kis.csv
 > :q
 ```
 
 Lệnh: `:n <số>` đổi số dòng hiển thị · `:v <số>` đổi giới hạn mỗi video ·
-`:o` mở ảnh hạng 1 · `:w kis|qa <tên>` ghi file · `:q` thoát · `:h` trợ giúp.
+`:o` mở ảnh hạng 1 · `:w kis|qa <stt>` ghi file · `:q` thoát · `:h` trợ giúp.
 
 **Dùng `:o` nhiều vào.** Nhìn ảnh là cách nhanh nhất biết câu mô tả có đúng
 hướng không — điểm số trên màn hình không nói được điều đó.
+
+---
+
+## 2c. Đã tự tìm ra ảnh đúng bằng mắt? Dùng `:top`
+
+Lật thư mục keyframe thấy đúng khung hình rồi thì khỏi cần tìm nữa — chèn
+thẳng lên hạng 1 và ghi file trong một lệnh:
+
+```
+> :top L21_V001_050 kis 23
+   L21_V001/050 -> frame 5760, đã đưa lên hạng 1
+   đã ghi artifacts\submissions\query-23-kis.csv  (100 dòng)
+```
+
+Cú pháp `<video_id>_<keyframe_id>`, lấy thẳng từ đường dẫn ảnh:
+
+```
+D:\AIC26_data\Keyframes_L21\keyframes\L21_V001\050.jpg
+                                      ^^^^^^^^ ^^^
+                                      video_id id
+
+->  :top L21_V001_050 kis 23
+```
+
+Gõ `_50` thay `_050` cũng được, nó tự đệm số 0.
+
+**`keyframe_id` không phải `frame_idx`.** `050` là tên file JPEG; cột thứ hai
+của file nộp là số khung hình trong video gốc (`5760`). `:top` tra bảng
+`keyframe_mapping.csv` để đổi. Cùng một `050` ở video khác ra số khác hẳn —
+nên bắt buộc phải có `video_id` đi kèm.
+
+Tra không ra thì nó **báo lỗi chứ không đoán bừa**. Thấy báo lỗi là kiểm lại
+tên thư mục và tên file ảnh.
 
 ---
 
@@ -197,7 +233,7 @@ Mở ảnh ở cột `image_path`, nhìn, gõ câu trả lời vào cột `answe
 Rồi dựng lại file nộp:
 
 ```powershell
-python scripts\answer_queries.py --from-review artifacts\submissions\query-3-qa.review.csv --output artifacts\submissions\query-3-qa.csv
+.venv\Scripts\python.exe scripts\answer_queries.py --from-review artifacts\submissions\query-3-qa.review.csv --output artifacts\submissions\query-3-qa.csv
 ```
 
 Sửa file bằng Excel cũng được — lệnh trên đọc được cả file Excel lưu ra (có BOM).
