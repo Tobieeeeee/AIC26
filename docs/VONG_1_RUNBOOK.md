@@ -4,6 +4,70 @@
 
 ---
 
+## Cài đặt cho máy mới (đồng đội đọc mục này trước)
+
+Merge code là chưa đủ. Hai thứ hệ thống cần đều **không nằm trong git**:
+
+```
+artifacts/indexes/qna_organizer_all/    376 MB
+artifacts/keyframe_mapping.csv           15 MB
+```
+
+**Đừng chép chúng từ máy người khác.** Cả hai nhúng đường dẫn tuyệt đối
+kiểu `D:\AIC26_data\Keyframes_L21\...`, sang máy khác là trỏ vào hư không —
+mà không báo lỗi, chỉ ra kết quả sai. Dựng lại tại chỗ, mất vài phút.
+
+### Cần có trước
+
+Bộ dữ liệu BTC. Đủ để chạy vòng 1 chỉ cần bốn thư mục này (~30 GB):
+
+```
+<DATA>/Keyframes_*/keyframes/<video_id>/*.jpg
+<DATA>/map-keyframes-aic25-b1/map-keyframes/<video_id>.csv
+<DATA>/clip-features-32-aic25-b1/clip-features-32/<video_id>.npy
+<DATA>/media-info-aic25-b1/media-info/<video_id>.json
+```
+
+**Không cần** `Videos_*` (78 GB) — vòng 1 không giải mã video.
+
+### Ba lệnh
+
+```powershell
+git clone https://github.com/Tobieeeeee/AIC26.git
+cd AIC26
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+.venv\Scripts\python.exe scriptsuild_keyframe_mapping.py ^
+    --dataset-root <DATA> --output artifacts\keyframe_mapping.csv
+
+.venv\Scripts\python.exe scriptsuild_qna_index_from_organizer_features.py ^
+    --dataset-root <DATA> --output artifacts\indexes\qna_organizer_all
+```
+
+Lệnh hai mất ~16 giây, lệnh ba vài phút. Thay `<DATA>` bằng đường dẫn bộ
+dữ liệu trên máy đó.
+
+### Kiểm
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/unit -q
+```
+
+Rồi làm bước 1 bên dưới. Nếu ra `100 dòng` là máy đó sẵn sàng.
+
+### Con số phải khớp
+
+```
+mapping   177.321 dòng
+index     177.321 vector, 873 video
+```
+
+Lệch nghĩa là bộ dữ liệu thiếu thư mục nào đó — kiểm lại `Keyframes_*`
+(phải có đủ 14 thư mục, gồm cả `Keyframes_L29`).
+
+---
+
 ## 0. Chuẩn bị trước khi BTC phát đề (làm ngay, một lần)
 
 ```powershell
