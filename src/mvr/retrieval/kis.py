@@ -227,3 +227,45 @@ def search_kis(
         if len(candidates) >= top_k:
             break
     return candidates
+
+
+def parse_keyframe_ref(ref: object) -> tuple[str, str]:
+    """``"L21_V001_001"`` -> ``("L21_V001", "001")``.
+
+    Splits on the LAST separator: `video_id` contains an underscore of its
+    own, so splitting on the first yields ``("L21", "V001_001")`` and
+    resolves to nothing. The slash form printed by the interactive
+    listing (``L21_V001/001``) is accepted too, because copying what is
+    on screen is the obvious thing to do.
+    """
+    text = str(ref).strip().replace("/", "_")
+    video_id, separator, keyframe_id = text.rpartition("_")
+    if not separator or not video_id or not keyframe_id:
+        raise ValueError(
+            f"không đọc được keyframe từ {ref!r}; cần dạng "
+            "<video_id>_<keyframe_id>, ví dụ L21_V001_001. Một id trần "
+            "không xác định được keyframe: 166.550 keyframe của BTC chỉ "
+            "có 632 id phân biệt"
+        )
+    return video_id, keyframe_id
+
+
+def resolve_keyframe_ref(
+    resolver: KeyframeFrameIndexResolver, ref: object
+) -> tuple[str, str, int | None]:
+    """``(video_id, keyframe_id, frame_idx)``; ``frame_idx`` is None on a miss.
+
+    Retries a numeric id zero-padded to the organizer's three-digit JPEG
+    stem, so ``L21_V001_50`` still finds ``050``. A miss is reported, never
+    guessed -- handing back a plausible integer for an unmapped pair is the
+    exact failure `KeyframeFrameIndexResolver` exists to prevent.
+    """
+    video_id, keyframe_id = parse_keyframe_ref(ref)
+    frame_idx = resolver.resolve(video_id, keyframe_id)
+    if frame_idx is None and keyframe_id.isdigit():
+        padded = keyframe_id.zfill(3)
+        if padded != keyframe_id:
+            retry = resolver.resolve(video_id, padded)
+            if retry is not None:
+                return video_id, padded, retry
+    return video_id, keyframe_id, frame_idx

@@ -92,3 +92,106 @@ def test_a_review_file_saved_by_excel_is_still_readable(tmp_path) -> None:
     _module().submission_from_review(review, tmp_path / "out.csv")
 
     assert (tmp_path / "out.csv").read_text(encoding="utf-8").strip() == "L01_V028,3450,5"
+
+
+# -- Submission naming in interactive mode ----------------------------
+#
+# The organizer's required listing is `query-23-kis.csv`, while the query
+# pack they sent is `query-p1-23-kis.txt`. Whatever the operator types,
+# the file that lands must carry the organizer's name.
+
+
+def test_w_accepts_a_bare_number() -> None:
+    assert _module().resolve_output_name("23", "kis") == "query-23-kis.csv"
+
+
+def test_w_normalises_a_pack_name_to_the_organizer_name() -> None:
+    # Typing the pack's own name is the habit from the batch run; it must
+    # not write `query-p1-23-kis.csv`, a name the organizer never lists.
+    assert (
+        _module().resolve_output_name("query-p1-23-kis", "kis")
+        == "query-23-kis.csv"
+    )
+
+
+def test_w_rejects_a_name_carrying_no_number() -> None:
+    from mvr.submission.official import SubmissionFormatError
+
+    with pytest.raises(SubmissionFormatError):
+        _module().resolve_output_name("ket-qua-cuoi", "kis")
+
+
+# -- Manual top-1 insertion -------------------------------------------
+
+
+def _row(video_id, frame_idx, rank=1):
+    return {
+        "rank": rank,
+        "video_id": video_id,
+        "frame_idx": frame_idx,
+        "score": 0.5,
+        "image_path": "x.jpg",
+    }
+
+
+def test_manual_row_goes_to_rank_one() -> None:
+    rows = [_row("L21_V002", 90, 1), _row("L21_V003", 120, 2)]
+
+    out = _module().insert_top_row(rows, "L21_V001", 5760)
+
+    assert (out[0]["video_id"], out[0]["frame_idx"]) == ("L21_V001", 5760)
+    assert [r["rank"] for r in out] == [1, 2, 3]
+
+
+def test_manual_row_already_present_is_moved_not_duplicated() -> None:
+    # A duplicate line wastes one of the 100 slots and scores nothing.
+    rows = [_row("L21_V002", 90, 1), _row("L21_V001", 5760, 2)]
+
+    out = _module().insert_top_row(rows, "L21_V001", 5760)
+
+    assert len(out) == 2
+    assert (out[0]["video_id"], out[0]["frame_idx"]) == ("L21_V001", 5760)
+
+
+def test_manual_row_works_from_an_empty_list() -> None:
+    # The operator already knows the answer and does not need to search.
+    out = _module().insert_top_row([], "L21_V001", 0)
+
+    assert len(out) == 1 and out[0]["frame_idx"] == 0
+
+
+def test_manual_row_keeps_its_own_image_path_when_already_present() -> None:
+    # A row already in the list carries a real image_path from search;
+    # promoting it to rank 1 must not lose that path.
+    rows = [
+        _row("L21_V002", 90, 1),
+        {**_row("L21_V001", 5760, 2), "image_path": "L21_V001.jpg"},
+    ]
+
+    out = _module().insert_top_row(rows, "L21_V001", 5760)
+
+    assert out[0]["image_path"] == "L21_V001.jpg"
+
+
+# -- Shared write path for :w and :top ---------------------------------
+
+
+def test_write_submission_kis_writes_two_columns(tmp_path) -> None:
+    m = _module()
+    rows = [_row("L21_V001", 5760, 1)]
+
+    m._write_submission(rows, "kis", tmp_path / "query-23-kis.csv")
+
+    assert (tmp_path / "query-23-kis.csv").read_text(encoding="utf-8").strip() == (
+        "L21_V001,5760"
+    )
+
+
+def test_write_submission_qa_also_writes_a_review_file(tmp_path) -> None:
+    m = _module()
+    rows = [_row("L30_V072", 1776, 1)]
+
+    m._write_submission(rows, "qa", tmp_path / "query-15-qa.csv")
+
+    assert (tmp_path / "query-15-qa.csv").exists()
+    assert (tmp_path / "query-15-qa.review.csv").exists()
