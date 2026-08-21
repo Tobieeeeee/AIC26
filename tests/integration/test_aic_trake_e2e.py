@@ -189,6 +189,185 @@ def _real_services():
     return SemanticRetriever(encoder, faiss_index), registry
 
 
+def _require_real_translator():
+    """A real Helsinki-NLP/opus-mt-vi-en translator, or skip.
+
+    Separate opt-in from the rest of this module's real-data gate: this
+    needs the ``qna`` extra (``transformers``/``sentencepiece``) and the
+    model weights cached locally (``MVR_TRAKE_ALLOW_MODEL_DOWNLOAD=1`` to
+    download them once), neither of which every environment running the
+    rest of this file's tests will have."""
+    from mvr.enrichment.qna_translation import HelsinkiViEnTranslator, TranslatorUnavailable
+
+    allow_download = os.environ.get("MVR_TRAKE_ALLOW_MODEL_DOWNLOAD", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+    try:
+        return HelsinkiViEnTranslator(allow_model_download=allow_download, device="cpu")
+    except TranslatorUnavailable as exc:
+        pytest.skip(f"translation model unavailable: {exc}")
+
+
+def _build_vietnamese_benchmark_queries():
+    """The SAME 6 queries/ground truth as ``_build_benchmark_queries()``,
+    with event text written as natural Vietnamese (not back-translated from
+    the English above) -- proves Stage A end to end on genuinely Vietnamese
+    input, the language real competition queries will actually use. See
+    docs/AIC_TRAKE_FINAL_REPORT.md for the measured before/after scores."""
+    from mvr.evaluation.trake import TrakeGroundTruth
+    from mvr.evaluation.trake_benchmark import TrakeBenchmarkQuery
+    from mvr.retrieval.trake_events import TrakeEventQuery, TrakeQuery, translate_gap_phrase
+
+    def _vi_query(events: list[str], connectors: list[str]) -> TrakeQuery:
+        return TrakeQuery(
+            events=tuple(TrakeEventQuery(i, text) for i, text in enumerate(events, start=1)),
+            gaps=tuple(translate_gap_phrase(phrase) for phrase in connectors),
+        )
+
+    return [
+        TrakeBenchmarkQuery(
+            query_id="traffic_accident_night",
+            query=_vi_query(
+                [
+                    "một vụ tai nạn giao thông vào ban đêm có xe cứu thương và cảnh sát",
+                    "một con đường ban đêm có ô tô và xe máy chạy qua gần dây phong tỏa",
+                    "hai cảnh sát đứng canh gác tại hiện trường tai nạn ban đêm",
+                    "một đám đông tụ tập tại hiện trường tai nạn có xe cứu thương đậu",
+                ],
+                ["", "", ""],
+            ),
+            gt=TrakeGroundTruth(video_id="L21_V024", frames=(13890, 14130, 14430, 14635)),
+        ),
+        TrakeBenchmarkQuery(
+            query_id="flood_embankment",
+            query=_vi_query(
+                [
+                    "bến phà đông người với nhiều xe máy đậu trên đường bị ngập nước",
+                    "nước lũ tràn qua bờ đê với đám lau sậy ở phía trước",
+                    "một cánh đồng ngập nước rộng lớn có bèo tây trôi nổi trên mặt nước",
+                    "người dân tụ tập tại bến phà bị ngập nước",
+                ],
+                ["", "", ""],
+            ),
+            gt=TrakeGroundTruth(video_id="L21_V015", frames=(8279, 8636, 8988, 9378)),
+        ),
+        TrakeBenchmarkQuery(
+            query_id="house_fire_alley",
+            query=_vi_query(
+                [
+                    "xe cứu hỏa đến hiện trường một vụ cháy nhà trên đường phố",
+                    "lính cứu hỏa tiến vào một con hẻm nhỏ có dây điện bị đứt rơi xuống",
+                    "lính cứu hỏa trèo lên để dập lửa gần các dây điện chằng chịt",
+                ],
+                ["", ""],
+            ),
+            gt=TrakeGroundTruth(video_id="L21_V018", frames=(11068, 11340, 11600)),
+        ),
+        TrakeBenchmarkQuery(
+            query_id="ocean_debris_cleanup",
+            query=_vi_query(
+                [
+                    "một thợ lặn đang thu gom rác và lưới đánh cá dưới đáy biển",
+                    "người dân đang chất các bao rác lên thuyền trên mặt biển",
+                ],
+                [""],
+            ),
+            gt=TrakeGroundTruth(video_id="L21_V010", frames=(9150, 9730)),
+        ),
+        TrakeBenchmarkQuery(
+            query_id="suspect_arrest",
+            query=_vi_query(
+                [
+                    "hai người đàn ông đang khống chế một nghi phạm cởi trần trên đường phố vào ban đêm",
+                    "cận cảnh một nghi phạm bị khống chế đang ngồi trên đường phố vào ban đêm",
+                    "cảnh ban đêm có đám đông người và xe máy cảnh sát đậu",
+                    "tang vật thu giữ gồm tiền mặt, chìa khóa, cờ lê và điện thoại trên sàn nhà",
+                ],
+                ["", "", ""],
+            ),
+            gt=TrakeGroundTruth(video_id="L21_V026", frames=(16083, 16355, 16697, 17021)),
+        ),
+        TrakeBenchmarkQuery(
+            query_id="wide_gap_bulletin_segments",
+            query=_vi_query(
+                [
+                    "cảnh nhìn dọc theo đường ray tàu điện trên cao nhìn xuống thành phố",
+                    "một tòa chung cư cao tầng dưới bầu trời nhiều mây xám",
+                    "một nữ phát thanh viên tin tức mặc áo màu hồng trong phòng thu",
+                    "mô hình khuôn mặt người vượn thời tiền sử trong bảo tàng",
+                ],
+                ["một lúc sau", "một lúc sau", "một lúc sau"],
+            ),
+            gt=TrakeGroundTruth(video_id="L21_V008", frames=(4620, 12367, 19710, 26652)),
+        ),
+    ]
+
+
+def test_vietnamese_queries_need_translation_to_score_anything() -> None:
+    """Stage A (query translation): measures the Vietnamese-query gap this
+    file's module docstring and docs/AIC_TRAKE_BENCHMARK_RESULTS.md have
+    flagged as unresolved, and proves translate_for_retrieval closes most
+    of it -- not just "should work in theory".
+
+    Real natural-Vietnamese event text (not back-translated from the
+    English benchmark queries) run through the exact same real
+    search_trake() pipeline, once with query_translator=None (today's
+    default) and once with a real HelsinkiViEnTranslator (Stage A, opt-in
+    via MVR_TRAKE_TRANSLATE_QUERIES on the API)."""
+    from mvr.evaluation.trake import evaluate_trake
+    from mvr.retrieval.trake import search_trake
+    from mvr.retrieval.trake_align import AtlasAlignment
+
+    semantic_service, registry = _real_services()
+    translator = _require_real_translator()
+    queries = _build_vietnamese_benchmark_queries()
+
+    untranslated_scores = []
+    translated_scores = []
+    for benchmark_query in queries:
+        chains_no = search_trake(
+            benchmark_query.query,
+            alignment_strategy=AtlasAlignment(),
+            semantic_service=semantic_service,
+            aic_registry=registry,
+            query_translator=None,
+        )
+        score_no = evaluate_trake(chains_no, benchmark_query.gt)
+        untranslated_scores.append(score_no.final_score)
+
+        chains_yes = search_trake(
+            benchmark_query.query,
+            alignment_strategy=AtlasAlignment(),
+            semantic_service=semantic_service,
+            aic_registry=registry,
+            query_translator=translator,
+        )
+        score_yes = evaluate_trake(chains_yes, benchmark_query.gt)
+        translated_scores.append(score_yes.final_score)
+
+    mean_no = sum(untranslated_scores) / len(untranslated_scores)
+    mean_yes = sum(translated_scores) / len(translated_scores)
+    print(
+        f"\n=== TRAKE Vietnamese-query translation (Stage A) ===\n"
+        f"  without translation: mean_final_score={mean_no:.3f} {untranslated_scores}\n"
+        f"  with translation    : mean_final_score={mean_yes:.3f} {translated_scores}\n"
+        f"  (known English-query baseline mean: 0.639)"
+    )
+
+    # The gap this test exists to measure and guard: raw Vietnamese into an
+    # English-trained CLIP encoder must score near-zero on every query.
+    assert mean_no < 0.05, (
+        f"untranslated Vietnamese scored {mean_no:.3f}, not near-zero -- "
+        "the documented Vietnamese-query gap may have changed; re-verify "
+        "before trusting this test's translated-side comparison"
+    )
+    # Translation must recover MOST of the gap, not just move the needle.
+    assert mean_yes > 0.35, (
+        f"translated Vietnamese only scored {mean_yes:.3f} -- Stage A is "
+        "not delivering the improvement docs/AIC_TRAKE_FINAL_REPORT.md claims"
+    )
+
+
 def test_lucifer_skip_beats_atlas_when_an_event_is_genuinely_unfindable() -> None:
     """Lucifer's skip mechanism is its only structural difference from ATLAS,
     and the six benchmark queries never trigger it: under realistic gap

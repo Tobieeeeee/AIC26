@@ -425,6 +425,11 @@ Commits, in order:
    export
 8. `4d084b4` — Phase 08, `POST /search/trake` API route
 9. `70fb328` — Phase 09, end-to-end hardening (4 real bugs found and fixed)
+10. Post-Phase-09: merged `origin/main` (90+ commits: ASR, OCR hardening,
+    BEiT-3/MetaCLIP-2/Perception Encoder multi-embedding stack, Q&A, lexical
+    BM25); reviewed and merged PR #9/#10 (Vietnamese/English query branch
+    split, keyframe-resolver identity fix); added opt-in query translation
+    (Stage A) to `search_trake()`/`POST /search/trake`
 
 Completed:
 
@@ -452,13 +457,25 @@ Completed:
   pass: a leaked machine-specific absolute path in a committed docstring,
   and leftover untracked trial-merge debris from an earlier unrelated
   `git merge --abort`.
+- Added opt-in Vietnamese->English query translation to `search_trake()`
+  (`query_translator` param, reuses `mvr.enrichment.qna_translation`
+  unchanged) and wired a lazy, fail-closed default into the API route
+  (`MVR_TRAKE_TRANSLATE_QUERIES=1`, off by default). Measured real effect on
+  6 natural-Vietnamese queries: mean final score 0.000 -> 0.547 (English
+  baseline on the same queries: 0.639). See `docs/AIC_TRAKE_FINAL_REPORT.md`
+  "Query Translation" section for the full before/after table.
 
-Tests (current state, after Phase 09):
+Tests (current state, after the post-Phase-09 main merge + query translation):
 
-- Working repo (`semantic` extras installed): 313 passed, 8 skipped, 0 failed.
+- Working repo (`semantic` extras installed): 860 passed, 14 skipped,
+  4 failed. The 4 failures are pre-existing, unrelated to TRAKE
+  (`test_weight_validation.py`, `feat/ocr-enrichment` track — a subprocess
+  test resolves a non-project Python lacking `cv2` on this machine).
 - CI-equivalent environment (`.[dev,api,semantic]` only, matching
-  `.github/workflows/ci.yml` exactly): same counts, 313 passed, 8 skipped,
-  0 failed.
+  `.github/workflows/ci.yml` exactly, no `qna` extra): 858 passed, 16
+  skipped, 4 failed (same OCR failures; 2 extra skips are the
+  translation-dependent tests self-skipping cleanly without `transformers`
+  installed — verified this introduces no new hard dependency).
 - Real full-pipeline E2E (`MVR_RUN_AIC_TRAKE_E2E=1`): PASS — query
   `traffic_accident_night` (k=4), real measured `final_score=0.600`,
   100 chains returned, export round-trip exact match.
@@ -467,12 +484,17 @@ Tests (current state, after Phase 09):
 - Real 6-query benchmark over the real L21 corpus: ATLAS/Lucifer mean final
   score 0.639 (tied), U-CESE 0.344; full results in
   `docs/AIC_TRAKE_BENCHMARK_RESULTS.md` and `docs/AIC_TRAKE_FINAL_REPORT.md`.
+- Re-verified unchanged after merging `origin/main` and after adding query
+  translation — both real E2E and CI-equivalent re-run clean.
 
 Remaining / explicitly out of scope:
 
-- **Queries must be English** — the index's OpenCLIP model is English-trained;
-  real competition queries will be Vietnamese. Documented, unresolved
-  operational gap, same limitation already noted for KIS.
+- **Queries must be English by default** — the index's OpenCLIP model is
+  English-trained; an opt-in translation layer (above) closes most but not
+  all of the gap on real Vietnamese queries (mean 0.547 vs. 0.639 English).
+  Real competition queries will be Vietnamese, so this should be enabled
+  deliberately. Same limitation already noted for KIS, which has no
+  equivalent translation wiring yet.
 - No `mvr.cli` subcommand exists for TRAKE (API/library-only); not fabricated
   per explicit instruction.
 - Ground truth is a small team-curated internal set, not organizer-labeled.

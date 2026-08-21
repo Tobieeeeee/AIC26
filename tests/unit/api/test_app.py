@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
 from fastapi.testclient import TestClient
 
-from mvr.api.app import LazyFaissSemanticService, create_app
+from mvr.api.app import LazyFaissSemanticService, LazyQueryTranslator, create_app, _default_trake_query_translator
 from mvr.retrieval.kis import KeyframeFrameIndexResolver
 from mvr.retrieval.semantic import SearchResult
 
@@ -688,3 +689,35 @@ def test_qna_search_unresolvable_candidates_are_dropped_not_guessed() -> None:
 
     assert response.status_code == 200
     assert response.json()["count"] == 0
+
+
+def test_default_trake_query_translator_is_none_without_the_env_var(monkeypatch) -> None:
+    monkeypatch.delenv("MVR_TRAKE_TRANSLATE_QUERIES", raising=False)
+    assert _default_trake_query_translator() is None
+
+
+def test_default_trake_query_translator_is_constructed_when_opted_in(monkeypatch) -> None:
+    """Only checks the lazy wrapper is built when the env var is set -- does
+    NOT load the actual translation model (LazyQueryTranslator defers that
+    to first .translate() call, so this needs no cached model/network)."""
+    monkeypatch.setenv("MVR_TRAKE_TRANSLATE_QUERIES", "1")
+    translator = _default_trake_query_translator()
+
+    assert isinstance(translator, LazyQueryTranslator)
+
+
+def test_lazy_query_translator_fails_closed_and_caches_the_error() -> None:
+    """A bogus model name must raise (mapped to a 503 by translate_for_retrieval's
+    caller, or safely swallowed by translate_for_retrieval itself), and must
+    not attempt to reload -- and therefore re-fail -- on every call."""
+    translator = LazyQueryTranslator(
+        model_name="this-model-does-not-exist/bogus", allow_model_download=False, device="cpu"
+    )
+
+    with pytest.raises(RuntimeError):
+        translator.translate("hello")
+    first_error = translator._error
+    with pytest.raises(RuntimeError):
+        translator.translate("hello again")
+
+    assert translator._error is first_error  # same cached failure, not reloaded

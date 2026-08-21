@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from ..enrichment.qna_translation import QueryTranslator, translate_for_retrieval
 from .kis import KeyframeFrameIndexResolver, search_kis
 from .trake_align import TrakeAlignmentStrategy
 from .trake_events import TrakeQuery
@@ -45,6 +46,7 @@ def search_trake(
     shortlist_top_k: int = 500,
     pipeline_resolver: KeyframeFrameIndexResolver | None = None,
     multimodal_service: Any | None = None,
+    query_translator: QueryTranslator | None = None,
 ) -> "list[TrakeChainPrediction]":
     """Run one TRAKE query end to end: encode -> shortlist -> dense score ->
     align -> merge, entirely in pure Python (no HTTP surface).
@@ -54,16 +56,27 @@ def search_trake(
     one bad item abort the batch" principle already established for KIS
     (``refine_top_candidates()``). Returns an empty list (not an exception)
     if every event fails to shortlist.
+
+    ``query_translator`` translates each event's text for retrieval only
+    (both shortlisting and dense scoring use the SAME translated text, so
+    the two stay comparable), mirroring ``search_qna()``'s
+    ``translate_for_retrieval`` usage -- see ``mvr.enrichment.qna_translation``
+    for why: the index's encoder is English-trained (measured: a Vietnamese
+    query ranked the correct frame 192/268 vs. #1/268 in English on the same
+    data, see docs/AIC_TRAKE_BENCHMARK_RESULTS.md). ``None`` (the default)
+    keeps every event's text unchanged, identical to all prior behavior.
     """
-    event_texts = [event.text for event in query.events]
-    event_text_vectors = semantic_service.text_encoder.encode_text(event_texts)
+    retrieval_texts = [
+        translate_for_retrieval(event.text, query_translator) for event in query.events
+    ]
+    event_text_vectors = semantic_service.text_encoder.encode_text(retrieval_texts)
 
     video_ids: set[str] = set()
     any_event_succeeded = False
-    for event in query.events:
+    for event, retrieval_text in zip(query.events, retrieval_texts):
         try:
             candidates = search_kis(
-                event.text,
+                retrieval_text,
                 top_k=shortlist_top_k,
                 semantic_service=semantic_service,
                 multimodal_service=multimodal_service,
@@ -75,7 +88,7 @@ def search_trake(
                 "search_trake: search_kis failed while shortlisting for event "
                 "index=%d text=%r; skipping this event",
                 event.index,
-                event.text,
+                retrieval_text,
             )
             continue
         any_event_succeeded = True

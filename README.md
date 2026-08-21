@@ -290,6 +290,22 @@ defaults outperforming hand-picked numbers (mean final score 0.639 vs 0.633).
 `alignment_strategy` (`"atlas" | "lucifer" | "ucese"`) is an optional override
 of the evidence-backed default, for manual testing only.
 
+Event text can be Vietnamese if query translation is explicitly enabled —
+off by default, since the benchmark above used untranslated English text:
+
+```powershell
+$env:MVR_TRAKE_TRANSLATE_QUERIES="1"
+# first run only, downloads ~300MB to the HuggingFace cache:
+$env:MVR_TRAKE_ALLOW_MODEL_DOWNLOAD="1"
+```
+
+Real measured effect (6 benchmark queries rewritten as natural Vietnamese,
+same real pipeline): mean final score **0.000 without translation ->
+0.547 with it** (English baseline on the same queries: 0.639). See
+`docs/AIC_TRAKE_FINAL_REPORT.md`'s "Query Translation" section for the full
+before/after table. A missing/uncached model degrades to untranslated
+retrieval rather than an error.
+
 Opt-in real-data verification (skips unless explicitly enabled):
 
 ```powershell
@@ -300,8 +316,8 @@ py -3.12 -m pytest tests\integration\test_aic_trake_e2e.py -v
 `docs/AIC_TRAKE_FINAL_REPORT.md` and `docs/AIC_TRAKE_BENCHMARK_RESULTS.md`
 record the full benchmark evidence, the real end-to-end run, and known
 limitations — most notably that benchmark queries were written in English
-(the index's OpenCLIP model is English-trained), while real competition
-queries will be Vietnamese; this is a documented, unresolved operational gap.
+(the index's OpenCLIP model is English-trained); an opt-in translation layer
+(above) closes most, not all, of the gap for Vietnamese queries.
 
 Đọc tiếp:
 

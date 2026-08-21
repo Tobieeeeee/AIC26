@@ -204,14 +204,73 @@ were trustworthy (see Known Limitations for a summary).
   (`/health`, `/search/kis`, `/search/semantic`, `/search/trake`); API module
   import cost measured at 0.47s.
 
+## Query Translation (Vietnamese -> English, opt-in)
+
+Added after this report's first draft, in response to the Known Limitations
+entry below being flagged as the single largest gap versus real competition
+use. `search_trake()` gained an optional `query_translator` parameter
+(mirrors `search_qna()`'s existing `translate_for_retrieval` usage exactly —
+reused, not reimplemented, from `mvr.enrichment.qna_translation`): each
+event's text is translated for retrieval only (both shortlisting and dense
+scoring use the same translated text) before anything else happens. `None`
+(the default) keeps every event's text unchanged, byte-identical to all
+prior behavior — this is purely additive.
+
+The API route wires this through `_default_trake_query_translator()`, an
+opt-in lazy loader (`LazyQueryTranslator`, mirrors `LazyAnswerReasoner`'s
+fail-closed/cache-the-error shape) gated behind
+`MVR_TRAKE_TRANSLATE_QUERIES=1`. Off by default: the measured benchmark
+above used untranslated English text throughout, and enabling translation
+unconditionally could silently change that result for any caller. A broken
+or uncached translator degrades to untranslated retrieval rather than a
+500/503 (`translate_for_retrieval`'s existing, already-tested contract) —
+verified again here specifically for TRAKE's real event text, not just
+assumed from Q&A's tests.
+
+**Real measured result** (`tests/integration/test_aic_trake_e2e.py::
+test_vietnamese_queries_need_translation_to_score_anything`, opt-in,
+`MVR_TRAKE_ALLOW_MODEL_DOWNLOAD=1` on first run): the same 6 benchmark
+queries, rewritten as natural Vietnamese (not back-translated from the
+English text above), run through the real `search_trake()` pipeline:
+
+| | mean final score | per-query |
+|---|---|---|
+| Vietnamese, no translation | **0.000** | 0.000 on all 6 — confirms the gap below, does not just assume it |
+| Vietnamese, with translation (Stage A) | **0.547** | 0.450 / 0.500 / 0.533 / 0.900 / 0.400 / 0.500 |
+| English (known baseline, same queries) | 0.639 | — |
+
+Translation recovers most but not all of the gap (0.547 vs 0.639 — roughly
+86% of the English-query score), consistent with machine translation
+introducing some semantic drift versus hand-written English event text.
+Zero to substantial is the headline result; zero to perfect was never a
+realistic bar.
+
+**Cost/dependency footprint**: the translator (`Helsinki-NLP/opus-mt-vi-en`,
+~300MB, CPU-only, ~1-2s/query measured) lives behind the existing optional
+`qna` extra (`transformers`, `sentencepiece`) — already a dependency of the
+Q&A track, not a new one introduced here. Verified in a clean venv matching
+`.github/workflows/ci.yml` exactly (`.[dev,api,semantic]`, no `qna` extra):
+TRAKE imports and all its tests still pass, and the new Vietnamese-specific
+E2E test skips cleanly (not an error) when the extra is absent — this
+feature adds zero hard dependency for anyone running the base system.
+
 ## Full Regression Suite
 
-- Working environment (`semantic` extras installed): **313 passed, 8 skipped,
-  0 failed**.
+- Working environment (`semantic` extras installed): **860 passed, 14
+  skipped, 4 failed**. The 4 failures are pre-existing and unrelated to
+  TRAKE (`tests/unit/enrichment/ocr/test_weight_validation.py`, from the
+  separately-owned `feat/ocr-enrichment` track): a subprocess test invokes a
+  bare `python` command that resolves to a different, non-project Python
+  interpreter lacking `cv2` on this machine, not a logic defect. Not
+  investigated further here since it is outside TRAKE's scope.
 - CI-equivalent environment (clean venv, `.[dev,api,semantic]` only —
-  matching `.github/workflows/ci.yml` exactly): **same counts**, 313 passed,
-  8 skipped, 0 failed. No new module introduces a hard dependency CI doesn't
-  already install.
+  matching `.github/workflows/ci.yml` exactly): **858 passed, 16 skipped, 4
+  failed** (same 4 pre-existing OCR failures; the 2 extra skips are the
+  translation-dependent tests correctly self-skipping without the `qna`
+  extra). Re-verified after merging `origin/main` (90+ commits: ASR, OCR
+  hardening, the BEiT-3/MetaCLIP-2/Perception Encoder multi-embedding stack,
+  Q&A, lexical BM25) and after adding query translation above — both passed
+  without new failures.
 - `git status`/`git status --ignored` swept clean at the end of Phase 09;
   leftover untracked `__pycache__` debris from an earlier `git merge --abort`
   (unrelated prior-phase conflict testing) was found and removed.
@@ -225,15 +284,19 @@ were trustworthy (see Known Limitations for a summary).
 1. GT is team-curated/internal, not organizer-labeled, and small (6 queries)
    — same caveat as the KIS report. Do not cite the numbers above as
    competition performance.
-2. **Queries must be in English.** The index's OpenCLIP model
-   (`ViT-B-32`/`laion2b_s34b_b79k`) is English-trained; an early version of
-   this benchmark used Vietnamese queries and every one scored 0.000 (a
-   direct rank comparison on one query showed rank 192/268 in Vietnamese vs.
-   rank 1/268 in English for the identical target frame). Real competition
-   queries will be Vietnamese. This is a **known, documented, unresolved
-   operational gap** — the same limitation already noted for KIS in
-   `docs/AIC_KIS_FINAL_REPORT.md`, now confirmed to affect TRAKE identically.
-   No translation layer is implemented.
+2. **Queries must be in English by default; Vietnamese now works via an
+   opt-in translation layer, not fully closed.** The index's OpenCLIP model
+   (`ViT-B-32`/`laion2b_s34b_b79k`) is English-trained; raw Vietnamese text
+   still scores 0.000 (verified again in this pass, see "Query Translation"
+   above). `query_translator` (opt-in, `MVR_TRAKE_TRANSLATE_QUERIES=1`)
+   closes most of the gap on real Vietnamese queries (0.000 -> 0.547 mean,
+   vs. 0.639 for the same queries hand-written in English) but not all of
+   it — machine translation loses some nuance, and this remains off by
+   default rather than a verified drop-in replacement for English queries.
+   Real competition queries will be Vietnamese, so this should be enabled
+   deliberately, not assumed automatic. Same limitation already noted for
+   KIS in `docs/AIC_KIS_FINAL_REPORT.md`; KIS has no equivalent translation
+   wiring yet.
 3. Three lab-reference defaults were wrong at TRAKE's per-video scope and
    silently produced meaningless comparisons before being found and fixed in
    Phase 06: U-CESE's `topk=300` collapsed every event onto one frame

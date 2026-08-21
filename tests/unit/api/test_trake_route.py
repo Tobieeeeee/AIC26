@@ -252,3 +252,65 @@ def test_trake_search_per_event_retrieval_failure_does_not_crash_route(monkeypat
     # (Phase 05): all events failing -> empty list, not an exception.
     assert response.status_code == 200
     assert response.json()["count"] == 0
+
+
+def test_trake_search_uses_an_injected_query_translator(monkeypatch) -> None:
+    """POST /search/trake honors a caller-injected trake_query_translator,
+    the same create_app() extension point qna_answer_reasoner already uses.
+    Verifies the TRANSLATED text (not the raw request text) is what
+    actually reaches search_kis/dense scoring."""
+
+    class _FakeTranslator:
+        def translate(self, text: str) -> str:
+            return f"[en] {text}"
+
+    seen_queries: list[str] = []
+
+    def recording_search_kis(query, **_kwargs):
+        seen_queries.append(query)
+        return [KisCandidate(rank=1, video_id="L21_V018", frame_id=1, score=0.5, keyframe_id="kf")]
+
+    monkeypatch.setattr(trake_module, "search_kis", recording_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+            trake_query_translator=_FakeTranslator(),
+        )
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 200
+    assert seen_queries == ["[en] event one", "[en] event two"]
+
+
+def test_trake_search_translation_is_off_by_default(monkeypatch) -> None:
+    """Without MVR_TRAKE_TRANSLATE_QUERIES set and without an explicit
+    trake_query_translator override, event text must pass through
+    unchanged -- the documented, benchmarked default behavior."""
+    monkeypatch.delenv("MVR_TRAKE_TRANSLATE_QUERIES", raising=False)
+    seen_queries: list[str] = []
+
+    def recording_search_kis(query, **_kwargs):
+        seen_queries.append(query)
+        return [KisCandidate(rank=1, video_id="L21_V018", frame_id=1, score=0.5, keyframe_id="kf")]
+
+    monkeypatch.setattr(trake_module, "search_kis", recording_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        )
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 200
+    assert seen_queries == ["event one", "event two"]

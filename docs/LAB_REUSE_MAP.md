@@ -316,6 +316,17 @@ This is not a lab-reference deviation (`GAP_PHRASE_TABLE` and its defaults are
 new TRAKE-owned code, not ported from the lab), so it is recorded here for
 completeness rather than as a numbered deviation.
 
+**Cross-track reuse (post-Phase-09, not lab-derived):** `search_trake()`'s
+optional query translation reuses `mvr.enrichment.qna_translation`
+(`QueryTranslator`, `translate_for_retrieval`, `HelsinkiViEnTranslator`)
+unchanged from the Q&A track — no new translation logic was written for
+TRAKE. Consistent with this file's reuse-first discipline even though the
+source is a sibling production module, not a course lab. Real measured
+effect on 6 natural-Vietnamese benchmark queries: mean final score
+`0.000` (no translation) `-> 0.547` (translated), vs. `0.639` for the same
+queries hand-written in English. See `docs/AIC_TRAKE_FINAL_REPORT.md`'s
+"Query Translation" section.
+
 ---
 
 ## Task05A v1 — Task04 artifact consumption without new lab migration

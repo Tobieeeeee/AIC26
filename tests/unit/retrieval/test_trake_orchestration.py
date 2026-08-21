@@ -265,3 +265,96 @@ def test_dense_scoring_uses_semantic_service_index_even_with_multimodal_given(mo
     )
 
     assert received_index == [sentinel_index]
+
+
+# -- query translation --------------------------------------------------------------
+
+
+class _FakeTranslator:
+    def __init__(self, mapping: dict[str, str] | None = None, *, raises: bool = False) -> None:
+        self._mapping = mapping or {}
+        self._raises = raises
+        self.calls: list[str] = []
+
+    def translate(self, text: str) -> str:
+        self.calls.append(text)
+        if self._raises:
+            raise RuntimeError("translator backend unavailable")
+        return self._mapping.get(text, text)
+
+
+def test_no_translator_keeps_event_text_unchanged(monkeypatch) -> None:
+    """Default (``query_translator=None``) must be byte-identical to every
+    prior test above -- this is the backward-compatibility guarantee."""
+    query = _query(k=2)
+    semantic_service = _FakeSemanticService(np.zeros((2, 4)))
+    search_kis_calls: list[str] = []
+    monkeypatch.setattr(
+        trake_module,
+        "search_kis",
+        lambda text, **kw: (search_kis_calls.append(text), [_candidate("V1")])[1],
+    )
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _stub_matrix)
+    strategy = _FakeAlignmentStrategy({})
+
+    search_trake(query, alignment_strategy=strategy, semantic_service=semantic_service, aic_registry=None)
+
+    assert search_kis_calls == ["event 1", "event 2"]
+    assert semantic_service.text_encoder.calls[0] == ["event 1", "event 2"]
+
+
+def test_translator_translates_each_event_before_shortlisting_and_encoding(monkeypatch) -> None:
+    """Both the shortlist calls AND the encoded vectors must use the SAME
+    translated text -- otherwise shortlisting and dense scoring would be
+    comparing two different queries."""
+    query = _query(k=2)
+    semantic_service = _FakeSemanticService(np.zeros((2, 4)))
+    search_kis_calls: list[str] = []
+    monkeypatch.setattr(
+        trake_module,
+        "search_kis",
+        lambda text, **kw: (search_kis_calls.append(text), [_candidate("V1")])[1],
+    )
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _stub_matrix)
+    strategy = _FakeAlignmentStrategy({})
+    translator = _FakeTranslator({"event 1": "a red car", "event 2": "a person enters a building"})
+
+    search_trake(
+        query,
+        alignment_strategy=strategy,
+        semantic_service=semantic_service,
+        aic_registry=None,
+        query_translator=translator,
+    )
+
+    assert translator.calls == ["event 1", "event 2"]
+    assert search_kis_calls == ["a red car", "a person enters a building"]
+    assert semantic_service.text_encoder.calls[0] == ["a red car", "a person enters a building"]
+
+
+def test_translator_failure_falls_back_to_original_text_not_a_crash(monkeypatch) -> None:
+    """A broken/uncached translator must degrade to untranslated retrieval
+    (mvr.enrichment.qna_translation.translate_for_retrieval's own contract),
+    never abort the whole query."""
+    query = _query(k=2)
+    semantic_service = _FakeSemanticService(np.zeros((2, 4)))
+    search_kis_calls: list[str] = []
+    monkeypatch.setattr(
+        trake_module,
+        "search_kis",
+        lambda text, **kw: (search_kis_calls.append(text), [_candidate("V1")])[1],
+    )
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _stub_matrix)
+    strategy = _FakeAlignmentStrategy({"V1": [TrakeChainPrediction("V1", (1, 2), score=1.0)]})
+    translator = _FakeTranslator(raises=True)
+
+    result = search_trake(
+        query,
+        alignment_strategy=strategy,
+        semantic_service=semantic_service,
+        aic_registry=None,
+        query_translator=translator,
+    )
+
+    assert search_kis_calls == ["event 1", "event 2"]  # fell back to the original text
+    assert len(result) == 1  # the query still completed, not aborted

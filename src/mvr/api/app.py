@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
 from ..enrichment.qna_answer import AnswerReasoner, AnswerReasonerUnavailable, HuggingFaceCausalLmBackend
+from ..enrichment.qna_translation import DEFAULT_TRANSLATION_MODEL, HelsinkiViEnTranslator, TranslatorUnavailable
 from ..ingestion.aic_dataset import AicDatasetRegistry
 from ..retrieval.hybrid import rrf_fuse
 from ..retrieval.kis import KeyframeFrameIndexResolver, search_kis
@@ -219,6 +220,50 @@ class LazyAnswerReasoner:
 
     def answer(self, question: str, context: Any):
         return self._load().answer(question, context)
+
+
+class LazyQueryTranslator:
+    """Load the Vietnamese->English query translator only on first use.
+
+    Same lazy/fail-closed shape as ``LazyAnswerReasoner``. Kept opt-in
+    (``MVR_TRAKE_TRANSLATE_QUERIES``, see ``_default_trake_query_translator``)
+    rather than always-on: the measured TRAKE benchmark
+    (docs/AIC_TRAKE_BENCHMARK_RESULTS.md) used untranslated English event
+    text throughout, and this Vietnamese->English model's behavior on
+    already-English input is unverified -- enabling it unconditionally
+    could silently change that result. ``translate_for_retrieval`` (used by
+    ``search_trake``) already falls back to the original text on any
+    failure here, so a missing/uncached model degrades to "no translation"
+    rather than a 503.
+    """
+
+    def __init__(
+        self, *, model_name: str, allow_model_download: bool, device: str = "cpu"
+    ) -> None:
+        self.model_name = model_name
+        self.allow_model_download = allow_model_download
+        self.device = device
+        self._translator: HelsinkiViEnTranslator | None = None
+        self._error: Exception | None = None
+
+    def _load(self) -> HelsinkiViEnTranslator:
+        if self._translator is not None:
+            return self._translator
+        if self._error is not None:
+            raise RuntimeError("query translator is unavailable") from self._error
+        try:
+            self._translator = HelsinkiViEnTranslator(
+                model_name=self.model_name,
+                allow_model_download=self.allow_model_download,
+                device=self.device,
+            )
+        except TranslatorUnavailable as exc:
+            self._error = exc
+            raise RuntimeError("query translator is unavailable") from exc
+        return self._translator
+
+    def translate(self, text: str) -> str:
+        return self._load().translate(text)
 
 
 class ElasticsearchMultimodalService:
@@ -470,6 +515,22 @@ def _default_qna_answer_reasoner() -> LazyAnswerReasoner | None:
     )
 
 
+def _default_trake_query_translator() -> LazyQueryTranslator | None:
+    if os.environ.get("MVR_TRAKE_TRANSLATE_QUERIES", "").strip().lower() not in (
+        "1", "true", "yes",
+    ):
+        return None
+    allow_download = os.environ.get("MVR_TRAKE_ALLOW_MODEL_DOWNLOAD", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+    model_name = os.environ.get("MVR_TRAKE_TRANSLATION_MODEL", "").strip() or DEFAULT_TRANSLATION_MODEL
+    return LazyQueryTranslator(
+        model_name=model_name,
+        allow_model_download=allow_download,
+        device=os.environ.get("MVR_DEVICE", "auto"),
+    )
+
+
 def _semantic_status(service: Any | None) -> SemanticRuntimeStatus:
     if service is None:
         return SemanticRuntimeStatus(
@@ -493,6 +554,7 @@ def create_app(
     kis_pipeline_resolver: Any = _UNSET,
     kis_aic_registry: Any = _UNSET,
     qna_answer_reasoner: Any = _UNSET,
+    trake_query_translator: Any = _UNSET,
 ) -> FastAPI:
     """Build an app with injectable services for lightweight contract tests."""
     if semantic_service is _UNSET:
@@ -512,6 +574,8 @@ def create_app(
         kis_aic_registry = _default_aic_registry()
     if qna_answer_reasoner is _UNSET:
         qna_answer_reasoner = _default_qna_answer_reasoner()
+    if trake_query_translator is _UNSET:
+        trake_query_translator = _default_trake_query_translator()
 
     application = FastAPI(
         title="MVR Competition Search API",
@@ -637,6 +701,7 @@ def create_app(
                 aic_registry=kis_aic_registry,
                 top_k=request.top_k,
                 pipeline_resolver=kis_pipeline_resolver,
+                query_translator=trake_query_translator,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
