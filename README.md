@@ -238,6 +238,87 @@ but is **not enabled by default**: the measured benchmark showed identical
 accuracy at roughly 3500x the latency. `docs/AIC_KIS_FINAL_REPORT.md` records
 that evidence and the remaining limitations.
 
+## Verified TRAKE commands
+
+TRAKE (`TRAKE = KIS × k events, same video, correct order`) finds an ordered
+chain of `k` frames in a **single** video that each match one described event,
+in the declared order. It returns competition predictions as
+`<video_id>, [frame_id, frame_id, ...]` (one chain of `k` frame IDs per
+prediction, up to 100 predictions), scored by the official partial-credit
+R-Score/Mean-Top-k-R/Final Score formula
+(`tolerance=1` frame, matching the course lab default).
+
+TRAKE reuses the **same FAISS index built by `build-aic-index`** above — there
+is no separate index-build step. It is currently **API/library-only: there is
+no `mvr.cli` subcommand for it.** Use `POST /search/trake` (shown below) or
+call `mvr.retrieval.trake.search_trake()` directly from Python.
+
+Each event's shortlist of candidate videos comes from the existing
+`search_kis()` (reused unchanged); per-video scoring reconstructs every
+resolvable frame's vector directly from the FAISS index
+(`IndexFlatIP.reconstruct()`, no re-encoding) and scores it against each
+event's text vector. One of three chain-alignment strategies then picks the
+best-ordered chain per video. `atlas` (hard dynamic-programming alignment) is
+the default — it matched `lucifer`'s accuracy on every real-data benchmark
+query while running faster and without a tuning cliff; see
+`docs/AIC_TRAKE_BENCHMARK_RESULTS.md` for the full parameter sweeps and
+per-query numbers behind that choice.
+
+```powershell
+$env:MVR_SEMANTIC_INDEX=(Resolve-Path -LiteralPath "artifacts\indexes\aic_l21").Path
+$env:MVR_AIC_DATASET_ROOT="<local AIC dataset root>"
+$env:MVR_DEVICE="cpu"
+py -3.12 -m uvicorn mvr.api.app:app --host 127.0.0.1 --port 8015
+
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/trake" `
+  -ContentType "application/json" `
+  -Body '{
+    "events": [
+      {"text": "a car crashes into a pole at night"},
+      {"text": "a crowd gathers around the wreck"},
+      {"text": "police arrive and set up a cordon"}
+    ],
+    "gap_phrases": ["rồi", "ngay sau đó"]
+  }'
+```
+
+`gap_phrases` takes one Vietnamese connector phrase per gap between
+consecutive events (`len(events) - 1` entries; `""` falls back to the phrase
+table's no-clue default). Raw `[min, max]` second ranges are deliberately not
+accepted directly — the real-data benchmark measured the phrase table's own
+defaults outperforming hand-picked numbers (mean final score 0.639 vs 0.633).
+`alignment_strategy` (`"atlas" | "lucifer" | "ucese"`) is an optional override
+of the evidence-backed default, for manual testing only.
+
+Event text can be Vietnamese if query translation is explicitly enabled —
+off by default, since the benchmark above used untranslated English text:
+
+```powershell
+$env:MVR_TRAKE_TRANSLATE_QUERIES="1"
+# first run only, downloads ~300MB to the HuggingFace cache:
+$env:MVR_TRAKE_ALLOW_MODEL_DOWNLOAD="1"
+```
+
+Real measured effect (6 benchmark queries rewritten as natural Vietnamese,
+same real pipeline): mean final score **0.000 without translation ->
+0.547 with it** (English baseline on the same queries: 0.639). See
+`docs/AIC_TRAKE_FINAL_REPORT.md`'s "Query Translation" section for the full
+before/after table. A missing/uncached model degrades to untranslated
+retrieval rather than an error.
+
+Opt-in real-data verification (skips unless explicitly enabled):
+
+```powershell
+$env:MVR_RUN_AIC_TRAKE_E2E="1"; $env:MVR_AIC_DATASET_ROOT="<local AIC dataset root>"
+py -3.12 -m pytest tests\integration\test_aic_trake_e2e.py -v
+```
+
+`docs/AIC_TRAKE_FINAL_REPORT.md` and `docs/AIC_TRAKE_BENCHMARK_RESULTS.md`
+record the full benchmark evidence, the real end-to-end run, and known
+limitations — most notably that benchmark queries were written in English
+(the index's OpenCLIP model is English-trained); an opt-in translation layer
+(above) closes most, not all, of the gap for Vietnamese queries.
+
 Đọc tiếp:
 
 - `docs/SOURCE_FILE_ANALYSIS.md`

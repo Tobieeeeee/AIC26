@@ -190,6 +190,145 @@ Two behavior notes for KIS-owned code (not lab-derived):
     `frame_idx` column as the original-video frame ID. The `n` ordinal and keyframe
     filenames are used only as lookup keys, never as the submitted frame ID.
 
+---
+
+The TRAKE competition-ready work (branch `feat/trake-competition-ready`; see
+`docs/CODEX_PROGRESS.md` and `docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md`) also
+migrates no new lab code in Phase 01. It makes two unavoidable behavior
+changes to existing KIS-owned production code, required before TRAKE code
+depends on it (see `docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md` for full root
+cause and blast-radius detail):
+
+25. **Resolver exception type:** `ingestion.aic_dataset._normalize_ref()`
+    (and its second caller, `keyframe_path()`'s directory scan) raised a
+    bare `ValueError` for a non-numeric keyframe reference instead of
+    `MissingFrameMappingError`. Because `retrieval.kis.resolve_original_frame_id()`
+    only ever caught `MissingFrameMappingError`, a candidate whose
+    `keyframe_id` was this repo's own (non-numeric) pipeline format crashed
+    the entire `search_kis()` call instead of being dropped, and this
+    crash's likelihood scales with the number of `search_kis()` calls per
+    query — exactly what TRAKE's k-events-per-query shape does. Fixed at
+    the root: `_normalize_ref()` now raises `MissingFrameMappingError`.
+    Purely an exception-type correction; no change to which frame
+    references successfully resolve. Verified: full regression suite green,
+    including the (corrected) pre-existing regression test for this exact
+    crash path.
+26. **`search_kis()`'s `top_k` ceiling raised 100 -> 500:** TRAKE's
+    per-event video-shortlisting step (Phase 05) needs a wider candidate
+    pool than plain KIS's Top-100 qualifying-round cap, mirroring the
+    course lab's own 500-wide `candidate_videos()` shortlisting step. The
+    public `POST /search/kis` HTTP contract (`api/schemas.py`) is
+    unaffected — this raises only the ceiling of `search_kis()`'s own
+    Python parameter validation; the default and all existing callers at
+    `top_k<=100` are unchanged. Verified via a new test asserting
+    `top_k=300` now succeeds, alongside all pre-existing `top_k` boundary
+    tests passing unmodified.
+
+TRAKE Phase 04 ports three chain-alignment algorithms from the course lab's
+`trake_align.py` (`dp_align` -> `AtlasAlignment`, `dp_align_soft` ->
+`LuciferAlignment`, `two_pointer_clips` -> `UceseAlignment`, plus
+`first_touch`) into `src/mvr/retrieval/trake_align.py`. The lab file is
+course material kept outside this repository, not one of the migration
+source labs in the table above, so it has no source-row entry there. The
+ports preserve the reference algorithms' mathematics, defaults (`alpha`,
+`beta`, `lam=0.8`, `min_sim`, `T_win`), scoring formulas, and documented
+behavioral differences, and are verified against the reference's own
+`python trake_align.py` self-check values. Three deviations are recorded
+here as required:
+
+27. **Per-video instead of whole-corpus scope.** The lab's alignment
+    functions each scan every video in one call (`video_spans()`,
+    `candidate_videos(..., pre_topk)`). This port takes one video's score
+    matrix per call, because video shortlisting now happens earlier via
+    `search_kis()` in Phase 05 orchestration. Only the reference's
+    per-video-span core logic is ported; the outer scanning helpers are not
+    needed. Consequence: `two_pointer_clips`'s `topk` was a GLOBAL per-event
+    hit threshold across all videos and is now scoped to one video, so the
+    lab's own `two_pointer_clips` self-check numbers are not numerically
+    reproducible here by construction. Its documented core property (a
+    winning chain need not be chronologically ordered) is preserved and
+    explicitly tested instead.
+28. **Lucifer `lam` threaded through the state key.** The lab's
+    `_soft_key()` hard-codes `0.8` when ranking intermediate DP states,
+    while `dp_align_soft()`'s final score uses the caller's `lam` — the two
+    disagree for any `lam != 0.8`. This port uses the configured `lam` in
+    both places. Verified to leave behavior identical at the lab's own
+    default `lam=0.8` (the reference self-check value `1.85 * 0.8` still
+    matches exactly), so this is a consistency correction, not a tuning
+    change.
+29. **Lucifer accumulates the gap budget across skipped events.** The lab
+    indexes the gap constraint by the current event (`gaps[j-1]`) even when
+    the events in between were skipped, so a surviving time span is judged
+    against only the last hop's budget although a skipped event still
+    consumes real elapsed time. Measured example: with
+    `gaps = ([0,10], [0,10])`, E1 invisible, E0 at t=0 and E2 at t=18
+    (inside the combined 20s budget), the reference formula charges
+    `(18-10)^2` and the DP then discards the perfectly findable E0,
+    returning `(None, None, f2)` instead of `(f0, None, f2)`. This port sums
+    the bounds of every gap traversed since the last MATCHED event. The
+    lab's own self-check only ever passes `gaps=None`, so it never exercises
+    this path. Verified: identical to the reference when no event is
+    skipped, and the regression scenario above now returns
+    `(f0, None, f2)`.
+
+TRAKE Phase 06 (`docs/AIC_TRAKE_BENCHMARK_RESULTS.md`) measured that three of
+the ported defaults above were actively wrong at TRAKE's per-video scope
+(deviation 27) and produced a meaningless comparison until fixed. Recorded
+here as required by rule 18:
+
+30. **U-CESE `topk`: lab default `300` → measured default `10`.** The lab's
+    `two_pointer_clips(topk=300)` is a global per-event hit threshold across
+    an entire corpus scan; at the per-video scope introduced by deviation 27,
+    `300` exceeds the number of resolvable frames in almost any single video,
+    so every event collapsed onto the same frame and every chain scored
+    `0.000`. A real sweep (`topk` in `{1, 3, 5, 10, 20}`) found mean final
+    score peaking at `10` (`0.413`) and dropping off on both sides (`1`→
+    `0.190`, `3`→`0.300`, `5`→`0.380`, `20`→`0.253`). `10` is the measured
+    default, not a guess or the lab's own value.
+31. **Lucifer `min_sim`: lab default `0.05` → measured default `0.20`.** The
+    lab's `dp_align_soft(min_sim=0.05)` is below every real CLIP cosine
+    similarity observed in this corpus, so the skip mechanism (Lucifer's
+    entire distinguishing feature versus ATLAS) never fired — every Lucifer
+    chain was numerically identical to the corresponding ATLAS chain. A real
+    sweep found `0.20` correct (mean final score `0.639`, matching ATLAS) and
+    a sharp cliff just above it: `0.22`→`0.530`, `0.25`→`0.473`. This is
+    documented as a cliff, not a plateau — values are not interchangeable
+    within this range the way ATLAS's `top_n` is.
+32. **`top_n` (return N-best distinct chains per video) added to all three
+    strategies; lab reference returns only one.** Each lab function
+    (`dp_align`, `dp_align_soft`, `two_pointer_clips`) returns a single
+    best-scoring span. Wired unmodified into a real API/benchmark context,
+    this meant a video contributing only 1 of the 100-prediction budget's
+    slots even when several distinct valid chains existed in it, discarding
+    most of the budget by construction. Added `top_n` (default `5`) to all
+    three strategies to return the `N` best distinct chains per video
+    instead. In isolation this alone lifted ATLAS's mean final score from
+    `0.417` to `0.660` (later refined to `0.639` alongside the gap-phrase
+    fixes below); a sweep over `top_n` in `{5, 10, 20}` showed the score
+    plateauing across the whole range, so `5` (matching the lab's per-video
+    intuition most closely while still using the budget) was kept rather
+    than raised further.
+
+Separately, Phase 06 also measured that the gap-phrase table's own no-clue
+default (`(0, 300)` seconds) outperforms a hand-picked narrower default
+(`(0, 60)`): `0.639` vs `0.633` mean final score on the same 6-query set.
+This is not a lab-reference deviation (`GAP_PHRASE_TABLE` and its defaults are
+new TRAKE-owned code, not ported from the lab), so it is recorded here for
+completeness rather than as a numbered deviation.
+
+**Cross-track reuse (post-Phase-09, not lab-derived):** `search_trake()`'s
+optional query translation reuses `mvr.enrichment.qna_translation`
+(`QueryTranslator`, `translate_for_retrieval`, `HelsinkiViEnTranslator`)
+unchanged from the Q&A track — no new translation logic was written for
+TRAKE. Consistent with this file's reuse-first discipline even though the
+source is a sibling production module, not a course lab. Real measured
+effect on 6 natural-Vietnamese benchmark queries: mean final score
+`0.000` (no translation) `-> 0.547` (translated), vs. `0.639` for the same
+queries hand-written in English. See `docs/AIC_TRAKE_FINAL_REPORT.md`'s
+"Query Translation" section.
+
+---
+
 ## Task05A v1 — Task04 artifact consumption without new lab migration
 
 Task05A v1 migrates no new lab implementation and does not change Task04 model

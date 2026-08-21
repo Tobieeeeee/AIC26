@@ -1,0 +1,316 @@
+from __future__ import annotations
+
+import numpy as np
+from fastapi.testclient import TestClient
+
+import mvr.retrieval.trake as trake_module
+from mvr.api.app import create_app
+from mvr.retrieval.kis import KisCandidate
+from mvr.retrieval.trake_scoring import TrakeVideoScoreMatrix
+
+
+class _FakeTextEncoder:
+    def encode_text(self, texts):
+        return np.zeros((len(texts), 4))
+
+
+class _FakeTrakeRetriever:
+    """What LazyFaissSemanticService.retriever() returns: something with
+    .text_encoder/.index, distinct from the plain .search()-only fake used
+    for /search/kis tests."""
+
+    def __init__(self) -> None:
+        self.text_encoder = _FakeTextEncoder()
+        self.index = "FAKE_FAISS_INDEX"
+
+
+class FakeTrakeSemanticService:
+    def retriever(self):
+        return _FakeTrakeRetriever()
+
+
+def _fake_search_kis(query, **_kwargs):
+    return [KisCandidate(rank=1, video_id="L21_V018", frame_id=1, score=0.5, keyframe_id="kf")]
+
+
+def _fake_build_video_score_matrix(video_id, *_args, **_kwargs):
+    # 2 events, 3 frames; frame_ids offset from column positions on purpose.
+    scores = np.array([[0.9, 0.1, 0.1], [0.1, 0.1, 0.9]])
+    return TrakeVideoScoreMatrix(
+        video_id=video_id,
+        timestamps=(0.0, 1.0, 2.0),
+        original_frame_ids=(100, 200, 300),
+        scores=scores,
+    )
+
+
+def _client(monkeypatch) -> TestClient:
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    return TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        )
+    )
+
+
+_VALID_REQUEST = {
+    "events": [{"text": "event one"}, {"text": "event two"}],
+    "gap_phrases": ["rồi"],
+}
+
+
+def test_trake_search_happy_path_returns_ranked_chains(monkeypatch) -> None:
+    client = _client(monkeypatch)
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["event_count"] == 2
+    assert payload["alignment_strategy"] == "atlas"
+    assert payload["count"] >= 1
+    first = payload["results"][0]
+    assert first["rank"] == 1
+    assert first["video_id"] == "L21_V018"
+    assert isinstance(first["frames"], list)
+    assert isinstance(first["score"], float)
+
+
+def test_trake_search_rejects_mismatched_gap_count(monkeypatch) -> None:
+    client = _client(monkeypatch)
+
+    response = client.post(
+        "/search/trake",
+        json={"events": [{"text": "a"}, {"text": "b"}], "gap_phrases": []},  # needs exactly 1
+    )
+
+    assert response.status_code == 422
+
+
+def test_trake_search_rejects_single_event(monkeypatch) -> None:
+    client = _client(monkeypatch)
+
+    response = client.post(
+        "/search/trake", json={"events": [{"text": "only one"}], "gap_phrases": []}
+    )
+
+    assert response.status_code == 422
+
+
+def test_trake_search_rejects_unknown_alignment_strategy_name(monkeypatch) -> None:
+    client = _client(monkeypatch)
+
+    response = client.post(
+        "/search/trake", json={**_VALID_REQUEST, "alignment_strategy": "not-a-real-strategy"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_trake_search_rejects_blank_event_text(monkeypatch) -> None:
+    client = _client(monkeypatch)
+
+    response = client.post(
+        "/search/trake", json={"events": [{"text": "  "}, {"text": "b"}], "gap_phrases": ["rồi"]}
+    )
+
+    assert response.status_code == 422
+
+
+def test_trake_search_strategy_override_is_honored(monkeypatch) -> None:
+    client = _client(monkeypatch)
+
+    default_response = client.post("/search/trake", json=_VALID_REQUEST)
+    override_response = client.post(
+        "/search/trake", json={**_VALID_REQUEST, "alignment_strategy": "ucese"}
+    )
+
+    assert default_response.json()["alignment_strategy"] == "atlas"
+    assert override_response.json()["alignment_strategy"] == "ucese"
+
+
+def test_trake_search_none_markers_serialize_as_json_null(monkeypatch) -> None:
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+
+    def fake_matrix_with_gap(video_id, *_args, **_kwargs):
+        # event1's row never clears any reasonable min_sim -> Lucifer skips it.
+        scores = np.array([[0.9, 0.1, 0.1], [0.01, 0.01, 0.01]])
+        return TrakeVideoScoreMatrix(
+            video_id=video_id,
+            timestamps=(0.0, 1.0, 2.0),
+            original_frame_ids=(100, 200, 300),
+            scores=scores,
+        )
+
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", fake_matrix_with_gap)
+    client = TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        )
+    )
+
+    response = client.post(
+        "/search/trake", json={**_VALID_REQUEST, "alignment_strategy": "lucifer"}
+    )
+
+    assert response.status_code == 200
+    frames = response.json()["results"][0]["frames"]
+    assert None in frames
+
+
+def test_trake_search_accepts_a_plain_retriever_shaped_service(monkeypatch) -> None:
+    """A plain SemanticRetriever already exposes .text_encoder/.index -- the
+    exact shape TRAKE needs, and what the real-data integration tests
+    construct. The route must accept it directly, not only the production
+    LazyFaissSemanticService's lazy retriever() wrapper."""
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=_FakeTrakeRetriever(),  # no retriever(); has .text_encoder/.index
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        )
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 200
+    assert response.json()["count"] >= 1
+
+
+def test_trake_search_returns_503_not_500_for_a_search_only_service(monkeypatch) -> None:
+    """Regression: a service exposing only .search() (e.g. an older or custom
+    injection) previously produced an opaque AttributeError -> HTTP 500. It
+    must fail as a clear, actionable 503 instead."""
+
+    class _SearchOnlyService:
+        def search(self, query, top_k=5):
+            return []
+
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=_SearchOnlyService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        ),
+        raise_server_exceptions=False,
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 503
+    assert "dense scoring" in response.json()["detail"]
+
+
+def test_trake_search_returns_503_when_semantic_service_unconfigured(monkeypatch) -> None:
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=None,
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        )
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 503
+
+
+def test_trake_search_per_event_retrieval_failure_does_not_crash_route(monkeypatch) -> None:
+    def failing_search_kis(query, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(trake_module, "search_kis", failing_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        )
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    # search_trake() already guarantees this at the orchestration layer
+    # (Phase 05): all events failing -> empty list, not an exception.
+    assert response.status_code == 200
+    assert response.json()["count"] == 0
+
+
+def test_trake_search_uses_an_injected_query_translator(monkeypatch) -> None:
+    """POST /search/trake honors a caller-injected trake_query_translator,
+    the same create_app() extension point qna_answer_reasoner already uses.
+    Verifies the TRANSLATED text (not the raw request text) is what
+    actually reaches search_kis/dense scoring."""
+
+    class _FakeTranslator:
+        def translate(self, text: str) -> str:
+            return f"[en] {text}"
+
+    seen_queries: list[str] = []
+
+    def recording_search_kis(query, **_kwargs):
+        seen_queries.append(query)
+        return [KisCandidate(rank=1, video_id="L21_V018", frame_id=1, score=0.5, keyframe_id="kf")]
+
+    monkeypatch.setattr(trake_module, "search_kis", recording_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+            trake_query_translator=_FakeTranslator(),
+        )
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 200
+    assert seen_queries == ["[en] event one", "[en] event two"]
+
+
+def test_trake_search_translation_is_off_by_default(monkeypatch) -> None:
+    """Without MVR_TRAKE_TRANSLATE_QUERIES set and without an explicit
+    trake_query_translator override, event text must pass through
+    unchanged -- the documented, benchmarked default behavior."""
+    monkeypatch.delenv("MVR_TRAKE_TRANSLATE_QUERIES", raising=False)
+    seen_queries: list[str] = []
+
+    def recording_search_kis(query, **_kwargs):
+        seen_queries.append(query)
+        return [KisCandidate(rank=1, video_id="L21_V018", frame_id=1, score=0.5, keyframe_id="kf")]
+
+    monkeypatch.setattr(trake_module, "search_kis", recording_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=None,
+        )
+    )
+
+    response = client.post("/search/trake", json=_VALID_REQUEST)
+
+    assert response.status_code == 200
+    assert seen_queries == ["event one", "event two"]

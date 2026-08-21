@@ -144,9 +144,28 @@ def test_search_kis_rejects_top_k_zero() -> None:
         search_kis("query", top_k=0, semantic_service=_FakeSemanticService([]), multimodal_service=None)
 
 
-def test_search_kis_rejects_top_k_101() -> None:
+def test_search_kis_rejects_top_k_501() -> None:
     with pytest.raises(ValueError):
-        search_kis("query", top_k=101, semantic_service=_FakeSemanticService([]), multimodal_service=None)
+        search_kis("query", top_k=501, semantic_service=_FakeSemanticService([]), multimodal_service=None)
+
+
+def test_search_kis_accepts_top_k_above_100_for_trake_shortlisting() -> None:
+    """TRAKE's video-shortlisting step needs top_k up to 500 (see
+    agent_task/trake_competition_ready/01_REPO_CONTRACT_AUDIT_AND_HARDENING.md);
+    plain KIS callers are unaffected since the public API/CLI never pass
+    more than 100."""
+    mapping = {f"kf-{i}": i for i in range(300)}
+    resolver = _resolver(mapping, videos=("L21_V001",))
+    hits = [_hit("L21_V001", f"kf-{i}", score=1.0 - i / 1000) for i in range(300)]
+    service = _FakeMultimodalService(hits)
+
+    results = search_kis(
+        "a query", top_k=300, semantic_service=None, multimodal_service=service,
+        pipeline_resolver=resolver, overfetch=300,
+    )
+
+    assert len(results) == 300
+    assert [r.rank for r in results] == list(range(1, 301))
 
 
 def test_search_kis_requires_at_least_one_backend() -> None:

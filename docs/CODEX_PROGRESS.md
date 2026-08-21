@@ -389,6 +389,127 @@ Blockers:
 
 ---
 
+# Post-baseline work: TRAKE Competition-Ready task pack
+
+Status: COMPLETE (all 9 phases)
+
+Branch: `feat/trake-competition-ready` (branched from `main` after PR #2
+merged), not yet pushed — pending user review of
+`docs/AIC_TRAKE_FINAL_REPORT.md` and explicit approval (per standing project
+rule: push happens once, at the end, only after that review).
+
+TRAKE (Temporal Retrieval & Alignment of Key Events,
+`TRAKE = KIS × k events, same video, correct order`) was explicitly approved
+by the project owner as post-baseline work, the same way the KIS pack was.
+It followed a separate local task pack at
+`agent_task/trake_competition_ready/` (kept out of Git, same convention as
+the KIS pack), executed one gated phase at a time with a stop-and-report
+boundary after each, plus a dedicated Phase 09 verification pass.
+
+Commits, in order:
+
+1. `e68f6b6` — Phase 01, repository contract audit + two prerequisite KIS
+   fixes → `docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md`
+2. `b12570f` — Phase 02, official TRAKE evaluator (partial R-Score,
+   Mean-Top-k-R, Final Score)
+3. `507284f` — Phase 03, event/gap input contract and gap-phrase translation
+4. `4127dc5` — Phase 04, dense per-video scoring and three chain-alignment
+   strategies (ATLAS, Lucifer, U-CESE)
+5. `8142468` — Phase 05, TRAKE orchestration (shortlist → dense score →
+   align → merge)
+6. `094da2d` + `a450913` + `04c9c0d` — Phase 06, real-data benchmark; fixed
+   three lab-reference defaults that made the comparison meaningless at
+   TRAKE's per-video scope; added a wide-gap query proving gap constraints
+   matter
+7. `a5535d4` — Phase 07, never-blank fallback, prediction validation, local
+   export
+8. `4d084b4` — Phase 08, `POST /search/trake` API route
+9. `70fb328` — Phase 09, end-to-end hardening (4 real bugs found and fixed)
+10. Post-Phase-09: merged `origin/main` (90+ commits: ASR, OCR hardening,
+    BEiT-3/MetaCLIP-2/Perception Encoder multi-embedding stack, Q&A, lexical
+    BM25); reviewed and merged PR #9/#10 (Vietnamese/English query branch
+    split, keyframe-resolver identity fix); added opt-in query translation
+    (Stage A) to `search_trake()`/`POST /search/trake`
+
+Completed:
+
+- Reused `search_kis()` unchanged for per-event video shortlisting — TRAKE's
+  k-events-per-query shape is concretely "call `search_kis()` k times."
+- Reused the existing FAISS index (`build-aic-index`) for dense per-video
+  scoring via `IndexFlatIP.reconstruct()` — no re-encoding, no new index type.
+- Implemented the official partial-credit TRAKE scoring formula, distinct
+  from KIS's exact-match formula and from the generic Recall@K/MRR helpers.
+- Ported and verified all three lab chain-alignment algorithms
+  (`dp_align`, `dp_align_soft`, `two_pointer_clips`), with all deviations
+  from the lab reference documented in `docs/LAB_REUSE_MAP.md`.
+- Ran a real parameter sweep (not guesses) to set every tuned default:
+  ATLAS `top_n=5`, Lucifer `min_sim=0.20`, U-CESE `topk=10`.
+- Exposed ranked chains through `POST /search/trake`, hardened in Phase 09
+  to accept either service shape the codebase produces (`.retriever()`
+  wrapper or a plain `.text_encoder`/`.index` retriever), returning a clear
+  503 instead of an opaque 500 for any other shape.
+- Implemented a never-blank submission fallback (interpolation for interior
+  gaps, phrase-table midpoints for edge gaps) so a chain is never submitted
+  with a raw blank marker.
+- Added a genuine no-mocks full-pipeline E2E test in Phase 09, closing a gap
+  where Phase 07's export module had no real-data caller.
+- Found and fixed 3 additional real issues during Phase 09's verification
+  pass: a leaked machine-specific absolute path in a committed docstring,
+  and leftover untracked trial-merge debris from an earlier unrelated
+  `git merge --abort`.
+- Added opt-in Vietnamese->English query translation to `search_trake()`
+  (`query_translator` param, reuses `mvr.enrichment.qna_translation`
+  unchanged) and wired a lazy, fail-closed default into the API route
+  (`MVR_TRAKE_TRANSLATE_QUERIES=1`, off by default). Measured real effect on
+  6 natural-Vietnamese queries: mean final score 0.000 -> 0.547 (English
+  baseline on the same queries: 0.639). See `docs/AIC_TRAKE_FINAL_REPORT.md`
+  "Query Translation" section for the full before/after table.
+
+Tests (current state, after the post-Phase-09 main merge + query translation):
+
+- Working repo (`semantic` extras installed): 860 passed, 14 skipped,
+  4 failed. The 4 failures are pre-existing, unrelated to TRAKE
+  (`test_weight_validation.py`, `feat/ocr-enrichment` track — a subprocess
+  test resolves a non-project Python lacking `cv2` on this machine).
+- CI-equivalent environment (`.[dev,api,semantic]` only, matching
+  `.github/workflows/ci.yml` exactly, no `qna` extra): 858 passed, 16
+  skipped, 4 failed (same OCR failures; 2 extra skips are the
+  translation-dependent tests self-skipping cleanly without `transformers`
+  installed — verified this introduces no new hard dependency).
+- Real full-pipeline E2E (`MVR_RUN_AIC_TRAKE_E2E=1`): PASS — query
+  `traffic_accident_night` (k=4), real measured `final_score=0.600`,
+  100 chains returned, export round-trip exact match.
+- Real `POST /search/trake` smoke: OpenAPI confirmed exactly 4 routes
+  registered; API import cost 0.47s.
+- Real 6-query benchmark over the real L21 corpus: ATLAS/Lucifer mean final
+  score 0.639 (tied), U-CESE 0.344; full results in
+  `docs/AIC_TRAKE_BENCHMARK_RESULTS.md` and `docs/AIC_TRAKE_FINAL_REPORT.md`.
+- Re-verified unchanged after merging `origin/main` and after adding query
+  translation — both real E2E and CI-equivalent re-run clean.
+
+Remaining / explicitly out of scope:
+
+- **Queries must be English by default** — the index's OpenCLIP model is
+  English-trained; an opt-in translation layer (above) closes most but not
+  all of the gap on real Vietnamese queries (mean 0.547 vs. 0.639 English).
+  Real competition queries will be Vietnamese, so this should be enabled
+  deliberately. Same limitation already noted for KIS, which has no
+  equivalent translation wiring yet.
+- No `mvr.cli` subcommand exists for TRAKE (API/library-only); not fabricated
+  per explicit instruction.
+- Ground truth is a small team-curated internal set, not organizer-labeled.
+- U-CESE intentionally does not enforce event order (a documented property of
+  the reference algorithm) — not selected as the production default partly
+  for this reason.
+- Q&A, Frontend, VLM, and deployment remain untouched per the pack's stop
+  gate.
+
+Blockers:
+
+- None.
+
+---
+
 # Post-baseline work: per-keyframe ASR features
 
 Status: CODE COMPLETE; CPU REAL RUNTIME VERIFIED
@@ -1091,6 +1212,36 @@ Verification:
 No full-corpus non-dry-run operation was launched. Full-corpus execution and
 representative-ground-truth quality evaluation remain approval-gated.
 
+---
+
+# Current active phase
+
+**TRAKE competition-ready task pack — COMPLETE, merged with `main` and
+pending user review before push (2026-08-21).** Phases 01–06 (reuse
+baseline) are COMPLETE and merged via PR #1. The Textual KIS
+competition-ready task pack (Tasks 01–09) is COMPLETE and merged into
+`main` via PR #2, including the PR #2 hardening pass. The TRAKE
+competition-ready task pack (Phases 01–09, including the dedicated Phase 09
+verification pass) is COMPLETE on branch `feat/trake-competition-ready`; see
+the section above and `docs/AIC_TRAKE_FINAL_REPORT.md`.
+
+Since TRAKE branched off, `main` gained ASR (`feat/keyframe-asr`), OCR
+hardening (`feat/ocr-enrichment`), a three-provider multi-embedding stack
+(BEiT-3/MetaCLIP-2/Perception Encoder with RRF fusion), a full Q&A task
+pack, lexical BM25 (`feat/lexical`), and feature filtering
+(`feat/filtering`) — none of which existed when the TRAKE task pack's own
+Phase 01 audit ran. `origin/main` was merged into
+`feat/trake-competition-ready` to pick all of this up before push; the core
+assumption that dense scoring depends on (`FaissIndex`/`semantic_builder.py`
+being unchanged) was verified to still hold. See the merge commit for the
+conflict resolution and the regression re-run that followed it.
+
+Next action: user reviews `docs/AIC_TRAKE_FINAL_REPORT.md` and explicitly
+approves before this branch is pushed to `origin` — no push has happened yet.
+
+Stop gate: do not begin Q&A, Frontend, VLM, advanced reranking, or
+deployment without explicit approval.
+
 # Resume instruction
 
 If work is interrupted, read:
@@ -1101,4 +1252,7 @@ codex/00_MASTER_PLAN.md
 docs/CODEX_PROGRESS.md
 docs/AIC_KIS_IMPLEMENTATION_NOTES.md
 docs/AIC_KIS_FINAL_REPORT.md
+docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md
+docs/AIC_TRAKE_BENCHMARK_RESULTS.md
+docs/AIC_TRAKE_FINAL_REPORT.md
 ```

@@ -68,3 +68,43 @@ kis:
   refinement_top_n: 3
   refinement_frame_radius: 45
   local_export_format: local_verification_export
+
+# TRAKE (multi-event ordered temporal alignment). Every value below was set
+# from the real-data benchmark in docs/AIC_TRAKE_BENCHMARK_RESULTS.md, not
+# copied from the course lab: three lab defaults were measured to be actively
+# harmful at this system's per-video scope and are documented there.
+trake:
+  # ATLAS is the evidence-backed default: 0.660 mean final score vs Lucifer's
+  # 0.670 (a one-marker difference on a five-query set, i.e. noise) but on a
+  # flat parameter plateau instead of Lucifer's min_sim cliff.
+  alignment_strategy: atlas
+  top_k_default: 100             # competition cap on submitted chains per query
+  shortlist_top_k: 500           # per-event search_kis() width, needs the raised kis ceiling
+
+  atlas:
+    alpha: 0.01                  # lab default, unchanged
+    beta: 0.01                   # lab default, unchanged
+    min_sim: 0.0                 # lab default, unchanged
+    top_n: 5                     # chains kept per video; plateau 5..20 all score 0.660
+
+  lucifer:
+    alpha: 0.01                  # lab default, unchanged
+    beta: 0.01                   # lab default, unchanged
+    lambda: 0.8                  # lab default, unchanged (per-skip multiplier)
+    # CLIFF -- do not nudge without re-running the benchmark: 0.20 -> 0.670,
+    # 0.22 -> 0.530, 0.25 -> 0.473. Below 0.20 no skip ever fires and this
+    # strategy degenerates into ATLAS. Lab default was 0.05 (unreachable skip).
+    min_sim: 0.20
+    top_n: 5
+
+  ucese:
+    t_win: 20.0                  # lab default, unchanged (window width, seconds)
+    # Lab default was 300, which selected hits across the WHOLE corpus. Scoped
+    # per-video (~200-320 frames) that made every frame a hit for every event
+    # and returned one identical frame for all k events, scoring 0.000.
+    topk: 10
+    top_n: 5
+
+  first_touch:
+    slack: 0.05                  # lab defaults, unchanged; helper is not wired
+    floor: 0.15                  # into any strategy (see trake_align.py)
