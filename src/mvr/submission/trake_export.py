@@ -231,6 +231,57 @@ def export_local_trake_verification_json(
     return output_path
 
 
+#: Official AIC26 result-row cap, one CSV per query
+#: (https://sotuyenaic.oj.io.vn/, "Yeu cau ket qua": "toi da 100 dong").
+OFFICIAL_MAX_ROWS_PER_QUERY = 100
+
+
+def export_official_trake_submission_csv(
+    rows: Sequence[TrakePredictionRow], output_path: Path | str
+) -> Path:
+    """Write the REAL AIC26 organizer TRAKE submission CSV -- NOT the local
+    verification export above.
+
+    Exact format from https://sotuyenaic.oj.io.vn/ (fetched and verified
+    2026-08-21, not guessed): one row per ranked chain, no header row,
+    comma-delimited, UTF-8, ``<video_name>, <Frame ID_1>, ..., <Frame
+    ID_N>``. ``video_name`` carries no ``.mp4`` suffix (matches this
+    codebase's ``video_id`` throughout -- never had one). Frame IDs are
+    plain integers, never quoted (the organizer's quoting rules apply only
+    to Q&A's free-text answer column, which TRAKE does not have).
+
+    Every row MUST already be null-free (``apply_never_blank_fallback()``)
+    and validated (``validate_trake_prediction()``) before reaching this
+    function -- it does not call either itself, so a caller cannot forget
+    to and silently submit a row with a gap.
+
+    Raises ``InvalidTrakePredictionError`` if ``rows`` is empty or exceeds
+    the organizer's 100-row cap, or if rows disagree on marker count (the
+    organizer compares Frame ID count against the query's own declared
+    event count, so a mixed-k file is already broken before upload).
+    """
+    if not rows:
+        raise InvalidTrakePredictionError("cannot submit an empty TRAKE result file")
+    if len(rows) > OFFICIAL_MAX_ROWS_PER_QUERY:
+        raise InvalidTrakePredictionError(
+            f"{len(rows)} rows exceeds the organizer's {OFFICIAL_MAX_ROWS_PER_QUERY}-row cap"
+        )
+    k = len(rows[0].frames)
+    for row in rows:
+        if len(row.frames) != k:
+            raise InvalidTrakePredictionError(
+                f"mixed marker counts in one submission file: {k} vs. {len(row.frames)} "
+                f"({row.video_id})"
+            )
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        for row in rows:
+            writer.writerow([row.video_id, *row.frames])
+    return output_path
+
+
 def load_local_trake_verification_json(input_path: Path | str) -> list[TrakePredictionRow]:
     """Round-trip reader for ``export_local_trake_verification_json()``'s output."""
     payload = json.loads(Path(input_path).read_text(encoding="utf-8"))

@@ -137,8 +137,19 @@ the course lab default).
     during Phase 07.
 - `validate_trake_prediction()` / `export_local_trake_verification_csv()` /
   `export_local_trake_verification_json()`: same "explicitly labeled local
-  verification export" discipline as the KIS export — no official organizer
-  transport format is assumed or implemented.
+  verification export" discipline as the KIS export — kept separate from the
+  official submission format below, never conflated.
+- `export_official_trake_submission_csv()` (post-push addition): the REAL
+  AIC26 organizer submission CSV — fetched and verified against
+  `https://sotuyenaic.oj.io.vn/` directly (2026-08-21), not guessed: no
+  header row, comma-delimited, UTF-8, `<video_name>, <Frame ID_1>, ...,
+  <Frame ID_N>`, `video_name` never carrying a `.mp4` suffix, capped at the
+  organizer's 100-row limit. Tested byte-for-byte against the organizer's
+  own published example. Packaging (a `submission/` folder zipped, per
+  `query-N-trake.csv` naming) is a manual/team-shared step across all three
+  tracks (KIS/Q&A/TRAKE), not automated by this repo — `scripts/
+  run_trake_pipeline.py --official-csv <path>` writes the CSV and prints a
+  reminder of the exact folder/zip steps required.
 - Phase 07 shipped with **no real-data caller** for this module — only
   synthetic unit tests. Closed in Phase 09 by
   `test_trake_full_pipeline_end_to_end_including_submission_export`, a
@@ -319,8 +330,15 @@ feature adds zero hard dependency for anyone running the base system.
    can violate the "correct order" half of the TRAKE definition; it is not
    the production default for this reason among others.
 7. No `mvr.cli` subcommand exists for TRAKE (API/library-only). Not
-   fabricated per explicit instruction — added only if the user requests it
-   as separate follow-up work.
+   fabricated per explicit instruction. `scripts/run_trake_pipeline.py`
+   (post-push addition) is a real operational entry point — one query file
+   in, ranked never-blank chains and (with `--official-csv`) a real AIC26
+   submission CSV out — but it is a standalone script, not wired into
+   `mvr.cli`.
+8. Packaging the official submission (`submission/` folder, zip, exact
+   `query-N-trake.csv` naming per batch) is not automated — the organizer's
+   own instructions frame this as a manual, whole-team step spanning all
+   three tracks' output files together, not a per-track concern.
 
 ## Final Decision
 

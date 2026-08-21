@@ -5,11 +5,13 @@ import pytest
 from mvr.evaluation.trake import TrakeChainPrediction
 from mvr.retrieval.trake_events import TrakeGapConstraint
 from mvr.submission.trake_export import (
+    OFFICIAL_MAX_ROWS_PER_QUERY,
     InvalidTrakePredictionError,
     TrakePredictionRow,
     apply_never_blank_fallback,
     export_local_trake_verification_csv,
     export_local_trake_verification_json,
+    export_official_trake_submission_csv,
     load_local_trake_verification_json,
     validate_trake_prediction,
 )
@@ -151,3 +153,85 @@ def test_csv_export_writes_expected_header_and_rows(tmp_path: Path) -> None:
     lines = path.read_text(encoding="utf-8").strip().splitlines()
     assert lines[0] == "format,query_id,rank,video_id,frames,is_interpolated"
     assert lines[1] == "local_verification_export,q1,1,v,100;200,False;True"
+
+
+# -- official AIC26 submission CSV ----------------------------------------------
+#
+# Fixtures below are the organizer's OWN published examples, fetched from
+# https://sotuyenaic.oj.io.vn/ on 2026-08-21 (the "TRAKE (query-3-trake.csv -
+# 4 events)" example), not invented -- byte-for-byte match is the strongest
+# verification available for a format this codebase does not control.
+
+
+def test_official_csv_matches_the_organizer_published_example_exactly(tmp_path: Path) -> None:
+    rows = [
+        TrakePredictionRow("L10_V001", (1200, 1850, 2100, 2450), (False, False, False, False)),
+        TrakePredictionRow("L10_V001", (1180, 1820, 2080, 2420), (False, False, False, False)),
+        TrakePredictionRow("L11_V003", (5100, 5700, 6200, 6800), (False, False, False, False)),
+    ]
+    path = tmp_path / "query-3-trake.csv"
+
+    export_official_trake_submission_csv(rows, path)
+
+    # Line ending is CRLF on disk (csv module's default "excel" dialect);
+    # read_text() universal-newline-translates it back to "\n" for
+    # comparison, which is fine -- the organizer explicitly accepts either.
+    assert path.read_text(encoding="utf-8").strip("\n").splitlines() == [
+        "L10_V001,1200,1850,2100,2450",
+        "L10_V001,1180,1820,2080,2420",
+        "L11_V003,5100,5700,6200,6800",
+    ]
+
+
+def test_official_csv_has_no_header_row(tmp_path: Path) -> None:
+    rows = [TrakePredictionRow("L01_V028", (25300,), (False,))]
+    path = tmp_path / "out.csv"
+
+    export_official_trake_submission_csv(rows, path)
+
+    first_line = path.read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == "L01_V028,25300"  # data, not "video_id,frame_1..."
+
+
+def test_official_csv_video_name_carries_no_mp4_suffix(tmp_path: Path) -> None:
+    rows = [TrakePredictionRow("L01_V028", (25300,), (False,))]
+    path = tmp_path / "out.csv"
+
+    export_official_trake_submission_csv(rows, path)
+
+    assert ".mp4" not in path.read_text(encoding="utf-8")
+
+
+def test_official_csv_rejects_an_empty_result_set() -> None:
+    with pytest.raises(InvalidTrakePredictionError):
+        export_official_trake_submission_csv([], "unused.csv")
+
+
+def test_official_csv_rejects_more_than_100_rows(tmp_path: Path) -> None:
+    rows = [TrakePredictionRow("v", (1, 2), (False, False))] * (OFFICIAL_MAX_ROWS_PER_QUERY + 1)
+
+    with pytest.raises(InvalidTrakePredictionError):
+        export_official_trake_submission_csv(rows, tmp_path / "out.csv")
+
+
+def test_official_csv_accepts_exactly_the_100_row_cap(tmp_path: Path) -> None:
+    rows = [TrakePredictionRow("v", (1, 2), (False, False))] * OFFICIAL_MAX_ROWS_PER_QUERY
+    path = tmp_path / "out.csv"
+
+    export_official_trake_submission_csv(rows, path)
+
+    assert len(path.read_text(encoding="utf-8").strip().splitlines()) == OFFICIAL_MAX_ROWS_PER_QUERY
+
+
+def test_official_csv_rejects_mixed_marker_counts_in_one_file(tmp_path: Path) -> None:
+    """The organizer compares Frame ID count against the query's own
+    declared event count -- a file mixing k=3 and k=4 rows is already
+    broken before it reaches the grader, so this must fail loudly here
+    rather than silently upload something invalid."""
+    rows = [
+        TrakePredictionRow("v1", (1, 2, 3), (False, False, False)),
+        TrakePredictionRow("v2", (1, 2, 3, 4), (False, False, False, False)),
+    ]
+
+    with pytest.raises(InvalidTrakePredictionError):
+        export_official_trake_submission_csv(rows, tmp_path / "out.csv")

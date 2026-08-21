@@ -114,6 +114,19 @@ def main() -> None:
         "--allow-translation-download", action="store_true",
         help="Permit downloading the translation model (fails closed otherwise)",
     )
+    parser.add_argument(
+        "--official-csv", type=Path, default=None,
+        help=(
+            "Also write the REAL AIC26 organizer submission CSV to this exact "
+            "path (e.g. submission/query-3-trake.csv -- name it per the "
+            "organizer's own query-N-trake.csv convention, this script does "
+            "not guess N). No header row, comma-delimited, video_id + N frame "
+            "IDs per row -- verified byte-for-byte against the organizer's "
+            "own published example from https://sotuyenaic.oj.io.vn/. This "
+            "is NOT the same file as --output-dir's local verification "
+            "export; write both if you want to keep the debug copy too."
+        ),
+    )
     args = parser.parse_args()
 
     from mvr.enrichment.embeddings.openclip import OpenClipEncoder
@@ -128,6 +141,7 @@ def main() -> None:
         apply_never_blank_fallback,
         export_local_trake_verification_csv,
         export_local_trake_verification_json,
+        export_official_trake_submission_csv,
         validate_trake_prediction,
     )
 
@@ -211,6 +225,18 @@ def main() -> None:
         print(f"  #{rank} {row.video_id} {row.frames} interpolated={row.is_interpolated}")
     if len(rows) > 5:
         print(f"  ... and {len(rows) - 5} more")
+
+    if args.official_csv is not None:
+        try:
+            official_path = export_official_trake_submission_csv(rows, args.official_csv)
+        except InvalidTrakePredictionError as exc:
+            raise SystemExit(f"cannot write the official submission CSV: {exc}") from exc
+        print(f"wrote the official AIC26 submission CSV to {official_path}")
+        print(
+            "remember: put this file inside a 'submission/' folder and zip that "
+            "folder (not the loose CSV) before uploading to "
+            "https://sotuyenaic.oj.io.vn/"
+        )
 
 
 if __name__ == "__main__":
