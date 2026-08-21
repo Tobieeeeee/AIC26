@@ -33,6 +33,25 @@ import json
 from mvr.retrieval.qna import KeyframeNeighbourIndex
 
 
+def _resolver(mapping, videos=("V", "A", "B")):
+    """Fixtures pre-dating the pair key: one keyframe id per video.
+
+    `KeyframeFrameIndexResolver` now keys on `(video_id, keyframe_id)`,
+    because a bare keyframe id does not identify a keyframe -- the
+    organizer's 166,550 keyframes carry only 632 distinct ids. These
+    fixtures use synthetic ids that were meant to resolve whatever video
+    asked, so registering each id under every video the test uses keeps
+    exactly the behaviour they were written to check.
+    """
+    from mvr.retrieval.kis import KeyframeFrameIndexResolver
+
+    return KeyframeFrameIndexResolver(
+        {(video, kf): idx for video in videos for kf, idx in mapping.items()}
+    )
+
+
+
+
 def _record(video_id: str, keyframe_id: str, frame_idx: int) -> dict:
     return {"video_id": video_id, "keyframe_id": keyframe_id, "frame_idx": frame_idx}
 
@@ -152,7 +171,7 @@ def _search(**kwargs):
         top_k=10,
         semantic_service=None,
         multimodal_service=_Service(hits),
-        pipeline_resolver=KeyframeFrameIndexResolver(
+        pipeline_resolver=_resolver(
             {"V_S0007_K01": 578, "V_S0008_K01": 655, "V_S0009_K01": 702}
         ),
         answer_reasoner=AnswerReasoner(_Backend()),
