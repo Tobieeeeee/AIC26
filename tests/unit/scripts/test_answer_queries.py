@@ -195,3 +195,26 @@ def test_write_submission_qa_also_writes_a_review_file(tmp_path) -> None:
 
     assert (tmp_path / "query-15-qa.csv").exists()
     assert (tmp_path / "query-15-qa.review.csv").exists()
+
+
+# -- Batch-mode filename (main(), not interactive) ----------------------
+
+
+def test_batch_output_filename_strips_the_pack_prefix() -> None:
+    # Batch mode used to write query-p1-23-kis.csv straight from the query
+    # file's own stem -- exactly the name the organizer's directory listing
+    # does not contain.
+    m = _module()
+    assert (
+        m.batch_output_filename(Path("query-p1-23-kis.txt"), "kis")
+        == "query-23-kis.csv"
+    )
+
+
+def test_batch_output_filename_falls_back_for_an_unparseable_name() -> None:
+    # An oddly-named query file must cost that one query, not crash
+    # everything still queued behind it in the batch.
+    m = _module()
+    assert (
+        m.batch_output_filename(Path("notes-kis.txt"), "kis") == "notes-kis.csv"
+    )
