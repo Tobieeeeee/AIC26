@@ -13,6 +13,7 @@ from mvr.submission.trake_export import (
     export_local_trake_verification_json,
     export_official_trake_submission_csv,
     load_local_trake_verification_json,
+    official_submission_filename,
     validate_trake_prediction,
 )
 
@@ -221,6 +222,33 @@ def test_official_csv_accepts_exactly_the_100_row_cap(tmp_path: Path) -> None:
     export_official_trake_submission_csv(rows, path)
 
     assert len(path.read_text(encoding="utf-8").strip().splitlines()) == OFFICIAL_MAX_ROWS_PER_QUERY
+
+
+def test_official_submission_filename_matches_the_organizer_examples() -> None:
+    """Byte-for-byte match to the organizer's own published examples:
+    query-1-kis.csv, query-2-qa.csv, query-3-trake.csv."""
+    assert official_submission_filename(1, "kis") == "query-1-kis.csv"
+    assert official_submission_filename(2, "qa") == "query-2-qa.csv"
+    assert official_submission_filename(3, "trake") == "query-3-trake.csv"
+
+
+def test_official_submission_filename_rejects_unknown_query_type() -> None:
+    with pytest.raises(ValueError):
+        official_submission_filename(1, "unknown-type")
+
+
+def test_official_submission_filename_rejects_non_positive_number() -> None:
+    with pytest.raises(ValueError):
+        official_submission_filename(0, "trake")
+    with pytest.raises(ValueError):
+        official_submission_filename(-1, "trake")
+
+
+def test_official_submission_filename_rejects_non_int_number() -> None:
+    with pytest.raises(ValueError):
+        official_submission_filename(1.5, "trake")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        official_submission_filename(True, "trake")  # bool is technically an int
 
 
 def test_official_csv_rejects_mixed_marker_counts_in_one_file(tmp_path: Path) -> None:

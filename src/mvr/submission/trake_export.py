@@ -235,6 +235,31 @@ def export_local_trake_verification_json(
 #: (https://sotuyenaic.oj.io.vn/, "Yeu cau ket qua": "toi da 100 dong").
 OFFICIAL_MAX_ROWS_PER_QUERY = 100
 
+#: Organizer's own query-file suffix convention (https://sotuyenaic.oj.io.vn/,
+#: "Quy uoc ten file truy van"): "kis" for Textual KIS, "qa" for Q&A, "trake"
+#: for TRAKE. Not TRAKE-specific -- shared here since KIS/Q&A's own export
+#: modules (mvr.submission.kis_export / qna_export) can import this same
+#: helper rather than duplicating the naming rule.
+OFFICIAL_QUERY_TYPES = ("kis", "qa", "trake")
+
+
+def official_submission_filename(query_number: int, query_type: str) -> str:
+    """Build the exact ``query-<N>-<type>.csv`` filename the organizer
+    expects (e.g. ``query-3-trake.csv``), per
+    https://sotuyenaic.oj.io.vn/'s published naming convention.
+
+    Raises ``ValueError`` on an out-of-range number or unrecognized type
+    rather than silently producing a filename the upload system would
+    reject.
+    """
+    if not isinstance(query_number, int) or isinstance(query_number, bool) or query_number < 1:
+        raise ValueError(f"query_number must be a positive integer, got {query_number!r}")
+    if query_type not in OFFICIAL_QUERY_TYPES:
+        raise ValueError(
+            f"query_type must be one of {OFFICIAL_QUERY_TYPES}, got {query_type!r}"
+        )
+    return f"query-{query_number}-{query_type}.csv"
+
 
 def export_official_trake_submission_csv(
     rows: Sequence[TrakePredictionRow], output_path: Path | str

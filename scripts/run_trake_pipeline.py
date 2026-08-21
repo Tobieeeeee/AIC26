@@ -118,14 +118,29 @@ def main() -> None:
         "--official-csv", type=Path, default=None,
         help=(
             "Also write the REAL AIC26 organizer submission CSV to this exact "
-            "path (e.g. submission/query-3-trake.csv -- name it per the "
-            "organizer's own query-N-trake.csv convention, this script does "
-            "not guess N). No header row, comma-delimited, video_id + N frame "
-            "IDs per row -- verified byte-for-byte against the organizer's "
-            "own published example from https://sotuyenaic.oj.io.vn/. This "
-            "is NOT the same file as --output-dir's local verification "
-            "export; write both if you want to keep the debug copy too."
+            "path. No header row, comma-delimited, video_id + N frame IDs per "
+            "row -- verified byte-for-byte against the organizer's own "
+            "published example from https://sotuyenaic.oj.io.vn/. This is "
+            "NOT the same file as --output-dir's local verification export; "
+            "write both if you want to keep the debug copy too. Prefer "
+            "--query-number + --official-dir below unless you need an exact "
+            "custom path/filename."
         ),
+    )
+    parser.add_argument(
+        "--query-number", type=int, default=None,
+        help=(
+            "This query's sequence number in the organizer's batch (the 'N' "
+            "in the query-N-trake.txt file the organizer handed out). "
+            "Combined with --official-dir, generates the exact "
+            "query-<N>-trake.csv filename the organizer expects "
+            "(mvr.submission.trake_export.official_submission_filename) -- "
+            "ignored if --official-csv is also given."
+        ),
+    )
+    parser.add_argument(
+        "--official-dir", type=Path, default=None,
+        help="Directory to write the --query-number-generated official CSV into",
     )
     args = parser.parse_args()
 
@@ -142,8 +157,17 @@ def main() -> None:
         export_local_trake_verification_csv,
         export_local_trake_verification_json,
         export_official_trake_submission_csv,
+        official_submission_filename,
         validate_trake_prediction,
     )
+
+    official_csv_path = args.official_csv
+    if official_csv_path is None and args.query_number is not None:
+        if args.official_dir is None:
+            raise SystemExit("--query-number requires --official-dir")
+        official_csv_path = args.official_dir / official_submission_filename(
+            args.query_number, "trake"
+        )
 
     events, gap_phrases = load_query_file(args.query_file)
     query_id = args.query_id or args.query_file.stem
@@ -226,9 +250,9 @@ def main() -> None:
     if len(rows) > 5:
         print(f"  ... and {len(rows) - 5} more")
 
-    if args.official_csv is not None:
+    if official_csv_path is not None:
         try:
-            official_path = export_official_trake_submission_csv(rows, args.official_csv)
+            official_path = export_official_trake_submission_csv(rows, official_csv_path)
         except InvalidTrakePredictionError as exc:
             raise SystemExit(f"cannot write the official submission CSV: {exc}") from exc
         print(f"wrote the official AIC26 submission CSV to {official_path}")
