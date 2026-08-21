@@ -62,7 +62,7 @@ def _key(video_id: Any, keyframe_id: Any) -> str:
     return f"{video_id}{_KEY_SEPARATOR}{keyframe_id}"
 
 
-class QnaFusedRetriever:
+class FusedRetriever:
     """``search_hybrid`` over semantic + lexical, in the shape ``search_qna`` reads.
 
     Emits ``frame_id`` for the KEYFRAME id, matching what ``search_qna``
@@ -85,7 +85,24 @@ class QnaFusedRetriever:
         self._lexical = lexical_search
         self._per_branch_top_k = per_branch_top_k
 
-    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int) -> list[dict[str, Any]]:
+    def search_hybrid(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        rrf_k: int,
+        lexical_query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """``query`` đi vào nhánh dense, ``lexical_query`` vào nhánh BM25.
+
+        Hai nhánh muốn hai ngôn ngữ khác nhau. Encoder dense là OpenCLIP
+        ``RN50/openai``, tiếng Anh thuần; index lexical chứa OCR/ASR tiếng
+        Việt. Ép cùng một chuỗi vào cả hai thì luôn có một nhánh chịu thiệt.
+
+        ``lexical_query=None`` giữ nguyên hành vi cũ -- một chuỗi cho cả hai.
+        """
+        lexical_text = query if lexical_query is None else lexical_query
+
         semantic_hits = [
             _semantic_payload(result)
             for result in self._semantic.search(query, self._per_branch_top_k)
@@ -94,7 +111,9 @@ class QnaFusedRetriever:
         lexical_hits: list[Any] = []
         if self._lexical is not None:
             try:
-                lexical_hits = list(self._lexical(query, top_k=self._per_branch_top_k))
+                lexical_hits = list(
+                    self._lexical(lexical_text, top_k=self._per_branch_top_k)
+                )
             except Exception:
                 # Elasticsearch being unreachable should cost recall, not the
                 # whole query: semantic alone still returns something useful.
@@ -140,3 +159,9 @@ class QnaFusedRetriever:
             payload.update(rank=rank, score=float(score))
             results.append(payload)
         return results
+
+
+#: Tên cũ, giữ lại vì `scripts/run_qna_pipeline.py` và các test Q&A import nó.
+#: Lớp này không còn chỉ phục vụ Q&A: nhánh KIS dùng chung nó để tách truy vấn
+#: tiếng Việt khỏi truy vấn tiếng Anh.
+QnaFusedRetriever = FusedRetriever

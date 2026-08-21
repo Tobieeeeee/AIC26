@@ -14,13 +14,15 @@ def _hit(
     *,
     score: float,
     frame_idx: int = 10,
+    video_id: str = "video-a",
 ) -> dict:
     return {
-        "_id": keyframe_id,
+        # Đúng định dạng `LexicalIndexDocument.document_id` sinh ra.
+        "_id": f"{video_id}/{keyframe_id}",
         "_score": score,
         "_source": {
             "keyframe_id": keyframe_id,
-            "video_id": "video-a",
+            "video_id": video_id,
             "frame_idx": frame_idx,
             "shot_id": 1,
             "timestamp": 0.4,
@@ -106,4 +108,68 @@ def test_official_client_object_api_response_body_is_supported() -> None:
 )
 def test_malformed_search_response_is_rejected(response: dict) -> None:
     with pytest.raises(RuntimeError, match="malformed search response"):
+        map_task05b_lexical_response(response, top_k=5)
+
+
+def test_reader_accepts_the_id_the_writer_actually_produces() -> None:
+    """Phía ghi và phía đọc phải dùng chung một định dạng `_id`.
+
+    Trước đây mỗi phía được test bằng một chuỗi tự bịa -- phía ghi khẳng định
+    "L21_V010/frame-a", phía đọc dựng fixture với `_id` là keyframe_id trần --
+    nên cả hai pass trong khi ở production chúng không khớp nhau. Test này lấy
+    `_id` từ chính object phía ghi, nên không thể lệch lần nữa.
+    """
+    from mvr.indexing.lexical_index import LexicalIndexDocument
+
+    document = LexicalIndexDocument(
+        keyframe_id="034",
+        video_id="L21_V001",
+        frame_idx=1745,
+        shot_id=7,
+        timestamp=69.8,
+        ocr_text="công thức nấu ăn",
+        asr_text="",
+    )
+    response = {
+        "hits": {
+            "hits": [
+                {
+                    "_id": document.document_id,
+                    "_score": 12.5,
+                    "_source": document.to_source(),
+                }
+            ]
+        }
+    }
+
+    results = map_task05b_lexical_response(response, top_k=5)
+
+    assert len(results) == 1
+    assert (results[0].video_id, results[0].keyframe_id) == ("L21_V001", "034")
+    assert results[0].frame_idx == 1745
+
+
+def test_bare_keyframe_id_as_elasticsearch_id_is_rejected() -> None:
+    """`_id` trần là dấu hiệu index được dựng bằng code trước PR #8, nơi "034"
+    của 842 video đè lên nhau còn đúng một document. Đọc nó như dữ liệu hợp lệ
+    sẽ giấu mất việc index đã mất 99,6% số dòng."""
+    response = {
+        "hits": {
+            "hits": [
+                {
+                    "_id": "034",
+                    "_score": 1.0,
+                    "_source": {
+                        "keyframe_id": "034",
+                        "video_id": "L21_V001",
+                        "frame_idx": 1745,
+                        "shot_id": 7,
+                        "timestamp": 69.8,
+                    },
+                }
+            ]
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="_id/keyframe_id mismatch"):
         map_task05b_lexical_response(response, top_k=5)

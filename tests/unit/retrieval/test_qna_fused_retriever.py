@@ -291,3 +291,66 @@ def test_a_hit_frame_idx_disagreeing_with_the_resolver_is_not_papered_over() -> 
 
     with pytest.raises(ValueError):
         _run_search(hits, pipeline_resolver=KeyframeFrameIndexResolver({"kf-1": 261}))
+
+
+# -- one query string cannot serve two branches -------------------------
+
+
+def test_each_branch_receives_its_own_query_string() -> None:
+    """Nhánh dense là OpenCLIP RN50, tiếng Anh thuần. Nhánh lexical là BM25
+    trên OCR/ASR tiếng Việt. Một chuỗi duy nhất không thể phục vụ cả hai:
+    dịch sang tiếng Anh làm hỏng BM25, giữ tiếng Việt làm hỏng CLIP."""
+    from mvr.retrieval.qna_fusion import FusedRetriever
+
+    seen: dict[str, str] = {}
+
+    class _Semantic:
+        def search(self, query, top_k):
+            seen["dense"] = query
+            return []
+
+    def _lexical(query, *, top_k):
+        seen["lexical"] = query
+        return []
+
+    FusedRetriever(semantic_service=_Semantic(), lexical_search=_lexical).search_hybrid(
+        "a red motorbike on a rainy street",
+        top_k=10,
+        rrf_k=60,
+        lexical_query="xe máy màu đỏ trên phố mưa",
+    )
+
+    assert seen["dense"] == "a red motorbike on a rainy street"
+    assert seen["lexical"] == "xe máy màu đỏ trên phố mưa"
+
+
+def test_omitting_lexical_query_sends_one_string_to_both_branches() -> None:
+    """Hành vi mặc định phải y hệt hiện tại, nếu không toàn bộ đường Q&A đang
+    chấm điểm sẽ đổi kết quả mà không ai yêu cầu."""
+    from mvr.retrieval.qna_fusion import FusedRetriever
+
+    seen: dict[str, str] = {}
+
+    class _Semantic:
+        def search(self, query, top_k):
+            seen["dense"] = query
+            return []
+
+    def _lexical(query, *, top_k):
+        seen["lexical"] = query
+        return []
+
+    FusedRetriever(semantic_service=_Semantic(), lexical_search=_lexical).search_hybrid(
+        "chỉ một chuỗi", top_k=10, rrf_k=60
+    )
+
+    assert seen["dense"] == "chỉ một chuỗi"
+    assert seen["lexical"] == "chỉ một chuỗi"
+
+
+def test_the_old_class_name_still_works() -> None:
+    """`QnaFusedRetriever` được import ở `scripts/run_qna_pipeline.py`; đổi tên
+    mà không giữ alias sẽ làm vỡ đường Q&A đang chấm điểm."""
+    from mvr.retrieval.qna_fusion import FusedRetriever, QnaFusedRetriever
+
+    assert QnaFusedRetriever is FusedRetriever
