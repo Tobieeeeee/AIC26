@@ -65,6 +65,14 @@ def search_trake(
     query ranked the correct frame 192/268 vs. #1/268 in English on the same
     data, see docs/AIC_TRAKE_BENCHMARK_RESULTS.md). ``None`` (the default)
     keeps every event's text unchanged, identical to all prior behavior.
+
+    The shortlisting call also passes the event's ORIGINAL (untranslated)
+    text as ``search_kis()``'s ``lexical_query`` -- same split ``search_kis``
+    itself documents: dense/semantic wants English, lexical/BM25 indexes
+    OCR/ASR text that is predominantly Vietnamese, so it wants the original.
+    Only takes effect if ``multimodal_service`` is configured; otherwise
+    ``search_kis()`` ignores it, matching TRAKE's documented semantic-only
+    default.
     """
     retrieval_texts = [
         translate_for_retrieval(event.text, query_translator) for event in query.events
@@ -82,6 +90,14 @@ def search_trake(
                 multimodal_service=multimodal_service,
                 pipeline_resolver=pipeline_resolver,
                 aic_registry=aic_registry,
+                # Same split as search_kis()'s own docstring: the dense
+                # branch wants English (retrieval_text, possibly
+                # translated); the lexical/BM25 branch indexes OCR/ASR text,
+                # which is predominantly Vietnamese, so it wants the
+                # ORIGINAL event text -- never the translated one. Only
+                # takes effect when multimodal_service is configured;
+                # search_kis() ignores it otherwise.
+                lexical_query=event.text,
             )
         except Exception:
             logger.exception(

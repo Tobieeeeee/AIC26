@@ -332,6 +332,39 @@ def test_translator_translates_each_event_before_shortlisting_and_encoding(monke
     assert semantic_service.text_encoder.calls[0] == ["a red car", "a person enters a building"]
 
 
+def test_search_kis_receives_original_text_as_lexical_query_not_the_translation(
+    monkeypatch,
+) -> None:
+    """search_kis()'s dense branch (positional query) gets the translated
+    text; its lexical/BM25 branch (lexical_query kwarg) must get the
+    ORIGINAL text, because OCR/ASR indexed text is predominantly Vietnamese
+    and translating it away would only help the dense branch while hurting
+    the lexical one -- same split search_kis() itself documents."""
+    query = _query(k=2)
+    semantic_service = _FakeSemanticService(np.zeros((2, 4)))
+    seen_kwargs: list[dict] = []
+
+    def recording_search_kis(text, **kwargs):
+        seen_kwargs.append({"query": text, **kwargs})
+        return [_candidate("V1")]
+
+    monkeypatch.setattr(trake_module, "search_kis", recording_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _stub_matrix)
+    strategy = _FakeAlignmentStrategy({})
+    translator = _FakeTranslator({"event 1": "a red car", "event 2": "a person enters a building"})
+
+    search_trake(
+        query,
+        alignment_strategy=strategy,
+        semantic_service=semantic_service,
+        aic_registry=None,
+        query_translator=translator,
+    )
+
+    assert [call["query"] for call in seen_kwargs] == ["a red car", "a person enters a building"]
+    assert [call["lexical_query"] for call in seen_kwargs] == ["event 1", "event 2"]
+
+
 def test_translator_failure_falls_back_to_original_text_not_a_crash(monkeypatch) -> None:
     """A broken/uncached translator must degrade to untranslated retrieval
     (mvr.enrichment.qna_translation.translate_for_retrieval's own contract),
