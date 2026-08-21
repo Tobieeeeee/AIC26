@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import time
 from typing import Any
 from pathlib import Path
@@ -38,6 +39,34 @@ except ImportError:
     reciprocal_rank_fusion = None
 
 
+def _build_multimodal_service(semantic_service):
+    """Wire the BM25 branch when Elasticsearch is configured, else return None.
+
+    None rather than raising: the development machine has no Elasticsearch,
+    and a FAISS-only smoke test is still worth running. But it does NOT
+    measure the lexical branch, and the run has to say so rather than leaving
+    the reader to infer it.
+    """
+    es_url = os.environ.get("MVR_ES_URL", "").strip()
+    index_name = os.environ.get("MVR_ES_LEXICAL_INDEX", "").strip()
+    if not es_url or not index_name:
+        return None
+
+    from elasticsearch import Elasticsearch
+
+    from mvr.retrieval.lexical_bm25 import search_task05b_lexical
+    from mvr.retrieval.qna_fusion import FusedRetriever
+
+    client = Elasticsearch(es_url)
+
+    def lexical_search(query, *, top_k):
+        return search_task05b_lexical(client, query, index_name=index_name, top_k=top_k)
+
+    return FusedRetriever(
+        semantic_service=semantic_service, lexical_search=lexical_search
+    )
+
+
 def run_smoke_test(
     queries: list[dict],
     modes: list[str],
@@ -48,6 +77,12 @@ def run_smoke_test(
     output_dir: Path = None,
 ):
     results = []
+    multimodal_service = _build_multimodal_service(semantic_service)
+    if multimodal_service is None:
+        print(
+            "Lexical branch OFF (set MVR_ES_URL and MVR_ES_LEXICAL_INDEX to enable). "
+            "Every number below is FAISS alone."
+        )
 
     for idx, q_dict in enumerate(queries):
         query_id = q_dict.get("query_id", f"query_{idx:03d}")
@@ -63,7 +98,7 @@ def run_smoke_test(
         keyword_query = None
         decomposition_latency = 0.0
 
-        if "en_full" in modes or "qwen_keyword" in modes or "rrf" in modes:
+        if {"en_full", "qwen_keyword", "rrf", "vi_lex_en_dense"} & set(modes):
             if translate_vi_to_en:
                 start_t = time.perf_counter()
                 try:
@@ -93,7 +128,10 @@ def run_smoke_test(
         c_en = []
         c_qwen = []
         
-        def _search(text: str):
+        def _search(text: str, lexical_text: str | None = None):
+            # `lexical_text` defaults to `text`, so every pre-existing mode keeps
+            # sending ONE string to both branches -- which is what its name
+            # promises. Only the mode that explicitly asks for a split gets one.
             if not text:
                 return [], 0.0, "empty_query"
             start_s = time.perf_counter()
@@ -102,9 +140,10 @@ def run_smoke_test(
                     text,
                     top_k=top_k,
                     semantic_service=semantic_service,
-                    multimodal_service=None,
+                    multimodal_service=multimodal_service,
                     pipeline_resolver=pipeline_resolver,
-                    aic_registry=registry
+                    aic_registry=registry,
+                    lexical_query=lexical_text,
                 )
                 lat = (time.perf_counter() - start_s) * 1000.0
                 err = "empty_mapped_candidates" if not candidates else None
@@ -134,6 +173,17 @@ def run_smoke_test(
                 else:
                     cands, lat, err = _search(keyword_query)
                 c_qwen = cands
+
+            elif mode == "vi_lex_en_dense":
+                # The split this work exists to measure: English to the dense
+                # branch because its encoder is OpenCLIP RN50, Vietnamese to
+                # BM25 because the OCR and ASR indexed under it are Vietnamese.
+                if not query_en:
+                    err = "translation_failed"
+                elif multimodal_service is None:
+                    err = "lexical_branch_unavailable"
+                else:
+                    cands, lat, err = _search(query_en, lexical_text=query_vi)
 
             elif mode == "rrf":
                 if not reciprocal_rank_fusion:
@@ -222,7 +272,7 @@ def main():
     parser = argparse.ArgumentParser(description="Real-Data KIS Smoke Test")
     parser.add_argument("--query", type=str, help="Single Vietnamese query")
     parser.add_argument("--queries-file", type=Path, help="JSON file with queries")
-    parser.add_argument("--modes", type=str, default="en_full", help="Comma-separated modes (vi_raw,en_full,qwen_keyword,rrf)")
+    parser.add_argument("--modes", type=str, default="en_full", help="Comma-separated modes (vi_raw,en_full,qwen_keyword,rrf,vi_lex_en_dense)")
     parser.add_argument("--top-k", type=int, default=20, help="Top-K candidates to retrieve")
     parser.add_argument("--data-root", type=Path, help="AIC dataset root path")
     parser.add_argument("--index-dir", type=Path, default=Path("artifacts/indexes/aic_l21"), help="Semantic index directory")
