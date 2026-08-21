@@ -5,6 +5,13 @@ import json
 from pathlib import Path
 from typing import Sequence
 
+from .enrichment.asr.audio import FfmpegAudioWindowProvider
+from .enrichment.asr.chunkformer import (
+    DEFAULT_MODEL_REVISION,
+    ChunkFormerASRProvider,
+)
+from .enrichment.asr.pipeline import ASRPipelineConfig, build_asr_features
+from .enrichment.asr.vad import SileroVADProvider
 from .enrichment.embeddings.openclip import OpenClipEncoder
 from .evaluation.benchmark import (
     KisBenchmarkQuery,
@@ -118,6 +125,119 @@ def _add_build_aic_index_parser(subparsers: argparse._SubParsersAction) -> None:
         default="auto",
     )
     parser.set_defaults(command="build-aic-index")
+
+
+def _non_negative_float(value: str) -> float:
+    parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
+
+
+def _add_build_asr_features_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "build-asr-features",
+        help="Build VAD-gated Vietnamese ASR JSON independently per keyframe",
+    )
+    parser.add_argument("--dataset-root", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--pre-seconds", type=_non_negative_float, default=3.0)
+    parser.add_argument("--post-seconds", type=_non_negative_float, default=3.0)
+    parser.add_argument("--vad-threshold", type=float, default=0.5)
+    parser.add_argument("--min-speech-duration-ms", type=_positive_int, default=250)
+    parser.add_argument("--min-silence-duration-ms", type=_positive_int, default=150)
+    parser.add_argument("--merge-gap-ms", type=int, default=250)
+    parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+    parser.add_argument(
+        "--videos",
+        nargs="+",
+        default=None,
+        help="Optional video IDs (space- or comma-separated).",
+    )
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--allow-download",
+        action="store_true",
+        help="Allow Hugging Face model download; default is local-files-only.",
+    )
+    parser.add_argument("--model-revision", default=DEFAULT_MODEL_REVISION)
+    parser.set_defaults(command="build-asr-features")
+
+
+def _normalize_video_args(values: Sequence[str] | None) -> list[str] | None:
+    if values is None:
+        return None
+    video_ids = [
+        item.strip()
+        for value in values
+        for item in value.split(",")
+        if item.strip()
+    ]
+    return video_ids or None
+
+
+def _run_build_asr_features(
+    *,
+    dataset_root: Path,
+    output: Path,
+    pre_seconds: float,
+    post_seconds: float,
+    vad_threshold: float,
+    min_speech_duration_ms: int,
+    min_silence_duration_ms: int,
+    merge_gap_ms: int,
+    device: str,
+    videos: Sequence[str] | None,
+    force: bool,
+    allow_download: bool,
+    model_revision: str | None,
+) -> None:
+    if merge_gap_ms < 0:
+        raise ValueError("merge_gap_ms must be non-negative")
+    vad = SileroVADProvider(
+        threshold=vad_threshold,
+        min_speech_duration_ms=min_speech_duration_ms,
+        min_silence_duration_ms=min_silence_duration_ms,
+    )
+    asr = ChunkFormerASRProvider(
+        device=device,
+        revision=model_revision,
+        allow_download=allow_download,
+    )
+    manifest = build_asr_features(
+        dataset_root,
+        output,
+        audio_provider=FfmpegAudioWindowProvider(),
+        vad_provider=vad,
+        asr_provider=asr,
+        config=ASRPipelineConfig(
+            pre_seconds=pre_seconds,
+            post_seconds=post_seconds,
+            merge_gap_ms=merge_gap_ms,
+            force=force,
+        ),
+        videos=_normalize_video_args(videos),
+    )
+    print(json.dumps(manifest, indent=2, ensure_ascii=False))
+
+
+def _add_enrich_ocr_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "enrich-ocr",
+        help="Run temporal OCR enrichment on extracted keyframes",
+    )
+    parser.add_argument("--mapping-csv", type=Path, required=True)
+    parser.add_argument("--video-root", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "cuda", "mps"],
+        default="auto",
+    )
+    parser.add_argument("--ocr-conf-threshold", type=float, default=0.50)
+    parser.add_argument("--text-similarity-threshold", type=float, default=0.80)
+    parser.add_argument("--bbox-iou-threshold", type=float, default=0.30)
+    parser.set_defaults(command="enrich-ocr")
 
 
 def _discover_aic_video_ids(dataset_root: Path) -> list[str]:
@@ -255,7 +375,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     _add_build_index_parser(subparsers)
     _add_search_parser(subparsers)
     _add_build_aic_index_parser(subparsers)
+    _add_build_asr_features_parser(subparsers)
     _add_benchmark_kis_parser(subparsers)
+    _add_enrich_ocr_parser(subparsers)
     values = vars(parser.parse_args(argv))
     command = values.pop("command")
     if command == "ingest":
@@ -276,8 +398,46 @@ def main(argv: Sequence[str] | None = None) -> None:
     if command == "build-aic-index":
         _run_build_aic_index(**values)
         return
+    if command == "build-asr-features":
+        _run_build_asr_features(**values)
+        return
     if command == "benchmark-kis":
         _run_benchmark_kis(**values)
+        return
+    if command == "enrich-ocr":
+        mapping_csv = values.pop("mapping_csv")
+        video_root = values.pop("video_root")
+        output = values.pop("output")
+        device = values.pop("device")
+        ocr_conf = values.pop("ocr_conf_threshold")
+        text_sim = values.pop("text_similarity_threshold")
+        bbox_iou = values.pop("bbox_iou_threshold")
+
+        # We process each video separately. A naive way is to loop over videos based on the mapping-csv.
+        # However, mapping-csv contains all keyframes. We can group them by video, then find the shots.json.
+        # But wait, the instruction says "Run temporal OCR enrichment". The input contract:
+        # artifacts/ingest_<dataset>/
+        # ├── video_metadata.csv
+        # ├── keyframes/
+        # ├── keyframe_mapping.csv
+        # └── shots.json
+        # So we process the entire dataset ingest dir!
+        # wait, video-root is supposed to be the root of the raw videos?
+        # The prompt says: --video-root
+        # Yes, extract_keyframes needs the original video file.
+
+        # Let's write the handler here or call a main function in scene_text.py
+        from .enrichment.ocr.scene_text import process_dataset_ocr
+        manifest = process_dataset_ocr(
+            mapping_csv=mapping_csv,
+            video_root=video_root,
+            output_dir=output,
+            device=device,
+            ocr_conf_threshold=ocr_conf,
+            text_similarity_threshold=text_sim,
+            bbox_iou_threshold=bbox_iou
+        )
+        print(json.dumps(manifest, indent=2, ensure_ascii=False))
         return
 
     index = FaissIndex.load(values.pop("index"))

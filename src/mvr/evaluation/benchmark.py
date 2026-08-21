@@ -11,7 +11,7 @@ from __future__ import annotations
 import csv
 import statistics
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -110,59 +110,187 @@ def summarize_kis_benchmark(
     return {name: _summarize_one_config(group) for name, group in by_config.items()}
 
 
+#: Exactly the schema `ingestion.metadata.write_metadata` emits, in its
+#: order. Matching it column-for-column is the point: a mapping produced
+#: from organizer data and one produced by the team's own ingestion must be
+#: interchangeable, or every consumer needs to know which one it is holding.
+KEYFRAME_MAPPING_COLUMNS = (
+    "keyframe_id",
+    "video_id",
+    "shot_id",
+    "ordinal",
+    "frame_idx",
+    "timestamp",
+    "image_path",
+)
+
+#: `shot_id` for a keyframe that no supplied shot boundary contains. Zero is
+#: safe as a sentinel because the team's detectors number shots from 1
+#: (`ingestion.shot_detection.transnetv2`, `.pyscenedetect`), so it cannot
+#: collide with a real shot, and it sorts ahead of them.
+UNKNOWN_SHOT_ID = 0
+
+
+def _organizer_keyframe_dirs(dataset_root: Path, video_id: str) -> list[Path]:
+    """Where a video's keyframes may live, normalized layout first.
+
+    A normalized root holds `<root>/keyframes/<video_id>/`. The raw organizer
+    download splits them across `Keyframes_L21/`, `Keyframes_L26_a/`, `_b/`,
+    ... so both shapes are searched rather than requiring a copy of 166,550
+    images into one tree.
+    """
+    candidates = [dataset_root / "keyframes" / video_id]
+    candidates.extend(
+        path / "keyframes" / video_id for path in sorted(dataset_root.glob("Keyframes_*"))
+    )
+    return [path for path in candidates if path.is_dir()]
+
+
+def _organizer_mapping_csv(dataset_root: Path, video_id: str) -> Path | None:
+    """The video's `map_keyframes` CSV under either layout, or `None`.
+
+    A normalized root holds `<root>/map_keyframes/`; the raw download nests
+    it as `<root>/map-keyframes-aic25-b1/map-keyframes/`. Missing the second
+    shape produced zero rows against the real corpus while reporting success.
+    """
+    candidates = [dataset_root / "map_keyframes" / f"{video_id}.csv"]
+    candidates.extend(
+        path / "map-keyframes" / f"{video_id}.csv"
+        for path in sorted(dataset_root.glob("map-keyframes*"))
+    )
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def _shot_id_for(frame_idx: int, boundaries: Sequence[tuple[int, int]]) -> int:
+    """Which supplied shot contains this frame, or `UNKNOWN_SHOT_ID`.
+
+    Numbered from 1 to match `ingestion.shot_detection`, so a `shot_id` here
+    means the same thing as a `shot_id` the team's own detectors produce.
+    """
+    for shot_id, (start, end) in enumerate(boundaries, start=1):
+        if start <= frame_idx <= end:
+            return shot_id
+    return UNKNOWN_SHOT_ID
+
+
 def build_aic_keyframe_mapping_csv(
     dataset_root: Path | str,
     output_path: Path | str,
     video_ids: Sequence[str],
+    *,
+    shot_boundaries: Mapping[str, Sequence[tuple[int, int]]] | None = None,
 ) -> Path:
-    """Adapt AIC organizer `map_keyframes/<video_id>.csv` files into the
-    `keyframe_mapping.csv` shape `indexing.semantic_builder.build_semantic_index`
-    already expects, so the existing (verified) index-building code can be
-    reused unchanged rather than duplicated for organizer data.
+    """Adapt AIC organizer keyframe data into the canonical `keyframe_mapping.csv`.
 
-    Uses the verified organizer `frame_idx`-mapping identity (n -> frame_idx)
-    indirectly: `keyframe_id` here is the organizer keyframe reference (e.g.
-    "003"), which `AicDatasetRegistry.resolve_frame()` can resolve to the
-    exact original-video `frame_idx` later -- this function does not itself
-    resolve or emit `frame_idx`. Rows whose keyframe JPEG does not exist
-    locally are skipped rather than guessed.
+    Everything downstream reads keyframe identity from this one file --
+    `task05a.load_canonical_mapping`, `ocr.docker_ocr`, and the semantic
+    index builder -- so adopting the organizer's keyframes as the team's
+    canonical identity means emitting this CSV, not refactoring a pipeline.
+
+    `keyframe_id` is the **JPEG stem** ("034"), not the CSV `n` column
+    ("34"). The stem is what exists on disk and what `image_path` must agree
+    with; the two spellings do not join, and a mismatch yields an empty
+    result silently rather than an error. `frame_idx` is taken from the
+    organizer's own column rather than derived from fps and timestamp: it is
+    the number the competition scores on, they state it, and re-deriving it
+    would only introduce a rounding disagreement.
+
+    `shot_boundaries` optionally assigns `shot_id` from the team's own shot
+    detection, letting TransNetV2 supply boundaries while the organizer
+    supplies identity; `ordinal` is then the keyframe's 1-based position
+    within its shot, exactly as `ingestion.keyframes` numbers it.
+
+    **Without boundaries each organizer keyframe becomes its own shot**:
+    `shot_id` is the organizer's own `n`, and `ordinal` is 1. An earlier
+    version left `shot_id` blank -- reasoning that the organizer ships no
+    shot identity, so inventing one would be unauditable. That reasoning
+    checked `indexing.lexical_index`, which accepts a null `shot_id`, and
+    missed that a null there is a *document* field while this is a *CSV
+    column*: nine call sites across `task05a`, `feature_extraction`,
+    `docker_ocr`, `scene_text` and the ASR mapping all do `int(row["shot_id"])`
+    and raise on a blank. The blank mapping could not be loaded by anything.
+
+    One-shot-per-keyframe is the honest degradation rather than a guess at
+    boundaries. The organizer's keyframes are already shot-aware -- measured
+    spacing runs 0.04s to 7.0s with 30-150 distinct values per video, which
+    is cut-driven, not uniform sampling -- so "each keyframe stands for its
+    own shot" restates their sampling instead of inventing cuts. What it
+    costs is grouping: `scene_text` and `docker_ocr` dedupe OCR *within* a
+    shot, and singleton shots mean no dedupe, which reads every keyframe
+    independently. That is the safe direction. Collapsing a video into one
+    shot would be the alternative, and it would make temporal OCR sample one
+    anchor for ~190 keyframes.
+
+    Rows whose keyframe JPEG does not exist locally, and videos with no
+    mapping CSV, are skipped rather than guessed -- 23 of 873 videos ship no
+    keyframes, and a fabricated `frame_idx` would poison the one number the
+    competition scores on.
     """
     dataset_root = Path(dataset_root)
     rows: list[dict[str, str]] = []
+    mappings_found = 0
     for video_id in video_ids:
-        csv_path = dataset_root / "map_keyframes" / f"{video_id}.csv"
+        csv_path = _organizer_mapping_csv(dataset_root, video_id)
+        if csv_path is None:
+            continue
+        mappings_found += 1
+
         # Index the video's JPEGs by their numeric value rather than assuming a
         # zero-padding width, matching AicDatasetRegistry.keyframe_path().
-        keyframe_dir = dataset_root / "keyframes" / video_id
         images_by_number: dict[int, Path] = {}
-        if keyframe_dir.is_dir():
+        for keyframe_dir in _organizer_keyframe_dirs(dataset_root, video_id):
             for image_path in keyframe_dir.glob("*.jpg"):
                 try:
-                    images_by_number[int(image_path.stem)] = image_path
+                    images_by_number.setdefault(int(image_path.stem), image_path)
                 except ValueError:
                     continue
 
-        with csv_path.open(newline="", encoding="utf-8") as handle:
+        boundaries = None if shot_boundaries is None else shot_boundaries.get(video_id)
+        # `ordinal` counts keyframes within a shot, so it needs the shot to be
+        # known first. Rows arrive in `n` order, which is frame order, so a
+        # running per-shot counter numbers them exactly as ingestion does.
+        ordinals: dict[int, int] = {}
+        with csv_path.open(newline="", encoding="utf-8-sig") as handle:
             for row in csv.DictReader(handle):
                 number = int(row["n"].strip())
                 image_path = images_by_number.get(number)
                 if image_path is None:
                     continue
+                frame_idx = int(row["frame_idx"].strip())
+                if boundaries:
+                    shot_id = _shot_id_for(frame_idx, boundaries)
+                    ordinals[shot_id] = ordinals.get(shot_id, 0) + 1
+                    ordinal = ordinals[shot_id]
+                else:
+                    shot_id, ordinal = number, 1
                 rows.append(
                     {
                         "keyframe_id": image_path.stem,
                         "video_id": video_id,
+                        "shot_id": str(shot_id),
+                        "ordinal": str(ordinal),
+                        "frame_idx": str(frame_idx),
                         "timestamp": row["pts_time"],
                         "image_path": str(image_path),
                     }
                 )
 
+    if video_ids and mappings_found == 0:
+        # Not finding a single mapping CSV means the dataset root is wrong --
+        # a video merely missing its downloaded keyframes still has one, and
+        # legitimately yields no rows. An empty CSV would be accepted happily
+        # by everything downstream: OCR, Task05A and the index builder would
+        # each report "0 documents" as if that were the data. Against the real
+        # corpus this went unnoticed until the row count was inspected by hand.
+        raise ValueError(
+            f"no map_keyframes CSV found under {dataset_root} for any of "
+            f"{len(video_ids)} video(s); check the dataset root"
+        )
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(
-            handle, fieldnames=["keyframe_id", "video_id", "timestamp", "image_path"]
-        )
+        writer = csv.DictWriter(handle, fieldnames=list(KEYFRAME_MAPPING_COLUMNS))
         writer.writeheader()
         writer.writerows(rows)
     return output_path

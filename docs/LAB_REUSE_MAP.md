@@ -316,6 +316,34 @@ This is not a lab-reference deviation (`GAP_PHRASE_TABLE` and its defaults are
 new TRAKE-owned code, not ported from the lab), so it is recorded here for
 completeness rather than as a numbered deviation.
 
+---
+
+## Task05A v1 — Task04 artifact consumption without new lab migration
+
+Task05A v1 migrates no new lab implementation and does not change Task04 model
+behavior. It consumes immutable Task04 artifacts and adds index-document
+preparation under `src/mvr/indexing/`.
+
+| Task04 artifact/component | Task05A target | Behavior preserved / compatibility handling | Verification |
+|---|---|---|---|
+| Task04B OCR per-keyframe JSON (`text`, `conf`, `support_count`) | `indexing.filtering`, `indexing.task05a` | Does not rerun OCR. Applies only the approved Task05A confidence, temporal-support/high-confidence, punctuation-only, normalization, and intra-keyframe dedup gates. Numeric-only text and Vietnamese diacritics are preserved. | VERIFIED |
+| Task04C ASR artifact contract | `indexing.filtering`, `indexing.task05a` | No ASR artifact exists in the current real corpus, so no fields/confidence values are invented. Empty ASR output and `confidence_filter_active=false` are recorded. | VERIFIED |
+| Task04A Faster R-CNN JSON and explicit person/car counts | `indexing.filtering.project_object_metadata` | Does not rerun inference, thresholding, or NMS. Existing person/car counts are authoritative; other retained Task04 labels are counted and projected deterministically. | VERIFIED |
+| Task04A CLIP `.npy` vectors and mapping CSV | `indexing.validation.validate_clip_vector`, `indexing.task05a` | Does not rerun CLIP or suppress near-duplicates. Validates numeric dtype, dimension, finiteness, row existence, and full canonical identity before emitting a vector reference. | VERIFIED |
+| Task04 branch identity | `indexing.task05a` | The real CLIP/Object artifacts use a 643-row TransNetV2 mapping while the selected canonical OCR/ingest mapping has 677 rows. Task05A reports incompatible/missing rows and leaves their branch flags false; it does not repair or positional-join them. | VERIFIED |
+
+## Task05B v1 — Elasticsearch/BM25 lexical branch reuse
+
+Task05B consumes Task05A processed documents and reuses only the appropriate
+existing Elasticsearch/Lab infrastructure conventions. The legacy Lab 6
+multimodal mapping/query behavior remains available and unchanged.
+
+| Existing component | Task05B target | Preserved/adapted behavior | Verification |
+|---|---|---|---|
+| `src/mvr/indexing/elasticsearch_index.py` / Lab 6 Elasticsearch 8.x bulk lifecycle | `src/mvr/indexing/lexical_index.py` | Reused injected client, helper-based bulk actions, chunk size 50, request timeout 120, explicit lifecycle, and final refresh/count conventions. Task05B uses its locked lexical-only mapping and surfaces partial failures instead of using the legacy vector/object schema. | VERIFIED |
+| `src/mvr/retrieval/lexical.py` / Lab 6 `multi_match` BM25 request pattern | `src/mvr/retrieval/lexical_bm25.py` | Reused Elasticsearch `multi_match` execution. Task05B intentionally removes the legacy OCR boost, caption fallback, match-all behavior, object filters, and highlighting to satisfy equal weighting over exactly `ocr_text` and `asr_text`. Default Elasticsearch BM25 remains unchanged. | VERIFIED |
+| Task05A processed-document contract | `src/mvr/indexing/lexical_index.py` | Uses authoritative `indexability.lexical`, `ocr.joined`, `asr.joined`, and canonical identity fields directly. No Task04/raw OCR/ASR reads, filtering, normalization, or deduplication occur. | VERIFIED |
+
 ## Status values
 
 ```text

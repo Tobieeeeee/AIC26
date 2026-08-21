@@ -1,9 +1,11 @@
+import argparse
 import pytest
 import json
 import numpy as np
 import csv
 from pathlib import Path
 from mvr.enrichment.feature_extraction import extract_clip_features, extract_objects, sort_keyframes_deterministically
+from scripts.run_feature_extraction import parse_embedding_providers
 
 class FakeEncoder:
     def __init__(self):
@@ -27,6 +29,20 @@ class FakeDetector:
             {"label": "person", "class_id": 1, "score": 0.88, "bbox": [10.0, 10.0, 20.0, 20.0]},
             {"label": "car", "class_id": 3, "score": 0.95, "bbox": [20.0, 20.0, 30.0, 30.0]}
         ]
+
+
+def test_parse_embedding_provider_list():
+    assert parse_embedding_providers("beit3, metaclip2,perception_encoder") == (
+        "beit3",
+        "metaclip2",
+        "perception_encoder",
+    )
+
+
+@pytest.mark.parametrize("value", ["", "  ", "beit3,beit3"])
+def test_parse_embedding_provider_list_rejects_empty_or_duplicate(value):
+    with pytest.raises(argparse.ArgumentTypeError):
+        parse_embedding_providers(value)
 
 def test_extract_clip_features(tmp_path):
     # Setup fake keyframe images and mapping
