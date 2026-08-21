@@ -9,6 +9,23 @@ from mvr.retrieval.kis import KeyframeFrameIndexResolver
 from mvr.retrieval.semantic import SearchResult
 
 
+def _resolver(mapping, videos=("video-1", "video-2")):
+    """Fixtures pre-dating the pair key: one keyframe id per video.
+
+    `KeyframeFrameIndexResolver` now keys on `(video_id, keyframe_id)`,
+    because a bare keyframe id does not identify a keyframe -- the
+    organizer's 166,550 keyframes carry only 632 distinct ids. These
+    fixtures use synthetic ids that were meant to resolve whatever video
+    asked, so registering each id under every video the test uses keeps
+    exactly the behaviour they were written to check.
+    """
+    return KeyframeFrameIndexResolver(
+        {(video, kf): idx for video in videos for kf, idx in mapping.items()}
+    )
+
+
+
+
 @dataclass
 class FakeSemanticService:
     loaded: bool = True
@@ -345,7 +362,7 @@ def test_semantic_runtime_failure_is_not_reported_as_success() -> None:
 
 
 def test_kis_search_returns_ranked_response_contract() -> None:
-    resolver = KeyframeFrameIndexResolver({"frame-high": 261, "frame-low": 45})
+    resolver = _resolver({"frame-high": 261, "frame-low": 45})
     client = TestClient(
         create_app(
             semantic_service=FakeSemanticService(),
@@ -383,7 +400,7 @@ def test_kis_search_returns_ranked_response_contract() -> None:
 
 
 def test_kis_search_rejects_blank_query_and_invalid_top_k() -> None:
-    resolver = KeyframeFrameIndexResolver({"frame-high": 261})
+    resolver = _resolver({"frame-high": 261})
     client = TestClient(
         create_app(
             semantic_service=FakeSemanticService(),
@@ -447,7 +464,7 @@ class _CallCountingMultimodalService(FakeMultimodalService):
 
 
 def test_kis_search_never_rebuilds_index_or_reloads_model_per_request() -> None:
-    resolver = KeyframeFrameIndexResolver({"frame-high": 261, "frame-low": 45})
+    resolver = _resolver({"frame-high": 261, "frame-low": 45})
     multimodal_service = _CallCountingMultimodalService()
     client = TestClient(
         create_app(
@@ -499,7 +516,7 @@ class _FakeAnswerReasoner:
 
 
 def test_qna_search_returns_ranked_answered_response_contract() -> None:
-    resolver = KeyframeFrameIndexResolver({"frame-high": 261, "frame-low": 45})
+    resolver = _resolver({"frame-high": 261, "frame-low": 45})
     reasoner = _FakeAnswerReasoner(answer="blue", source="context-grounded")
     client = TestClient(
         create_app(
@@ -554,7 +571,7 @@ def test_qna_search_exposes_servable_image_url_when_keyframes_are_mounted(tmp_pa
         create_app(
             semantic_service=FakeSemanticService(),
             multimodal_service=_AbsolutePathService(),
-            kis_pipeline_resolver=KeyframeFrameIndexResolver({"frame-high": 261, "frame-low": 45}),
+            kis_pipeline_resolver=_resolver({"frame-high": 261, "frame-low": 45}),
             keyframe_dir=keyframe_dir,
             qna_answer_reasoner=_FakeAnswerReasoner(),
         )
@@ -576,7 +593,7 @@ def test_qna_search_hides_image_paths_outside_the_served_directory(tmp_path) -> 
         create_app(
             semantic_service=FakeSemanticService(),
             multimodal_service=FakeMultimodalService(),
-            kis_pipeline_resolver=KeyframeFrameIndexResolver({"frame-high": 261}),
+            kis_pipeline_resolver=_resolver({"frame-high": 261}),
             keyframe_dir=tmp_path / "somewhere-else",
             qna_answer_reasoner=_FakeAnswerReasoner(),
         )
@@ -592,7 +609,7 @@ def test_qna_search_hides_image_paths_outside_the_served_directory(tmp_path) -> 
 
 
 def test_qna_search_rejects_blank_fields_and_invalid_top_k() -> None:
-    resolver = KeyframeFrameIndexResolver({"frame-high": 261})
+    resolver = _resolver({"frame-high": 261})
     client = TestClient(
         create_app(
             semantic_service=FakeSemanticService(),
@@ -617,7 +634,7 @@ def test_qna_search_rejects_blank_fields_and_invalid_top_k() -> None:
 
 
 def test_qna_search_returns_503_when_no_answer_reasoner_configured() -> None:
-    resolver = KeyframeFrameIndexResolver({"frame-high": 261})
+    resolver = _resolver({"frame-high": 261})
     client = TestClient(
         create_app(
             semantic_service=FakeSemanticService(),

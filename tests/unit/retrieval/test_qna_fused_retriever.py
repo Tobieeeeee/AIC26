@@ -28,6 +28,25 @@ from mvr.retrieval.lexical_bm25 import LexicalSearchHit
 from mvr.retrieval.qna_fusion import QnaFusedRetriever
 
 
+def _resolver(mapping, videos=("V", "A", "B")):
+    """Fixtures pre-dating the pair key: one keyframe id per video.
+
+    `KeyframeFrameIndexResolver` now keys on `(video_id, keyframe_id)`,
+    because a bare keyframe id does not identify a keyframe -- the
+    organizer's 166,550 keyframes carry only 632 distinct ids. These
+    fixtures use synthetic ids that were meant to resolve whatever video
+    asked, so registering each id under every video the test uses keeps
+    exactly the behaviour they were written to check.
+    """
+    from mvr.retrieval.kis import KeyframeFrameIndexResolver
+
+    return KeyframeFrameIndexResolver(
+        {(video, kf): idx for video in videos for kf, idx in mapping.items()}
+    )
+
+
+
+
 class _FakeSemanticResult:
     def __init__(self, video_id: str, frame_id: str, score: float, rank: int) -> None:
         self.video_id = video_id
@@ -272,7 +291,7 @@ def test_a_neighbour_never_inherits_the_hit_frame_idx() -> None:
     results = _run_search(
         hits,
         temporal_radius=1,
-        pipeline_resolver=KeyframeFrameIndexResolver({"kf-2": 200, "kf-3": 300}),
+        pipeline_resolver=_resolver({"kf-2": 200, "kf-3": 300}),
     )
 
     assert [(c.keyframe_id, c.frame_id) for c in results] == [
@@ -290,4 +309,67 @@ def test_a_hit_frame_idx_disagreeing_with_the_resolver_is_not_papered_over() -> 
     ]
 
     with pytest.raises(ValueError):
-        _run_search(hits, pipeline_resolver=KeyframeFrameIndexResolver({"kf-1": 261}))
+        _run_search(hits, pipeline_resolver=_resolver({"kf-1": 261}))
+
+
+# -- one query string cannot serve two branches -------------------------
+
+
+def test_each_branch_receives_its_own_query_string() -> None:
+    """Nhánh dense là OpenCLIP RN50, tiếng Anh thuần. Nhánh lexical là BM25
+    trên OCR/ASR tiếng Việt. Một chuỗi duy nhất không thể phục vụ cả hai:
+    dịch sang tiếng Anh làm hỏng BM25, giữ tiếng Việt làm hỏng CLIP."""
+    from mvr.retrieval.qna_fusion import FusedRetriever
+
+    seen: dict[str, str] = {}
+
+    class _Semantic:
+        def search(self, query, top_k):
+            seen["dense"] = query
+            return []
+
+    def _lexical(query, *, top_k):
+        seen["lexical"] = query
+        return []
+
+    FusedRetriever(semantic_service=_Semantic(), lexical_search=_lexical).search_hybrid(
+        "a red motorbike on a rainy street",
+        top_k=10,
+        rrf_k=60,
+        lexical_query="xe máy màu đỏ trên phố mưa",
+    )
+
+    assert seen["dense"] == "a red motorbike on a rainy street"
+    assert seen["lexical"] == "xe máy màu đỏ trên phố mưa"
+
+
+def test_omitting_lexical_query_sends_one_string_to_both_branches() -> None:
+    """Hành vi mặc định phải y hệt hiện tại, nếu không toàn bộ đường Q&A đang
+    chấm điểm sẽ đổi kết quả mà không ai yêu cầu."""
+    from mvr.retrieval.qna_fusion import FusedRetriever
+
+    seen: dict[str, str] = {}
+
+    class _Semantic:
+        def search(self, query, top_k):
+            seen["dense"] = query
+            return []
+
+    def _lexical(query, *, top_k):
+        seen["lexical"] = query
+        return []
+
+    FusedRetriever(semantic_service=_Semantic(), lexical_search=_lexical).search_hybrid(
+        "chỉ một chuỗi", top_k=10, rrf_k=60
+    )
+
+    assert seen["dense"] == "chỉ một chuỗi"
+    assert seen["lexical"] == "chỉ một chuỗi"
+
+
+def test_the_old_class_name_still_works() -> None:
+    """`QnaFusedRetriever` được import ở `scripts/run_qna_pipeline.py`; đổi tên
+    mà không giữ alias sẽ làm vỡ đường Q&A đang chấm điểm."""
+    from mvr.retrieval.qna_fusion import FusedRetriever, QnaFusedRetriever
+
+    assert QnaFusedRetriever is FusedRetriever
