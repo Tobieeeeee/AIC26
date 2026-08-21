@@ -13,7 +13,7 @@ class MockAicRegistry:
 
 def test_pipeline_resolver_wins_before_aic_registry_fallback():
     # Setup mock resolver
-    mapping = {"video7688_S0002_K01": 95}
+    mapping = {("video7688", "video7688_S0002_K01"): 95}
     resolver = KeyframeFrameIndexResolver(mapping)
     
     registry = MockAicRegistry()
@@ -30,7 +30,7 @@ def test_pipeline_resolver_wins_before_aic_registry_fallback():
     assert frame_idx == 95, f"Expected 95, got {frame_idx}"
 
 def test_pipeline_resolver_missing_mapping():
-    resolver = KeyframeFrameIndexResolver({"other_video": 10})
+    resolver = KeyframeFrameIndexResolver({("video7688", "other_video"): 10})
     registry = MockAicRegistry()
     
     # If the pipeline resolver does not contain the mapping, it falls back.

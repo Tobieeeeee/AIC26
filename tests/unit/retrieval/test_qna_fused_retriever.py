@@ -28,6 +28,25 @@ from mvr.retrieval.lexical_bm25 import LexicalSearchHit
 from mvr.retrieval.qna_fusion import QnaFusedRetriever
 
 
+def _resolver(mapping, videos=("V", "A", "B")):
+    """Fixtures pre-dating the pair key: one keyframe id per video.
+
+    `KeyframeFrameIndexResolver` now keys on `(video_id, keyframe_id)`,
+    because a bare keyframe id does not identify a keyframe -- the
+    organizer's 166,550 keyframes carry only 632 distinct ids. These
+    fixtures use synthetic ids that were meant to resolve whatever video
+    asked, so registering each id under every video the test uses keeps
+    exactly the behaviour they were written to check.
+    """
+    from mvr.retrieval.kis import KeyframeFrameIndexResolver
+
+    return KeyframeFrameIndexResolver(
+        {(video, kf): idx for video in videos for kf, idx in mapping.items()}
+    )
+
+
+
+
 class _FakeSemanticResult:
     def __init__(self, video_id: str, frame_id: str, score: float, rank: int) -> None:
         self.video_id = video_id
@@ -272,7 +291,7 @@ def test_a_neighbour_never_inherits_the_hit_frame_idx() -> None:
     results = _run_search(
         hits,
         temporal_radius=1,
-        pipeline_resolver=KeyframeFrameIndexResolver({"kf-2": 200, "kf-3": 300}),
+        pipeline_resolver=_resolver({"kf-2": 200, "kf-3": 300}),
     )
 
     assert [(c.keyframe_id, c.frame_id) for c in results] == [
@@ -290,7 +309,7 @@ def test_a_hit_frame_idx_disagreeing_with_the_resolver_is_not_papered_over() -> 
     ]
 
     with pytest.raises(ValueError):
-        _run_search(hits, pipeline_resolver=KeyframeFrameIndexResolver({"kf-1": 261}))
+        _run_search(hits, pipeline_resolver=_resolver({"kf-1": 261}))
 
 
 # -- one query string cannot serve two branches -------------------------

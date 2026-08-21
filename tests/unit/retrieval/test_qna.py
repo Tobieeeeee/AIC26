@@ -10,6 +10,23 @@ from mvr.retrieval.kis import KeyframeFrameIndexResolver
 from mvr.retrieval.qna import QnaCandidate, search_qna
 
 
+def _resolver(mapping, videos=("L21_V001",)):
+    """Fixtures pre-dating the pair key: one keyframe id per video.
+
+    `KeyframeFrameIndexResolver` now keys on `(video_id, keyframe_id)`,
+    because a bare keyframe id does not identify a keyframe -- the
+    organizer's 166,550 keyframes carry only 632 distinct ids. These
+    fixtures use synthetic ids that were meant to resolve whatever video
+    asked, so registering each id under every video the test uses keeps
+    exactly the behaviour they were written to check.
+    """
+    return KeyframeFrameIndexResolver(
+        {(video, kf): idx for video in videos for kf, idx in mapping.items()}
+    )
+
+
+
+
 @dataclass
 class _FakeSemanticResult:
     frame_id: str
@@ -140,7 +157,7 @@ def test_search_qna_rejects_ocr_engine_without_image_loader() -> None:
 
 
 def test_search_qna_returns_answered_ranked_candidates() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    resolver = _resolver({"kf-1": 261})
     hits = [_hit("L21_V001", "kf-1", score=0.9)]
     service = _FakeMultimodalService(hits)
     reasoner = _reasoner("5", "context-grounded")
@@ -160,7 +177,7 @@ def test_search_qna_returns_answered_ranked_candidates() -> None:
 
 
 def test_search_qna_wires_ocr_and_objects_into_context() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    resolver = _resolver({"kf-1": 261})
     hits = [_hit("L21_V001", "kf-1", score=0.9)]
     service = _FakeMultimodalService(hits)
     ocr = _FakeOcrEngine("EXIT 5B")
@@ -197,7 +214,7 @@ def test_search_qna_wires_ocr_and_objects_into_context() -> None:
 def test_search_qna_preserves_image_path_for_human_review() -> None:
     """A human/VLM reviewing a Q&A candidate must be able to see the frame,
     so the retrieval hit's image path has to survive into the candidate."""
-    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    resolver = _resolver({"kf-1": 261})
     service = _FakeMultimodalService([_hit("L21_V001", "kf-1", score=0.9)])
 
     results = search_qna(
@@ -210,7 +227,7 @@ def test_search_qna_preserves_image_path_for_human_review() -> None:
 
 
 def test_search_qna_tolerates_hits_without_an_image_path() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    resolver = _resolver({"kf-1": 261})
     hit = {"video_id": "L21_V001", "frame_id": "kf-1", "score": 0.9, "timestamp": 1.0}
     service = _FakeMultimodalService([hit])
 
@@ -243,7 +260,7 @@ def test_search_qna_translates_only_the_retrieval_query() -> None:
         def translate(self, text: str) -> str:
             return "TRANSLATED: " + text
 
-    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    resolver = _resolver({"kf-1": 261})
     service = _FakeMultimodalService([_hit("L21_V001", "kf-1", score=0.9)])
 
     class _CapturingBackend:
@@ -298,7 +315,7 @@ def test_search_qna_falls_back_to_original_when_translation_fails() -> None:
 
 
 def test_search_qna_drops_unresolvable_candidates_without_guessing() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-a": 10})  # kf-b unknown
+    resolver = _resolver({"kf-a": 10})  # kf-b unknown
     hits = [_hit("L21_V001", "kf-a", score=0.9), _hit("L21_V001", "kf-b", score=0.8)]
     service = _FakeMultimodalService(hits)
 
@@ -313,7 +330,7 @@ def test_search_qna_drops_unresolvable_candidates_without_guessing() -> None:
 
 
 def test_search_qna_deduplicates_same_video_and_frame_id() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-a": 10, "kf-b": 10})
+    resolver = _resolver({"kf-a": 10, "kf-b": 10})
     hits = [_hit("L21_V001", "kf-a", score=0.9), _hit("L21_V001", "kf-b", score=0.8)]
     service = _FakeMultimodalService(hits)
 
@@ -329,7 +346,7 @@ def test_search_qna_deduplicates_same_video_and_frame_id() -> None:
 
 def test_search_qna_top_100_works() -> None:
     mapping = {f"kf-{i}": i for i in range(150)}
-    resolver = KeyframeFrameIndexResolver(mapping)
+    resolver = _resolver(mapping)
     hits = [_hit("L21_V001", f"kf-{i}", score=1.0 - i / 1000) for i in range(150)]
     service = _FakeMultimodalService(hits)
     reasoner = _reasoner("1", "context-grounded")
@@ -356,7 +373,7 @@ def test_qna_candidate_to_answer_matches_evaluator_identity() -> None:
 
 
 def test_search_qna_objects_path_resolver_is_wired_per_candidate() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    resolver = _resolver({"kf-1": 261})
     hits = [_hit("L21_V001", "kf-1", score=0.9)]
     service = _FakeMultimodalService(hits)
     calls: list[tuple[str, str]] = []

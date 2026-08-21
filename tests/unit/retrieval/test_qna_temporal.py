@@ -20,6 +20,23 @@ from mvr.retrieval.kis import KeyframeFrameIndexResolver
 from mvr.retrieval.qna import search_qna, shift_keyframe_id
 
 
+def _resolver(mapping, videos=("V", "W", "X")):
+    """Fixtures pre-dating the pair key: one keyframe id per video.
+
+    `KeyframeFrameIndexResolver` now keys on `(video_id, keyframe_id)`,
+    because a bare keyframe id does not identify a keyframe -- the
+    organizer's 166,550 keyframes carry only 632 distinct ids. These
+    fixtures use synthetic ids that were meant to resolve whatever video
+    asked, so registering each id under every video the test uses keeps
+    exactly the behaviour they were written to check.
+    """
+    return KeyframeFrameIndexResolver(
+        {(video, kf): idx for video in videos for kf, idx in mapping.items()}
+    )
+
+
+
+
 class _FakeMultimodalService:
     def __init__(self, hits: list[dict]) -> None:
         self._hits = hits
@@ -113,7 +130,7 @@ def test_search_qna_rejects_a_non_positive_neighbour_cost() -> None:
 
 
 def test_temporal_radius_zero_is_todays_behaviour() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-1": 100, "kf-2": 200, "kf-3": 300})
+    resolver = _resolver({"kf-1": 100, "kf-2": 200, "kf-3": 300})
     service = _FakeMultimodalService([_hit("V", "kf-2", 0.9)])
 
     results = search_qna(
@@ -128,7 +145,7 @@ def test_temporal_radius_zero_is_todays_behaviour() -> None:
 
 
 def test_temporal_expansion_emits_resolvable_neighbours() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-1": 100, "kf-2": 200, "kf-3": 300})
+    resolver = _resolver({"kf-1": 100, "kf-2": 200, "kf-3": 300})
     service = _FakeMultimodalService([_hit("V", "kf-2", 0.9)])
 
     results = search_qna(
@@ -143,7 +160,7 @@ def test_temporal_expansion_emits_resolvable_neighbours() -> None:
 def test_temporal_expansion_drops_neighbours_that_do_not_resolve() -> None:
     """The same 'never guess a frame_id' rule the primary hits obey: a
     keyframe the resolver has never heard of does not exist."""
-    resolver = KeyframeFrameIndexResolver({"kf-2": 200, "kf-3": 300})
+    resolver = _resolver({"kf-2": 200, "kf-3": 300})
     service = _FakeMultimodalService([_hit("V", "kf-2", 0.9)])
 
     results = search_qna(
@@ -160,7 +177,7 @@ def test_neighbours_record_where_they_came_from() -> None:
     """A neighbour is a hedge, not a retrieval hit. It carries the parent's
     score because it has none of its own, so the provenance fields are what
     keep that from being a silent claim."""
-    resolver = KeyframeFrameIndexResolver({"kf-2": 200, "kf-3": 300})
+    resolver = _resolver({"kf-2": 200, "kf-3": 300})
     service = _FakeMultimodalService([_hit("V", "kf-2", 0.87)])
 
     results = search_qna(
@@ -180,7 +197,7 @@ def test_neighbours_record_where_they_came_from() -> None:
 def test_expansion_never_demotes_the_top_retrieval_hit() -> None:
     """R@1 is one fifth of the final score; expansion may only spend slots
     the ranking was not already using."""
-    resolver = KeyframeFrameIndexResolver({f"kf-{n}": n * 10 for n in range(1, 10)})
+    resolver = _resolver({f"kf-{n}": n * 10 for n in range(1, 10)})
     service = _FakeMultimodalService([_hit("V", "kf-5", 0.9), _hit("W", "kf-2", 0.8)])
 
     results = search_qna(
@@ -194,7 +211,7 @@ def test_expansion_never_demotes_the_top_retrieval_hit() -> None:
 
 
 def test_a_neighbour_colliding_with_another_hit_is_not_duplicated() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-1": 100, "kf-2": 200, "kf-3": 300})
+    resolver = _resolver({"kf-1": 100, "kf-2": 200, "kf-3": 300})
     service = _FakeMultimodalService([_hit("V", "kf-1", 0.9), _hit("V", "kf-2", 0.8)])
 
     results = search_qna(
@@ -211,7 +228,7 @@ def test_a_neighbour_colliding_with_another_hit_is_not_duplicated() -> None:
 
 
 def test_a_high_neighbour_cost_places_every_retrieval_hit_first() -> None:
-    resolver = KeyframeFrameIndexResolver({f"kf-{n}": n * 10 for n in range(1, 10)})
+    resolver = _resolver({f"kf-{n}": n * 10 for n in range(1, 10)})
     service = _FakeMultimodalService(
         [_hit("V", "kf-2", 0.9), _hit("W", "kf-5", 0.8), _hit("X", "kf-8", 0.7)]
     )
@@ -228,7 +245,7 @@ def test_a_high_neighbour_cost_places_every_retrieval_hit_first() -> None:
 
 
 def test_a_low_neighbour_cost_exhausts_the_top_hit_before_the_next_one() -> None:
-    resolver = KeyframeFrameIndexResolver({f"kf-{n}": n * 10 for n in range(1, 10)})
+    resolver = _resolver({f"kf-{n}": n * 10 for n in range(1, 10)})
     service = _FakeMultimodalService([_hit("V", "kf-2", 0.9), _hit("W", "kf-8", 0.8)])
 
     results = search_qna(
@@ -241,7 +258,7 @@ def test_a_low_neighbour_cost_exhausts_the_top_hit_before_the_next_one() -> None
 
 
 def test_expansion_still_honours_top_k() -> None:
-    resolver = KeyframeFrameIndexResolver({f"kf-{n}": n * 10 for n in range(1, 30)})
+    resolver = _resolver({f"kf-{n}": n * 10 for n in range(1, 30)})
     service = _FakeMultimodalService([_hit("V", f"kf-{n}", 1.0 / n) for n in (5, 15, 25)])
 
     results = search_qna(
@@ -258,7 +275,7 @@ def test_neighbour_image_path_comes_from_the_injected_resolver() -> None:
     """Neighbours are not retrieval hits, so no backend supplied an image
     for them -- and OCR is the dominant Q&A signal, so a neighbour without
     its frame on disk is a far weaker prediction."""
-    resolver = KeyframeFrameIndexResolver({"kf-2": 200, "kf-3": 300})
+    resolver = _resolver({"kf-2": 200, "kf-3": 300})
     service = _FakeMultimodalService([_hit("V", "kf-2", 0.9)])
     asked: list[tuple[str, str]] = []
 
@@ -279,7 +296,7 @@ def test_neighbour_image_path_comes_from_the_injected_resolver() -> None:
 
 
 def test_keyframe_path_resolver_backfills_a_hit_with_no_image() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-2": 200})
+    resolver = _resolver({"kf-2": 200})
     hit = {"video_id": "V", "frame_id": "kf-2", "score": 0.9, "timestamp": 1.0}
     service = _FakeMultimodalService([hit])
 
@@ -297,7 +314,7 @@ def test_expansion_reruns_the_reasoner_per_frame() -> None:
     """Each neighbour gets its own OCR/object context, so it must get its
     own answer -- copying the parent's answer would defeat the point of
     predicting a different frame."""
-    resolver = KeyframeFrameIndexResolver({"kf-2": 200, "kf-3": 300})
+    resolver = _resolver({"kf-2": 200, "kf-3": 300})
     service = _FakeMultimodalService([_hit("V", "kf-2", 0.9)])
 
     class _CountingBackend:

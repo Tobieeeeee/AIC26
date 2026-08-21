@@ -23,6 +23,23 @@ from mvr.retrieval.kis import KeyframeFrameIndexResolver
 from mvr.retrieval.qna import search_qna
 
 
+def _resolver(mapping, videos=("V", "A", "B")):
+    """Fixtures pre-dating the pair key: one keyframe id per video.
+
+    `KeyframeFrameIndexResolver` now keys on `(video_id, keyframe_id)`,
+    because a bare keyframe id does not identify a keyframe -- the
+    organizer's 166,550 keyframes carry only 632 distinct ids. These
+    fixtures use synthetic ids that were meant to resolve whatever video
+    asked, so registering each id under every video the test uses keeps
+    exactly the behaviour they were written to check.
+    """
+    return KeyframeFrameIndexResolver(
+        {(video, kf): idx for video in videos for kf, idx in mapping.items()}
+    )
+
+
+
+
 class _Service:
     def __init__(self, hits: list[dict]) -> None:
         self._hits = hits
@@ -68,7 +85,7 @@ def _run(backend: _CapturingBackend, **kwargs):
         "event", "question", top_k=5,
         semantic_service=None,
         multimodal_service=_Service([_hit()]),
-        pipeline_resolver=KeyframeFrameIndexResolver({"kf-1": 261}),
+        pipeline_resolver=_resolver({"kf-1": 261}),
         answer_reasoner=AnswerReasoner(backend),
         **kwargs,
     )
