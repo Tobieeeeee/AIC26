@@ -19,11 +19,20 @@ class AblationRunner:
         aic_registry: Any,
         top_k: int = 100,
         rrf_k: int = 60,
+        multimodal_service: Any | None = None,
+        pipeline_resolver: Any | None = None,
     ) -> None:
         self.semantic_service = semantic_service
         self.aic_registry = aic_registry
         self.top_k = top_k
         self.rrf_k = rrf_k
+        # None keeps the FAISS-only behaviour this runner had before, which
+        # is what every KIS number measured so far actually describes. The
+        # `vi_lex_en_dense` variant is the one that needs a lexical branch,
+        # and it reports `lexical_branch_unavailable` rather than quietly
+        # measuring something else when there is none.
+        self.multimodal_service = multimodal_service
+        self.pipeline_resolver = pipeline_resolver
 
     def run_query(self, query: AblationQuery, variant: QueryVariant) -> list[AblationVariantRecord]:
         records: list[AblationVariantRecord] = []
@@ -33,7 +42,12 @@ class AblationRunner:
             end_frame=query.end_frame,
         )
 
-        def _search(text: str) -> tuple[list[Any], float, str | None]:
+        def _search(
+            text: str, lexical_text: str | None = None
+        ) -> tuple[list[Any], float, str | None]:
+            # `lexical_text` defaults to `text`, so every variant below keeps
+            # sending ONE string to both branches -- which is what its name
+            # promises. Only `vi_lex_en_dense` asks for a split.
             if not text:
                 return [], 0.0, None
             start_time = time.perf_counter()
@@ -41,8 +55,10 @@ class AblationRunner:
                 text,
                 top_k=self.top_k,
                 semantic_service=self.semantic_service,
-                multimodal_service=None,
+                multimodal_service=self.multimodal_service,
+                pipeline_resolver=self.pipeline_resolver,
                 aic_registry=self.aic_registry,
+                lexical_query=lexical_text,
             )
             elapsed = (time.perf_counter() - start_time) * 1000.0
             err = "empty_mapped_candidates" if not candidates else None
@@ -88,5 +104,29 @@ class AblationRunner:
                 err_rrf = "empty_mapped_candidates"
 
         records.append(evaluate_ablation_variant(query.query_id, "en_full_qwen_rrf", c_rrf, gt, lat_rrf, err_rrf))
+
+        # 5. vi_lex_en_dense -- the split this benchmark exists to settle:
+        #    English to the dense branch because its encoder is OpenCLIP
+        #    RN50, Vietnamese to BM25 because the OCR and ASR indexed under
+        #    it are Vietnamese. Compare it against `en_full`, which sends the
+        #    English to both.
+        if not variant.translation_success or not variant.query_en_full:
+            c_split, lat_split, err_split = [], 0.0, "translation_failed"
+        elif not variant.query_vi:
+            c_split, lat_split, err_split = [], 0.0, "empty_vi_query"
+        elif self.multimodal_service is None:
+            # Without a lexical branch this variant IS `en_full`. Recording it
+            # as a result would put a duplicate row beside its own baseline
+            # and make the split look like it changed nothing.
+            c_split, lat_split, err_split = [], 0.0, "lexical_branch_unavailable"
+        else:
+            c_split, lat_split, err_split = _search(
+                variant.query_en_full, lexical_text=variant.query_vi
+            )
+        records.append(
+            evaluate_ablation_variant(
+                query.query_id, "vi_lex_en_dense", c_split, gt, lat_split, err_split
+            )
+        )
 
         return records
