@@ -5,11 +5,28 @@ from dataclasses import dataclass
 import pytest
 
 from mvr.retrieval.kis import (
+
+
     KeyframeFrameIndexResolver,
     KisCandidate,
     resolve_original_frame_id,
     search_kis,
 )
+
+
+def _resolver(mapping, videos=("L21_V001", "L21_V002")):
+    """Fixtures pre-dating the pair key: one keyframe id per video.
+
+    `KeyframeFrameIndexResolver` now keys on `(video_id, keyframe_id)`,
+    because a bare keyframe id does not identify a keyframe -- the
+    organizer's 166,550 keyframes carry only 632 distinct ids. These
+    fixtures use synthetic ids that were meant to resolve whatever video
+    asked, so registering each id under every video the test uses keeps
+    exactly the behaviour they were written to check.
+    """
+    return KeyframeFrameIndexResolver(
+        {(video, kf): idx for video in videos for kf, idx in mapping.items()}
+    )
 
 
 @dataclass
@@ -56,7 +73,7 @@ def _hit(video_id: str, keyframe_id: str, score: float, timestamp: float = 1.0) 
 
 
 def test_resolve_prefers_pipeline_resolver_over_aic_registry() -> None:
-    resolver = KeyframeFrameIndexResolver({"L21_V001_S0001_K01": 42})
+    resolver = _resolver({"L21_V001_S0001_K01": 42})
 
     result = resolve_original_frame_id(
         video_id="L21_V001",
@@ -77,7 +94,7 @@ def test_resolve_falls_back_to_aic_registry_when_pipeline_resolver_misses() -> N
                 video_id=video_id, keyframe_ref=keyframe_ref, frame_idx=261, timestamp=8.7, fps=30.0
             )
 
-    resolver = KeyframeFrameIndexResolver({})  # empty: always misses
+    resolver = _resolver({})  # empty: always misses
 
     result = resolve_original_frame_id(
         video_id="L21_V001",
@@ -110,8 +127,8 @@ def test_keyframe_frame_index_resolver_from_csv(tmp_path) -> None:
 
     resolver = KeyframeFrameIndexResolver.from_csv(csv_path)
 
-    assert resolver.resolve("L01_V001_S0001_K01") == 120
-    assert resolver.resolve("missing") is None
+    assert resolver.resolve("L01_V001", "L01_V001_S0001_K01") == 120
+    assert resolver.resolve("L01_V001", "missing") is None
 
 
 # -- search_kis: validation -------------------------------------------------
@@ -141,7 +158,7 @@ def test_search_kis_requires_at_least_one_backend() -> None:
 
 
 def test_search_kis_correct_original_frame_mapping() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-1": 261})
+    resolver = _resolver({"kf-1": 261})
     service = _FakeSemanticService(
         [_FakeSemanticResult("kf-1", "L21_V001", score=0.9, timestamp=8.7)]
     )
@@ -159,7 +176,7 @@ def test_search_kis_correct_original_frame_mapping() -> None:
 
 def test_search_kis_top_100_works() -> None:
     mapping = {f"kf-{i}": i for i in range(150)}
-    resolver = KeyframeFrameIndexResolver(mapping)
+    resolver = _resolver(mapping)
     hits = [_hit("L21_V001", f"kf-{i}", score=1.0 - i / 1000) for i in range(150)]
     service = _FakeMultimodalService(hits)
 
@@ -180,7 +197,7 @@ def test_search_kis_default_overfetch_fills_top_100_past_unmapped_and_duplicates
     # 200 raw hits: only even-indexed ones resolve (100 valid unique total);
     # odd-indexed ones are unmapped. Half of the first 100 raw ranks are
     # therefore unusable, exactly the scenario the fix must handle.
-    resolver = KeyframeFrameIndexResolver({f"kf-{i}": i for i in range(0, 200, 2)})
+    resolver = _resolver({f"kf-{i}": i for i in range(0, 200, 2)})
     hits = [_hit("L21_V001", f"kf-{i}", score=1.0 - i / 1000) for i in range(200)]
     service = _FakeMultimodalService(hits)
 
@@ -195,7 +212,7 @@ def test_search_kis_default_overfetch_fills_top_100_past_unmapped_and_duplicates
 
 
 def test_search_kis_default_overfetch_never_exceeds_top_k_bounds() -> None:
-    resolver = KeyframeFrameIndexResolver({f"kf-{i}": i for i in range(300)})
+    resolver = _resolver({f"kf-{i}": i for i in range(300)})
     hits = [_hit("L21_V001", f"kf-{i}", score=1.0 - i / 1000) for i in range(300)]
 
     small = search_kis(
@@ -212,7 +229,7 @@ def test_search_kis_default_overfetch_never_exceeds_top_k_bounds() -> None:
 
 
 def test_search_kis_stable_ranking_preserves_input_order() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-a": 10, "kf-b": 20, "kf-c": 30})
+    resolver = _resolver({"kf-a": 10, "kf-b": 20, "kf-c": 30})
     hits = [
         _hit("L21_V001", "kf-a", score=0.9),
         _hit("L21_V001", "kf-b", score=0.8),
@@ -231,7 +248,7 @@ def test_search_kis_stable_ranking_preserves_input_order() -> None:
 
 def test_search_kis_deduplicates_same_video_and_frame_id() -> None:
     # Two different keyframes that both resolve to the same original frame.
-    resolver = KeyframeFrameIndexResolver({"kf-a": 10, "kf-b": 10})
+    resolver = _resolver({"kf-a": 10, "kf-b": 10})
     hits = [
         _hit("L21_V001", "kf-a", score=0.9),
         _hit("L21_V001", "kf-b", score=0.8),
@@ -248,7 +265,7 @@ def test_search_kis_deduplicates_same_video_and_frame_id() -> None:
 
 
 def test_search_kis_drops_unresolvable_candidates_without_guessing() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-a": 10})  # kf-b unknown
+    resolver = _resolver({"kf-a": 10})  # kf-b unknown
     hits = [
         _hit("L21_V001", "kf-a", score=0.9),
         _hit("L21_V001", "kf-b", score=0.8),
@@ -265,7 +282,7 @@ def test_search_kis_drops_unresolvable_candidates_without_guessing() -> None:
 
 
 def test_search_kis_prefers_hybrid_over_semantic_when_both_available() -> None:
-    resolver = KeyframeFrameIndexResolver({"kf-hybrid": 1, "kf-semantic": 2})
+    resolver = _resolver({"kf-hybrid": 1, "kf-semantic": 2})
     semantic = _FakeSemanticService(
         [_FakeSemanticResult("kf-semantic", "L21_V001", score=0.5, timestamp=1.0)]
     )
@@ -332,3 +349,88 @@ def test_a_service_without_lexical_query_support_is_not_broken() -> None:
     )
 
     assert seen["query"] == "a red motorbike"
+
+
+# -- the resolver must know which video it is answering about -----------
+
+
+def test_resolver_keys_on_video_and_keyframe(tmp_path) -> None:
+    """Đo trên mapping thật: 166.550 dòng, mọi cặp (video_id, keyframe_id)
+    đều duy nhất, nhưng chỉ 632 keyframe_id phân biệt. Key trên keyframe_id
+    trần thì mỗi video ghi đè video trước và còn lại 632 mục -- 98,8% số cặp
+    trả về frame của một video khác."""
+    import csv
+
+    path = tmp_path / "keyframe_mapping.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["keyframe_id", "video_id", "frame_idx"])
+        writer.writeheader()
+        writer.writerow({"keyframe_id": "034", "video_id": "L21_V001", "frame_idx": 3782})
+        writer.writerow({"keyframe_id": "034", "video_id": "L21_V002", "frame_idx": 3813})
+
+    resolver = KeyframeFrameIndexResolver.from_csv(path)
+
+    assert resolver.resolve("L21_V001", "034") == 3782
+    assert resolver.resolve("L21_V002", "034") == 3813
+    assert resolver.resolve("L21_V999", "034") is None
+
+
+def test_a_bare_string_key_is_refused_loudly() -> None:
+    """Một keyframe_id trần không định danh keyframe nào. Chấp nhận nó lặng lẽ
+    là cách lỗi này sống sót qua PR #8: nó trả về một con số trông hợp lệ."""
+    with pytest.raises(TypeError, match="video_id"):
+        KeyframeFrameIndexResolver({"034": 3782})
+
+
+def test_search_kis_prefers_the_frame_idx_a_hit_states() -> None:
+    """Hit lexical tự khai `frame_idx` của nó, nên hỏi resolver là hỏi thừa --
+    `search_qna` đã ưu tiên nó từ trước (qna.py:388). `search_kis` thì chưa,
+    nên nó vứt con số đúng đi để lấy con số sai từ resolver."""
+
+    class _Service:
+        def search_hybrid(self, query, *, top_k, rrf_k, lexical_query=None):
+            return [
+                {
+                    "video_id": "L21_V002",
+                    "frame_id": "034",
+                    "frame_idx": 3813,
+                    "timestamp": 152.5,
+                    "score": 9.9,
+                }
+            ]
+
+    candidates = search_kis(
+        "q",
+        top_k=10,
+        semantic_service=None,
+        multimodal_service=_Service(),
+        pipeline_resolver=KeyframeFrameIndexResolver({("L21_V001", "034"): 3782}),
+    )
+
+    assert [(c.video_id, c.frame_id) for c in candidates] == [("L21_V002", 3813)]
+
+
+def test_a_frame_idx_disagreeing_with_the_resolver_raises() -> None:
+    """Cùng quy tắc `search_qna` dùng: hai nguồn bất đồng là một mâu thuẫn
+    thật, phải nổ chứ không phải im lặng chọn một bên."""
+
+    class _Service:
+        def search_hybrid(self, query, *, top_k, rrf_k, lexical_query=None):
+            return [
+                {
+                    "video_id": "L21_V001",
+                    "frame_id": "034",
+                    "frame_idx": 999,
+                    "timestamp": 1.0,
+                    "score": 1.0,
+                }
+            ]
+
+    with pytest.raises(ValueError, match="frame_idx disagreement"):
+        search_kis(
+            "q",
+            top_k=10,
+            semantic_service=None,
+            multimodal_service=_Service(),
+            pipeline_resolver=KeyframeFrameIndexResolver({("L21_V001", "034"): 3782}),
+        )
