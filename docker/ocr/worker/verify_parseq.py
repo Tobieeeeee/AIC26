@@ -3,14 +3,28 @@ import argparse
 import torch
 import cv2
 from PIL import Image
+from pathlib import Path
 
 sys.path.insert(0, '/opt/vietnamese-scenetext-detection-recognition')
+sys.path.insert(0, '/workspace/src')
+from mvr.enrichment.ocr.model_integrity import ModelIntegrityError, verify_model_file
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--weights", required=True)
+    parser.add_argument("--expected-sha256", required=True)
     parser.add_argument("--image", required=False, default="")
     args = parser.parse_args()
+
+    try:
+        verify_model_file(
+            Path(args.weights),
+            args.expected_sha256,
+            label="parseq_vi smoke preflight",
+        )
+    except ModelIntegrityError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
 
     print("=== PARSeq-Vietnamese Docker Verification ===")
     print(f"Python: {sys.version}")

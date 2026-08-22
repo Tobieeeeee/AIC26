@@ -3,36 +3,22 @@ param (
     [string]$WeightsRoot = "artifacts\_ocr_models"
 )
 
-if (-not (Test-Path $WeightsRoot)) {
-    New-Item -ItemType Directory -Force -Path $WeightsRoot | Out-Null
-}
-
-$models = Get-Content $ModelsJson | ConvertFrom-Json
-
-foreach ($key in $models.psobject.properties.name) {
-    $model = $models.$key
-    $url = $model.url
-    $filename = $model.filename
-    $dirName = $model.dir
-
-    $modelDir = Join-Path $WeightsRoot $dirName
-    if (-not (Test-Path $modelDir)) {
-        New-Item -ItemType Directory -Force -Path $modelDir | Out-Null
-    }
-
-    $dest = Join-Path $modelDir $filename
-
-    if (-not (Test-Path $dest)) {
-        Write-Host "Downloading $key -> $dest"
-        try {
-            Invoke-WebRequest -Uri $url -OutFile $dest -ErrorAction Stop
-            Write-Host "Successfully downloaded $key."
-        } catch {
-            Write-Error "Failed to download $key from $url. Error: $_"
-            if (Test-Path $dest) { Remove-Item $dest -Force }
-            exit 1
-        }
+$previousPythonPath = $env:PYTHONPATH
+try {
+    $srcPath = (Resolve-Path -LiteralPath "src").Path
+    if ($previousPythonPath) {
+        $env:PYTHONPATH = "$srcPath$([IO.Path]::PathSeparator)$previousPythonPath"
     } else {
-        Write-Host "$dest already exists."
+        $env:PYTHONPATH = $srcPath
     }
+
+    py -3.12 -m mvr.enrichment.ocr.model_integrity fetch `
+        --lock $ModelsJson `
+        --weights-root $WeightsRoot
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "OCR model fetch failed closed."
+        exit $LASTEXITCODE
+    }
+} finally {
+    $env:PYTHONPATH = $previousPythonPath
 }

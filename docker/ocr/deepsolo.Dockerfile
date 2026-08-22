@@ -37,9 +37,11 @@ RUN pip install --no-cache-dir opencv-python==4.5.5.64 shapely scipy timm pyclip
 # Install Detectron2 for CUDA 11.1 and PyTorch 1.9.0
 RUN python -m pip install detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cu111/torch1.9/index.html
 
-# Clone DeepSolo
+# Clone the exact source revision paired with the production checkpoint lock.
 WORKDIR /opt
-RUN git clone https://github.com/ViTAE-Transformer/DeepSolo.git
+ARG DEEPSOLO_REVISION=dbadae995035246bad3376c7a44c015c69e9b313
+RUN git clone https://github.com/ViTAE-Transformer/DeepSolo.git && \
+    git -C /opt/DeepSolo checkout --detach "$DEEPSOLO_REVISION"
 
 WORKDIR /opt/DeepSolo/DeepSolo
 ENV TORCH_CUDA_ARCH_LIST="8.0;8.6+PTX"

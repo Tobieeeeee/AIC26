@@ -1093,6 +1093,39 @@ representative-ground-truth quality evaluation remain approval-gated.
 
 # Resume instruction
 
+# OCR-Fix-02 — production checkpoint replacement
+
+Status: COMPLETE
+
+Branch: `fix/ocr-production-checkpoints`
+
+- Replaced the ambiguous DeepSolo mirror with the official Total-Text ResNet-50
+  fine-tuned checkpoint and canonical upstream filename; pinned upstream source
+  commit and a locally established SHA256 from the official OneDrive artifact.
+- Replaced the Bao-Minh PARSeq source with the public Vietnamese-finetuned
+  `lynguyenminh` checkpoint; pinned repository commit, bundle/member identities,
+  bundle SHA256, and checkpoint SHA256.
+- Added a strict production-lock schema, fail-closed existing-file checks,
+  temporary downloads, bundle/member verification, atomic publication, shared
+  host/worker runtime preflight, read-only model mounts, and exact manifest
+  provenance.
+- Pinned both model source repositories in their Docker builds. DeepSolo and
+  PARSeq real GPU checkpoint-load/inference smoke tests passed.
+- Ran five canonical keyframes (15 F-1/F/F+1 samples) end to end. Validation
+  passed for five canonical JSON files, 41 consolidated text records, Unicode
+  serialization, multi-box handling, and exact manifest provenance. Empty
+  detections remain covered by a focused synthetic test.
+- No old/new OCR comparison or quality-improvement claim was made. No model
+  weights were committed. No full-corpus run was started.
+
+Verification:
+
+- OCR unit suite: 52 passed.
+- Real fetch, pinned Docker builds, two model-load/inference smokes, five-frame
+  end-to-end OCR, canonical validator, and UTF-8 decode: PASS.
+
+Final details: `docs/reviews/OCR_PRODUCTION_CHECKPOINT_REPLACEMENT_REPORT.md`.
+
 If work is interrupted, read:
 
 ```text

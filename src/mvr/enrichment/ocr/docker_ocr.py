@@ -8,6 +8,10 @@ import tempfile
 import sys
 
 from mvr.ingestion.extract import extract_keyframes
+from mvr.enrichment.ocr.model_integrity import (
+    model_manifest_provenance,
+    verify_model_directory,
+)
 from mvr.enrichment.ocr.scene_text import (
     OcrCandidate,
     group_candidates,
@@ -185,7 +189,9 @@ def run_docker_pipeline(
     temp_dir: Path,
     output_dir: Path,
     keyframes: list,
-    device: str
+    device: str,
+    models: dict,
+    weights_root: Path,
 ) -> dict:
 
     temp_dir_abs = temp_dir.resolve()
@@ -194,6 +200,9 @@ def run_docker_pipeline(
     requests_dir = temp_dir_abs / "requests"
     detections_dir = temp_dir_abs / "detections"
     candidates_dir = temp_dir_abs / "candidates"
+    model_mount = f"{weights_root.resolve()}:/models:ro"
+    deepsolo = models["deepsolo"]
+    parseq_vi = models["parseq_vi"]
 
     # Write requests to per-file JSON. Neighbor frames keep the original
     # keyframe as anchor and only vary source_frame_idx/source_timestamp.
@@ -214,7 +223,7 @@ def run_docker_pipeline(
     subprocess.run([
         "docker", "run", "--rm", "--gpus", "all",
         "-v", f"{workspace_root}:/workspace",
-        "-v", f"{workspace_root}/artifacts/_ocr_models:/models",
+        "-v", model_mount,
         "mvr-ocr-deepsolo:task04b",
         "python", "/workspace/docker/ocr/worker/deepsolo_worker.py",
         "--requests-dir",
@@ -222,9 +231,11 @@ def run_docker_pipeline(
         "--output-dir",
         f"/workspace/{detections_dir.relative_to(workspace_root).as_posix()}",
         "--weights",
-        "/models/deepsolo/deepsolo_r50_totaltext_textocr.pth",
+        str(deepsolo["runtime_path"]),
         "--config",
-        "/opt/DeepSolo/DeepSolo/configs/R_50/TotalText/finetune_150k_tt_mlt_13_15_textocr.yaml"
+        str(deepsolo["runtime_config"]),
+        "--expected-sha256",
+        str(deepsolo["sha256"]),
     ], check=True)
 
     request_count = len(list(requests_dir.rglob("*.json")))
@@ -240,12 +251,13 @@ def run_docker_pipeline(
     subprocess.run([
         "docker", "run", "--rm", "--gpus", "all",
         "-v", f"{workspace_root}:/workspace",
-        "-v", f"{workspace_root}/artifacts/_ocr_models:/models",
+        "-v", model_mount,
         "mvr-ocr-parseq-vi:task04b",
         "python", "/workspace/docker/ocr/worker/parseq_worker.py",
         "--detections-dir", f"/workspace/{detections_dir.relative_to(workspace_root).as_posix()}",
         "--output-dir", f"/workspace/{candidates_dir.relative_to(workspace_root).as_posix()}",
-        "--weights", "/models/parseq_vi/best-parseq.ckpt"
+        "--weights", str(parseq_vi["runtime_path"]),
+        "--expected-sha256", str(parseq_vi["sha256"]),
     ], check=True)
 
     candidate_count = len(list(candidates_dir.rglob("*.json")))
@@ -396,9 +408,14 @@ def process_dataset_docker_ocr(
     mapping_csv: Path,
     video_root: Path,
     output_dir: Path,
-    temp_dir: Path
+    temp_dir: Path,
+    model_lock_path: Path | None = None,
+    weights_root: Path | None = None,
 ) -> dict:
-
+    repository_root = Path(__file__).resolve().parents[4]
+    model_lock_path = model_lock_path or repository_root / "docker" / "ocr" / "model_sources.lock.json"
+    weights_root = weights_root or repository_root / "artifacts" / "_ocr_models"
+    models = verify_model_directory(model_lock_path, weights_root)
     keyframes = load_keyframes(mapping_csv)
     shots_json = mapping_csv.with_name("shots.json")
     shot_boundaries = get_shot_boundaries(shots_json)
@@ -471,7 +488,15 @@ def process_dataset_docker_ocr(
             f"actual={actual_frame_count}"
         )
 
-    res = run_docker_pipeline(frames_to_extract, temp_dir, output_dir, keyframes, "cuda")
+    res = run_docker_pipeline(
+        frames_to_extract,
+        temp_dir,
+        output_dir,
+        keyframes,
+        "cuda",
+        models,
+        weights_root,
+    )
 
     manifest = {
       "schema_version": "2.0",
@@ -480,6 +505,11 @@ def process_dataset_docker_ocr(
       "ocr_backend": res["backend"],
       "detector": "deepsolo",
       "recognizer": "parseq_vi",
+      "model_provenance": {
+          "detector": model_manifest_provenance(models["deepsolo"]),
+          "recognizer": model_manifest_provenance(models["parseq_vi"]),
+      },
+      "ocr_pipeline_version": "docker-ocr-2.1",
       "ocr_conf_threshold": 0.0, # Handled by worker logic if any
       "temporal_offsets": [-1, 0, 1],
       "text_similarity": "normalized_levenshtein",
@@ -508,6 +538,23 @@ if __name__ == "__main__":
     parser.add_argument("--videos", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--temp", required=True)
+    parser.add_argument(
+        "--model-lock",
+        type=Path,
+        default=Path("docker/ocr/model_sources.lock.json"),
+    )
+    parser.add_argument(
+        "--weights-root",
+        type=Path,
+        default=Path("artifacts/_ocr_models"),
+    )
     args = parser.parse_args()
 
-    process_dataset_docker_ocr(Path(args.mapping), Path(args.videos), Path(args.output), Path(args.temp))
+    process_dataset_docker_ocr(
+        Path(args.mapping),
+        Path(args.videos),
+        Path(args.output),
+        Path(args.temp),
+        args.model_lock,
+        args.weights_root,
+    )

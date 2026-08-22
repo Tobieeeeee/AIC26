@@ -216,6 +216,22 @@ multimodal mapping/query behavior remains available and unchanged.
 | `src/mvr/retrieval/lexical.py` / Lab 6 `multi_match` BM25 request pattern | `src/mvr/retrieval/lexical_bm25.py` | Reused Elasticsearch `multi_match` execution. Task05B intentionally removes the legacy OCR boost, caption fallback, match-all behavior, object filters, and highlighting to satisfy equal weighting over exactly `ocr_text` and `asr_text`. Default Elasticsearch BM25 remains unchanged. | VERIFIED |
 | Task05A processed-document contract | `src/mvr/indexing/lexical_index.py` | Uses authoritative `indexability.lexical`, `ocr.joined`, `asr.joined`, and canonical identity fields directly. No Task04/raw OCR/ASR reads, filtering, normalization, or deduplication occur. | VERIFIED |
 
+## OCR production checkpoint replacement (OCR-Fix-02)
+
+This approved task intentionally changes the production checkpoint sources while
+preserving the DeepSolo + PARSeq architecture, crop/rectify behavior, and
+F-1/F/F+1 temporal consolidation.
+
+| Previous production source | Replacement | Behavior/compatibility change | Verification | Status |
+|---|---|---|---|---|
+| Ambiguous Hugging Face object named `deepsolo_res50_finetune_synth.pth`, saved as a Total-Text/TextOCR filename | Official DeepSolo Total-Text ResNet-50 fine-tuned artifact `tt_res50_finetune_synth-tt-mlt-13-15-textocr.pth`, source revision `dbadae995035246bad3376c7a44c015c69e9b313`, SHA256 `6342945f34781ea90340d11b089c091327115d381fceb62c87b5cd2a82efeed3` | Checkpoint identity and canonical runtime filename are corrected; detector architecture and intended runtime config are unchanged. | Locked fetch, host/worker preflight, real GPU model-load/inference smoke, and five-keyframe OCR subset | VERIFIED |
+| `Bao-Minh/PARSeq-Vietnamese` mutable-main mirror renamed from `parseq_vi.ckpt` to `best-parseq.ckpt` | `lynguyenminh/vietnamese-scenetext-detection-recognition` commit `76cc5f3cc6268457aac764653400fdff681f8271`, `weights.zip` member `weights/rec/best-parseq.ckpt`, SHA256 `8089b13c5ad115a96a608c6401eaab36b081393ea0a8323537b29a2dc80168f5` | Production source is intentionally replaced by the task-selected public Vietnamese-finetuned checkpoint. The existing PARSeq loader remains compatible and crop/rectify behavior is unchanged. | Bundle/member hashing, real GPU model-load/inference smoke, and five-keyframe OCR subset | VERIFIED |
+
+The fetch path now fails closed, publishes only after hash verification, and
+never treats an existing filename as evidence of identity. Generated OCR
+manifests record both exact checkpoint identities, revisions, hashes, runtime
+paths/configs, and pipeline version. No OCR quality comparison was performed.
+
 ## Status values
 
 ```text
