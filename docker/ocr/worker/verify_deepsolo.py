@@ -4,15 +4,29 @@ import argparse
 import cv2
 import numpy as np
 import torch
+from pathlib import Path
 
 sys.path.insert(0, '/opt/DeepSolo/DeepSolo')
+sys.path.insert(0, '/workspace/src')
+from mvr.enrichment.ocr.model_integrity import ModelIntegrityError, verify_model_file
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--weights", required=True)
+    parser.add_argument("--expected-sha256", required=True)
     parser.add_argument("--image", required=False, default="")
     args = parser.parse_args()
+
+    try:
+        verify_model_file(
+            Path(args.weights),
+            args.expected_sha256,
+            label="deepsolo smoke preflight",
+        )
+    except ModelIntegrityError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
 
     print("=== DeepSolo Docker Verification ===")
     print(f"Python: {sys.version}")

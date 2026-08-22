@@ -2,7 +2,9 @@ param(
     [string]$MappingCsv = "data\mapping.csv",
     [string]$VideoRoot = "data\videos",
     [string]$OutputDir = "artifacts\_ocr_runtime\output",
-    [string]$TempDir = "artifacts\_ocr_runtime"
+    [string]$TempDir = "artifacts\_ocr_runtime",
+    [string]$ModelsJson = "docker\ocr\model_sources.lock.json",
+    [string]$WeightsRoot = "artifacts\_ocr_models"
 )
 
 # Convert to absolute paths
@@ -20,7 +22,13 @@ if (-not $VideoRootPath) {
 $env:PYTHONPATH = "src"
 
 Write-Host "Running Docker OCR Pipeline via Host Bridge..."
-python src\mvr\enrichment\ocr\docker_ocr.py --mapping $MappingCsvPath --videos $VideoRootPath --output $OutputDir --temp $TempDir
+py -3.12 src\mvr\enrichment\ocr\docker_ocr.py `
+    --mapping $MappingCsvPath `
+    --videos $VideoRootPath `
+    --output $OutputDir `
+    --temp $TempDir `
+    --model-lock $ModelsJson `
+    --weights-root $WeightsRoot
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "OCR Pipeline failed."

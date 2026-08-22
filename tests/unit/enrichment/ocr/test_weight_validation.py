@@ -1,7 +1,12 @@
 import pytest
 import os
 import subprocess
+import hashlib
 from pathlib import Path
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 def test_missing_deepsolo_weight(tmp_path):
     req_dir = tmp_path / "req"
@@ -17,7 +22,8 @@ def test_missing_deepsolo_weight(tmp_path):
         "--requests-dir", str(req_dir),
         "--output-dir", str(out_dir),
         "--weights", str(missing_weight),
-        "--config", "dummy.yaml"
+        "--config", "dummy.yaml",
+        "--expected-sha256", "0" * 64,
     ], capture_output=True, text=True)
 
     assert res.returncode != 0
@@ -38,7 +44,8 @@ def test_empty_deepsolo_weight(tmp_path):
         "--requests-dir", str(req_dir),
         "--output-dir", str(out_dir),
         "--weights", str(empty_weight),
-        "--config", "dummy.yaml"
+        "--config", "dummy.yaml",
+        "--expected-sha256", "0" * 64,
     ], capture_output=True, text=True)
 
     assert res.returncode != 0
@@ -63,7 +70,8 @@ def test_mock_file_in_production_fails(tmp_path):
         "--requests-dir", str(req_dir),
         "--output-dir", str(out_dir),
         "--weights", str(mock_weight),
-        "--config", "dummy.yaml"
+        "--config", "dummy.yaml",
+        "--expected-sha256", _sha256(mock_weight.read_bytes()),
     ], env=env, capture_output=True, text=True)
 
     assert res.returncode != 0
@@ -90,7 +98,8 @@ def test_explicit_mock_env_var(tmp_path):
         "--requests-dir", str(req_dir),
         "--output-dir", str(out_dir),
         "--weights", str(mock_weight),
-        "--config", "dummy.yaml"
+        "--config", "dummy.yaml",
+        "--expected-sha256", _sha256(mock_weight.read_bytes()),
     ], env=env, capture_output=True, text=True)
 
     assert res.returncode == 0
