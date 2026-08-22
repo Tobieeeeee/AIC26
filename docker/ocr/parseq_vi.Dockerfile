@@ -12,7 +12,9 @@ RUN rm -f /etc/apt/sources.list.d/cuda.list /etc/apt/sources.list.d/nvidia-ml.li
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
-RUN git clone https://github.com/lynguyenminh/vietnamese-scenetext-detection-recognition.git
+ARG PARSEQ_VI_REVISION=76cc5f3cc6268457aac764653400fdff681f8271
+RUN git clone https://github.com/lynguyenminh/vietnamese-scenetext-detection-recognition.git && \
+    git -C /opt/vietnamese-scenetext-detection-recognition checkout --detach "$PARSEQ_VI_REVISION"
 
 WORKDIR /opt/vietnamese-scenetext-detection-recognition
 # We install common dependencies directly to avoid issues with older requirements files

@@ -5,6 +5,10 @@ import json
 import argparse
 import numpy as np
 from pathlib import Path
+
+REPOSITORY_SRC = Path(__file__).resolve().parents[3] / "src"
+sys.path.insert(0, str(REPOSITORY_SRC))
+from mvr.enrichment.ocr.model_integrity import ModelIntegrityError, verify_model_file
 import cv2
 import json
 import argparse
@@ -21,6 +25,7 @@ def main():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--weights", required=True)
     parser.add_argument("--config", required=True)
+    parser.add_argument("--expected-sha256", required=True)
     args = parser.parse_args()
 
     requests_dir = Path(args.requests_dir)
@@ -46,6 +51,17 @@ def main():
     else:
         print(f"ERROR: Weights file not found: {weights_path}", file=sys.stderr)
         sys.exit(1)
+
+    if not is_dummy:
+        try:
+            verify_model_file(
+                weights_path,
+                args.expected_sha256,
+                label="deepsolo runtime preflight",
+            )
+        except ModelIntegrityError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     predictor = None
     if not is_dummy:

@@ -1,12 +1,46 @@
 {
-  "deepsolo": {
-    "filename": "deepsolo_r50_totaltext_textocr.pth",
-    "url": "https://huggingface.co/ViTAE-Transformer/DeepSolo/resolve/main/deepsolo_res50_finetune_synth.pth",
-    "dir": "deepsolo"
-  },
-  "parseq_vi": {
-    "filename": "best-parseq.ckpt",
-    "url": "https://huggingface.co/Bao-Minh/PARSeq-Vietnamese/resolve/main/parseq_vi.ckpt",
-    "dir": "parseq_vi"
+  "schema_version": "1.0",
+  "models": {
+    "deepsolo": {
+      "model": "DeepSolo",
+      "variant": "ResNet-50 Total-Text fine-tuned",
+      "purpose": "scene_text_localization",
+      "checkpoint_identity": "tt_res50_finetune_synth-tt-mlt-13-15-textocr.pth",
+      "source_repo": "https://github.com/ViTAE-Transformer/DeepSolo",
+      "source_revision": "dbadae995035246bad3376c7a44c015c69e9b313",
+      "download_source": "https://1drv.ms/u/s!AimBgYV7JjTlgcd138p8HaXViFk-tw?download=1",
+      "license": "AdelaiDet non-commercial license; commercial use requires a separate license",
+      "filename": "tt_res50_finetune_synth-tt-mlt-13-15-textocr.pth",
+      "dir": "deepsolo",
+      "runtime_path": "/models/deepsolo/tt_res50_finetune_synth-tt-mlt-13-15-textocr.pth",
+      "runtime_config": "/opt/DeepSolo/DeepSolo/configs/R_50/TotalText/finetune_150k_tt_mlt_13_15_textocr.yaml",
+      "sha256": "6342945f34781ea90340d11b089c091327115d381fceb62c87b5cd2a82efeed3",
+      "trust_root": "locally established from the official upstream checkpoint on 2026-08-22",
+      "acquisition": {
+        "type": "file"
+      }
+    },
+    "parseq_vi": {
+      "model": "PARSeq",
+      "variant": "Vietnamese-finetuned",
+      "purpose": "scene_text_transcription",
+      "checkpoint_identity": "weights/rec/best-parseq.ckpt from weights.zip",
+      "source_repo": "https://github.com/lynguyenminh/vietnamese-scenetext-detection-recognition",
+      "source_revision": "76cc5f3cc6268457aac764653400fdff681f8271",
+      "download_source": "https://drive.usercontent.google.com/download?id=1Az9psFV6C1qiqFCL2s6DIBYRKr3Bkjd7&export=download&confirm=t",
+      "license": "MIT repository license; incorporated PARSeq code carries Apache-2.0 notices",
+      "filename": "best-parseq.ckpt",
+      "dir": "parseq_vi",
+      "runtime_path": "/models/parseq_vi/best-parseq.ckpt",
+      "runtime_config": "Lightning checkpoint hyperparameters loaded by the pinned lynguyenminh PARSeq runtime",
+      "sha256": "8089b13c5ad115a96a608c6401eaab36b081393ea0a8323537b29a2dc80168f5",
+      "trust_root": "locally established from the pinned upstream weights.zip on 2026-08-22",
+      "acquisition": {
+        "type": "zip_member",
+        "bundle_filename": "weights.zip",
+        "bundle_sha256": "8d180494052108f20e8e68935fd5dc81061c59fad00c18e7bade64e5ecad24ab",
+        "member": "weights/rec/best-parseq.ckpt"
+      }
+    }
   }
 }

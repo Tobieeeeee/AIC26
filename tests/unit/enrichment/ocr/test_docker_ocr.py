@@ -85,3 +85,29 @@ def test_process_candidates_to_canonical(tmp_path):
     assert "polygon" not in text_obj
     assert "crop_strategy" not in text_obj
     assert "detection_index" not in text_obj
+
+
+def test_process_candidates_to_canonical_writes_empty_detection_result(tmp_path):
+    candidate_dir = tmp_path / "candidates"
+    candidate_dir.mkdir()
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    keyframe = {
+        "video_id": "V1",
+        "shot_id": 1,
+        "keyframe_id": "K1",
+        "frame_idx": 10,
+        "timestamp": 1.0,
+    }
+
+    result = process_candidates_to_canonical(
+        candidate_dir, output_dir, [keyframe]
+    )
+
+    payload = json.loads((output_dir / "V1" / "K1.json").read_text(encoding="utf-8"))
+    assert result == {
+        "json_file_count": 1,
+        "canonical_text_count": 0,
+        "backend": "deepsolo+parseq",
+    }
+    assert payload["texts"] == []
