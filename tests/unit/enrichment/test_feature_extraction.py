@@ -21,6 +21,10 @@ class FakeDetector:
         self.model_name = "FakeRCNN"
         self.score_threshold = 0.5
         self.nms_threshold = 0.5
+        self.model_family = "FakeRCNN-Family"
+        self.nms_enabled = True
+        self.nms_mode = "class_aware"
+        self.nms_implementation = "built_in_faster_rcnn"
 
     def detect(self, path):
         # Return 2 persons and 1 car
@@ -174,6 +178,7 @@ def test_extract_objects(tmp_path):
     assert manifest["json_file_count"] == 2
     assert manifest["keyframe_count"] == 2
     assert manifest["shot_count"] == 1
+    assert manifest["model_family"] == "FakeRCNN-Family"
     assert manifest["nms_enabled"] is True
     assert manifest["nms_threshold"] == 0.5
     assert manifest["nms_mode"] == "class_aware"

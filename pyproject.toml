@@ -36,7 +36,7 @@ ocr = [
     "paddleocr>=2,<4",
     "paddlepaddle>=2,<4",
 ]
-objects = ["ultralytics>=8,<9"]
+objects = ["ultralytics>=8,<9", "rfdetr>=1.9,<2"]
 asr = [
     "chunkformer==1.2.2",
     "huggingface-hub>=0.28,<2",

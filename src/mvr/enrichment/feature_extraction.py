@@ -6,7 +6,7 @@ from tqdm import tqdm
 from PIL import Image
 
 from mvr.enrichment.embeddings.openclip import OpenClipEncoder
-from mvr.enrichment.objects.faster_rcnn import FasterRCNN
+from mvr.enrichment.objects.rf_detr import RfDetr
 
 def sort_keyframes_deterministically(mapping_csv: Path) -> list[dict]:
     with mapping_csv.open("r", encoding="utf-8") as f:
@@ -117,7 +117,7 @@ from collections import defaultdict
 def extract_objects(
     dataset_name: str,
     keyframes: list[dict],
-    detector: FasterRCNN,
+    detector: RfDetr,
     output_dir: Path,
     keyframe_root: Path,
     mapping_source: Path
@@ -129,7 +129,7 @@ def extract_objects(
     json_count = 0
     shot_stats = defaultdict(lambda: {"keyframe_count": 0, "person_count_max": 0, "car_count_max": 0})
 
-    for frame in tqdm(keyframes, desc="Faster R-CNN Objects"):
+    for frame in tqdm(keyframes, desc=f"{detector.model_family} Objects"):
         img_path = keyframe_root / frame["image_path"]
         if not img_path.exists():
             raise FileNotFoundError(f"Keyframe image not found: {img_path}")
@@ -178,14 +178,14 @@ def extract_objects(
         "schema_version": "1.0",
         "feature_type": "object_detection",
         "storage_format": "one_json_per_keyframe",
-        "model_family": "Faster R-CNN",
+        "model_family": detector.model_family,
         "model": detector.model_name,
         "weights": "DEFAULT",
         "score_threshold": detector.score_threshold,
-        "nms_enabled": True,
+        "nms_enabled": detector.nms_enabled,
         "nms_threshold": detector.nms_threshold,
-        "nms_mode": "class_aware",
-        "nms_implementation": "built_in_faster_rcnn",
+        "nms_mode": detector.nms_mode,
+        "nms_implementation": detector.nms_implementation,
         "coordinate_format": "xyxy",
         "keyframe_count": len(keyframes),
         "json_file_count": json_count,

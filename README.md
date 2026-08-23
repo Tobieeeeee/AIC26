@@ -37,6 +37,7 @@ Available now:
 - a verified FastAPI serving layer with health and semantic search, plus text, object, and RRF hybrid routes when the configured Elasticsearch index is reachable.
 - real-data-verified Textual KIS support: an AIC original-frame registry, the official KIS evaluator (`R@1/5/20/50/100` and per-query Final Score), Top-100 KIS orchestration behind `POST /search/kis`, exact-frame refinement on the original video, a reproducible KIS benchmark, and prediction validation/export. See `docs/AIC_KIS_FINAL_REPORT.md` for measured results and limitations.
 - a CPU-runtime-verified per-keyframe ASR feature pipeline with independent +/-3 second audio windows, Silero VAD gating, the exact Vietnamese ChunkFormer provider, canonical JSON artifacts, resume/force behavior, and an isolated CPU Dockerfile. See `docs/ASR_KEYFRAME_PIPELINE.md` for commands and remaining GPU/quality gates.
+- a per-keyframe object detection stage using RF-DETR (COCO-pretrained), producing one JSON per keyframe plus `shot_summary.json`/`manifest.json`; part of `scripts/run_feature_extraction.py`. See `docs/RF_DETR_OBJECT_EXTRACTION.md` for setup, commands, and the output contract.
 
 Planned:
 

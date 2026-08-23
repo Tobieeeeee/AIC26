@@ -15,7 +15,7 @@ from mvr.enrichment.embeddings.offline import (
     run_selected_embedding_providers,
 )
 from mvr.enrichment.embeddings.provider_specs import load_provider_specs
-from mvr.enrichment.objects.faster_rcnn import FasterRCNN
+from mvr.enrichment.objects.rf_detr import RfDetr
 
 
 def parse_embedding_providers(value: str) -> tuple[str, ...]:
@@ -67,9 +67,9 @@ def main():
         type=Path,
         help="Local locked PE-Core-L14-336 checkpoint; never downloaded implicitly",
     )
-    parser.add_argument("--rcnn-model", type=str, default="fasterrcnn_resnet50_fpn", help="Faster R-CNN model")
-    parser.add_argument("--rcnn-threshold", type=float, default=0.5, help="Faster R-CNN score threshold")
-    parser.add_argument("--rcnn-nms-threshold", type=float, default=0.5, help="Faster R-CNN NMS threshold")
+    parser.add_argument("--detector-model", type=str, default="rfdetr_medium", help="RF-DETR model variant (rfdetr_nano/small/medium/large)")
+    parser.add_argument("--detector-threshold", type=float, default=0.5, help="RF-DETR score threshold")
+    parser.add_argument("--detector-nms-threshold", type=float, default=0.5, help="Unused: RF-DETR is NMS-free; kept for interface parity")
     
     parser.add_argument("--device", type=str, default="auto", help="Device (cpu/cuda/auto)")
     parser.add_argument(
@@ -185,13 +185,13 @@ def main():
         },
     )
     
-    # 2. Faster R-CNN
+    # 2. RF-DETR
     if args.skip_objects:
         print("Object extraction skipped.")
         return
-    print(f"Initializing Faster R-CNN ({args.rcnn_model})...")
-    rcnn_detector = FasterRCNN(model_name=args.rcnn_model, device=args.device, score_threshold=args.rcnn_threshold, nms_threshold=args.rcnn_nms_threshold)
-    extract_objects(dataset_name, keyframes, rcnn_detector, args.output, args.keyframe_root, args.mapping_csv)
+    print(f"Initializing RF-DETR ({args.detector_model})...")
+    object_detector = RfDetr(model_name=args.detector_model, device=args.device, score_threshold=args.detector_threshold, nms_threshold=args.detector_nms_threshold)
+    extract_objects(dataset_name, keyframes, object_detector, args.output, args.keyframe_root, args.mapping_csv)
     
     print(f"Feature extraction completed. Outputs saved to {args.output}")
 
