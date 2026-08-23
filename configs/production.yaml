@@ -1,0 +1,142 @@
+# Canonical Production System Defaults — AIC26
+# ============================================
+#
+# This file is the authoritative source of truth for production model and
+# parameter defaults. Every offline pipeline, CLI command, manifest, and
+# downstream task must resolve its defaults from this file.
+#
+# To experiment with a different configuration, create a separate config file
+# (e.g. configs/experiment_xyz.yaml) and pass it explicitly. Do NOT silently
+# override these values with hardcoded alternatives.
+#
+# Frozen at: DATA-02 task
+# Schema version: 1.0
+
+schema_version: "1.0"
+
+# --------------------------------------------------------------------------
+# Ingestion — frozen production contract
+# --------------------------------------------------------------------------
+ingestion:
+  detector: transnetv2
+  detector_threshold: 0.5
+  selector: periodic
+  long_threshold_sec: 12.0
+  interval_sec: 8.0
+
+# --------------------------------------------------------------------------
+# Object detection — canonical production default
+# --------------------------------------------------------------------------
+objects:
+  provider: rfdetr
+  # RF-DETR variant and checkpoint are NOT YET PINNED.
+  # Full object extraction is BLOCKED until these are resolved.
+  variant: null
+  checkpoint: null
+  checkpoint_sha256: null
+  revision: null
+  pin_status: pending
+  # Legacy backends remain available by explicit opt-in only.
+  legacy_backends:
+    - faster_rcnn
+
+# --------------------------------------------------------------------------
+# Visual semantic embeddings — canonical three-provider stack
+# --------------------------------------------------------------------------
+embeddings:
+  providers:
+    - beit3
+    - metaclip2
+    - perception_encoder
+  # Provider-level pinning is in configs/embedding_providers.json.
+  # No vector concatenation across providers.
+  # No raw-score addition between providers.
+  # One mapping per provider. One manifest per provider.
+  # One semantic index namespace per provider.
+  provider_specs: configs/embedding_providers.json
+
+# --------------------------------------------------------------------------
+# OCR — canonical production stack
+# --------------------------------------------------------------------------
+ocr:
+  detector: deepsolo
+  recognizer: parseq_vietnamese
+  temporal_context: [-1, 0, 1]
+  text_similarity: normalized_levenshtein
+  text_similarity_threshold: 0.80
+  spatial_similarity: bbox_iou
+  bbox_iou_threshold: 0.30
+  # Legacy backends available by explicit opt-in only.
+  legacy_backends:
+    - easyocr
+    - paddleocr
+
+# --------------------------------------------------------------------------
+# ASR — current production system (unchanged)
+# --------------------------------------------------------------------------
+asr:
+  vad:
+    provider: silero
+    threshold: 0.5
+    min_speech_duration_ms: 250
+    min_silence_duration_ms: 150
+    merge_gap_ms: 250
+  recognizer: chunkformer_ctc_large_vie
+  model: khanhld/chunkformer-ctc-large-vie
+  revision: 14a68262fa5fc6d497cb107c18bc5a9308ef21ca
+  sample_rate: 16000
+  pre_seconds: 3.0
+  post_seconds: 3.0
+  device: cpu
+  allow_download: false
+
+# --------------------------------------------------------------------------
+# R2 / Data platform
+# --------------------------------------------------------------------------
+r2:
+  bucket: null  # Set via R2_BUCKET env var
+  endpoint: null  # Set via R2_ENDPOINT env var
+  layout:
+    raw: "data/raw"
+    staging: "data/staging"
+    corpus: "data/corpus"
+
+# --------------------------------------------------------------------------
+# Local cache
+# --------------------------------------------------------------------------
+cache:
+  directory: ".cache/mvr"
+  max_size_gb: 50.0
+  eviction_policy: lru
+
+# --------------------------------------------------------------------------
+# Retrieval (unchanged from existing)
+# --------------------------------------------------------------------------
+retrieval:
+  lexical_backend: elasticsearch
+  semantic_backend: faiss_flat_ip
+  candidate_k: 30
+  hybrid_method: weighted
+  rrf_k: 60
+  weighted_alpha: 0.25
+  elasticsearch_num_candidates: 100
+
+elasticsearch:
+  url: http://localhost:9200
+  index: keyframes
+  server_version: 8.11.4
+
+api:
+  top_k_default: 20
+  top_k_max: 100
+
+kis:
+  top_k_default: 100
+  top_k_max: 100
+  benchmark_top_k: 100
+  overfetch_multiplier: 3
+  overfetch_floor: 30
+  refinement_enabled: false
+  refinement_top_n: 3
+  refinement_frame_radius: 45
+  local_export_format: local_verification_export

@@ -1,3 +1,12 @@
+# Default configuration — AIC26 MVR Competition
+# ===============================================
+#
+# This file resolves default parameters for all CLI commands and pipeline stages.
+# It MUST be aligned with configs/production.yaml (the canonical system-default
+# registry). Legacy/experimental values are available only by explicit opt-in.
+#
+# See also: docs/architecture/CANONICAL_SYSTEM_DEFAULTS.md
+
 ingestion:
   shot_detector: transnetv2
   pyscene_threshold: 27.0
@@ -21,18 +30,37 @@ ingestion:
     interval_sec: 8.0
 
 enrichment:
-  ocr_engine: paddleocr
-  ocr_confidence: 0.3
-  object_detector: yolov8n
+  # --- OCR (production: DeepSolo + Vietnamese PARSeq) ---
+  ocr_engine: deepsolo
+  ocr_detector: deepsolo
+  ocr_recognizer: parseq_vietnamese
+  ocr_temporal_context: [-1, 0, 1]
+  ocr_confidence: 0.0    # Worker-side threshold; post-processing handles filtering
+  ocr_text_similarity_threshold: 0.80
+  ocr_bbox_iou_threshold: 0.30
+
+  # --- Object detection (production: RF-DETR) ---
+  object_detector: rfdetr
   object_confidence: 0.4
-  embedding_model: ViT-B-32
-  embedding_pretrained: laion2b_s34b_b79k
-  embedding_batch_size: 32
+  # RF-DETR variant/checkpoint pinning is pending.
+  # Legacy Faster R-CNN remains available by explicit --rcnn-model flag.
+
+  # --- Visual embeddings (production: three-provider stack) ---
   embedding_providers:
-    - clip
-  lab6_embedding_model: RN50
-  lab6_embedding_pretrained: openai
-  lab6_embedding_batch_size: 64
+    - beit3
+    - metaclip2
+    - perception_encoder
+  embedding_batch_size: 32
+
+  # Legacy single-CLIP configuration (explicit opt-in only)
+  legacy_clip:
+    embedding_model: ViT-B-32
+    embedding_pretrained: laion2b_s34b_b79k
+    lab6_embedding_model: RN50
+    lab6_embedding_pretrained: openai
+    lab6_embedding_batch_size: 64
+
+  # --- ASR (production: Silero VAD + ChunkFormer CTC Large Vie) ---
   asr:
     mode: per_keyframe
     sample_rate: 16000

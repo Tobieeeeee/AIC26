@@ -410,6 +410,146 @@ def _run_benchmark_kis(
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
+# --------------------------------------------------------------------------
+# Data-02 CLI commands
+# --------------------------------------------------------------------------
+
+def _add_show_defaults_parser(subparsers: argparse._SubParsersAction) -> None:
+    subparsers.add_parser(
+        "show-defaults",
+        help="Print canonical production system defaults",
+    ).set_defaults(command="show-defaults")
+
+
+def _run_show_defaults() -> None:
+    """Print the canonical production defaults summary."""
+    try:
+        import yaml
+        config_path = Path(__file__).resolve().parent.parent.parent / "configs" / "production.yaml"
+        if config_path.is_file():
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        else:
+            config = None
+    except ImportError:
+        config = None
+
+    lines = [
+        "Canonical Production Defaults",
+        "-----------------------------",
+    ]
+    if config:
+        ing = config.get("ingestion", {})
+        lines.append(
+            f"Ingestion: {ing.get('detector', '?')} @ {ing.get('detector_threshold', '?')} "
+            f"+ {ing.get('selector', '?')} {ing.get('long_threshold_sec', '?')}s/{ing.get('interval_sec', '?')}s"
+        )
+        obj = config.get("objects", {})
+        pin = obj.get("pin_status", "unknown")
+        lines.append(f"Objects:   {obj.get('provider', '?')} (pin: {pin})")
+        emb = config.get("embeddings", {})
+        providers = ", ".join(emb.get("providers", ["?"]))
+        lines.append(f"Visual:    {providers}")
+        ocr = config.get("ocr", {})
+        lines.append(
+            f"OCR:       {ocr.get('detector', '?')} + {ocr.get('recognizer', '?')} "
+            f"+ {ocr.get('temporal_context', '?')}"
+        )
+        asr = config.get("asr", {})
+        vad = asr.get("vad", {})
+        lines.append(f"ASR:       {vad.get('provider', '?')} VAD + {asr.get('recognizer', '?')}")
+    else:
+        lines.extend([
+            "Ingestion: TransNetV2 @ 0.5 + periodic 12s/8s",
+            "Objects:   RF-DETR (pin: pending)",
+            "Visual:    beit3, metaclip2, perception_encoder",
+            "OCR:       DeepSolo + Vietnamese PARSeq + F-1/F/F+1",
+            "ASR:       Silero VAD + ChunkFormer CTC Large Vie",
+        ])
+    print("\n".join(lines))
+
+
+def _add_audit_status_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "audit-status",
+        help="Show extraction status summary from a status Parquet file",
+    )
+    parser.add_argument("--status-file", type=Path, required=True)
+    parser.set_defaults(command="audit-status")
+
+
+def _run_audit_status(status_file: Path) -> None:
+    from .operations.extraction_status import summary
+    result = summary(status_file)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def _add_consolidate_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "consolidate-parquet",
+        help="Consolidate staging JSON into canonical Parquet",
+    )
+    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--schema", required=True,
+                        choices=["ocr", "asr", "objects", "keyframe_mapping", "extraction_status"])
+    parser.add_argument("--batch-id", default=None)
+    parser.add_argument("--collection-id", default=None)
+    parser.set_defaults(command="consolidate-parquet")
+
+
+def _run_consolidate(source: Path, output: Path, schema: str,
+                     batch_id: str | None, collection_id: str | None) -> None:
+    from .operations.consolidate import consolidate_to_parquet
+    result = consolidate_to_parquet(
+        source, output, schema,
+        batch_id=batch_id, collection_id=collection_id,
+    )
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+def _add_validate_staging_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "validate-staging",
+        help="Validate a staging Parquet artifact",
+    )
+    parser.add_argument("--file", type=Path, required=True)
+    parser.add_argument("--schema", default=None,
+                        choices=["ocr", "asr", "objects", "keyframe_mapping", "extraction_status"])
+    parser.add_argument("--min-rows", type=int, default=0)
+    parser.set_defaults(command="validate-staging")
+
+
+def _run_validate_staging(file: Path, schema: str | None, min_rows: int) -> None:
+    from .operations.promote import validate_parquet
+    checks = validate_parquet(file, schema_name=schema, min_rows=min_rows)
+    print(json.dumps(checks, indent=2, ensure_ascii=False))
+
+
+def _add_promote_parser(subparsers: argparse._SubParsersAction) -> None:
+    parser = subparsers.add_parser(
+        "promote",
+        help="Validate and promote a staging artifact to corpus",
+    )
+    parser.add_argument("--staging", type=Path, required=True)
+    parser.add_argument("--corpus", type=Path, required=True)
+    parser.add_argument("--schema", default=None)
+    parser.add_argument("--manifest", type=Path, default=None)
+    parser.set_defaults(command="promote")
+
+
+def _run_promote(staging: Path, corpus: Path, schema: str | None,
+                 manifest: Path | None) -> None:
+    from .operations.promote import promote_file
+    result = promote_file(
+        staging, corpus,
+        schema_name=schema,
+        manifest_path=manifest,
+    )
+    print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    if not result.success:
+        raise SystemExit(1)
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m mvr.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -420,6 +560,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     _add_build_asr_features_parser(subparsers)
     _add_benchmark_kis_parser(subparsers)
     _add_enrich_ocr_parser(subparsers)
+    # Data-02 commands
+    _add_show_defaults_parser(subparsers)
+    _add_audit_status_parser(subparsers)
+    _add_consolidate_parser(subparsers)
+    _add_validate_staging_parser(subparsers)
+    _add_promote_parser(subparsers)
     values = vars(parser.parse_args(argv))
     command = values.pop("command")
     if command == "ingest":
@@ -480,6 +626,31 @@ def main(argv: Sequence[str] | None = None) -> None:
             bbox_iou_threshold=bbox_iou
         )
         print(json.dumps(manifest, indent=2, ensure_ascii=False))
+        return
+    # Data-02 commands
+    if command == "show-defaults":
+        _run_show_defaults()
+        return
+    if command == "audit-status":
+        _run_audit_status(values.pop("status_file"))
+        return
+    if command == "consolidate-parquet":
+        _run_consolidate(
+            values.pop("source"), values.pop("output"),
+            values.pop("schema"), values.pop("batch_id"),
+            values.pop("collection_id"),
+        )
+        return
+    if command == "validate-staging":
+        _run_validate_staging(
+            values.pop("file"), values.pop("schema"), values.pop("min_rows"),
+        )
+        return
+    if command == "promote":
+        _run_promote(
+            values.pop("staging"), values.pop("corpus"),
+            values.pop("schema"), values.pop("manifest"),
+        )
         return
 
     index = FaissIndex.load(values.pop("index"))
