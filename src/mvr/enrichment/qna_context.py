@@ -80,7 +80,7 @@ def build_frame_context(
     **choosing a detection confidence threshold is the indexing/enrichment
     layer's decision, not Q&A's.** This module deliberately owns no
     threshold value so there is exactly one source of truth for that policy
-    upstream (see ``mvr.enrichment.objects.faster_rcnn`` /
+    upstream (see ``mvr.enrichment.objects.rf_detr`` /
     ``mvr.enrichment.objects.yolo``, which carry their detector's own).
 
     Callers that read *raw, unfiltered* organizer objects JSON directly

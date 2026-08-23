@@ -3,8 +3,8 @@
 Object detection for keyframes uses `RfDetr`
 (`src/mvr/enrichment/objects/rf_detr.py`), a COCO-pretrained RF-DETR model.
 It replaced the previous live `FasterRCNN` detector (also COCO-pretrained,
-not OpenImages V4) as of 2026-08-23; `faster_rcnn.py` remains in the repo
-unused, kept only for reference.
+not OpenImages V4) as of 2026-08-23; `faster_rcnn.py` was removed from the
+repo (still recoverable from git history if ever needed).
 
 Prerequisites:
 
