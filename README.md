@@ -29,7 +29,7 @@ Existing foundation:
 
 Available now:
 
-- verified video probe, PySceneDetect shot detection, keyframe selection, exact FFmpeg extraction, and metadata mapping;
+- verified video probe, PySceneDetect shot detection, canonical hybrid temporal-content keyframe selection, exact FFmpeg extraction, and metadata mapping;
 - `py -3.12 -m mvr.cli ingest` for one video or a directory of videos.
 - verified OpenCLIP `ViT-B-32` image/text embeddings and persistent exact FAISS `IndexFlatIP` search;
 - `py -3.12 -m mvr.cli build-index` and `py -3.12 -m mvr.cli search` for semantic keyframe retrieval.
@@ -78,16 +78,22 @@ pip install -e requirement.text
 pytest -q python -m
 ```
 
-## Verified ingestion command
+## Canonical ingestion command
 
-The Phase 02 smoke run used Python 3.12, FFmpeg/ffprobe, and the default PySceneDetect settings:
+Canonical ingestion V1 uses TransNetV2 at threshold `0.5` and the deterministic
+periodic midpoint + 12s/8s selector. The default path does not load a content
+embedding model:
 
 ```powershell
-py -3.12 -m pip install -e ".[dev]"
 py -3.12 -m mvr.cli ingest "D:\project\STUDY\NAM_2\SELF_PRJ\AIC26\New folder\shot-boundary-lab-student\student\data\videos\L01_V001.mp4" --output "artifacts\keyframes\phase02-smoke"
 ```
 
-The output contains `shots.json`, `keyframe_mapping.csv`, benchmark JSON/CSV, and JPEG keyframes. The input may also be a directory. TransNetV2 is preserved as an optional backend but was not runtime-verified in Phase 02.
+The output contains `shots.json`, the unchanged canonical
+`keyframe_mapping.csv`, `selector_manifest.json`, benchmark JSON/CSV, and JPEG
+keyframes. The input may also be a directory. PySceneDetect, midpoint-only, and
+`hybrid_temporal_content` remain explicit non-default modes. TransNetV2 failures
+are surfaced; ingestion never silently switches to PySceneDetect. See
+`docs/architecture/CANONICAL_INGESTION.md`.
 
 ## Verified semantic retrieval commands
 

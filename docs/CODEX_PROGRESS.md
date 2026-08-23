@@ -1289,3 +1289,102 @@ docs/AIC_TRAKE_IMPLEMENTATION_NOTES.md
 docs/AIC_TRAKE_BENCHMARK_RESULTS.md
 docs/AIC_TRAKE_FINAL_REPORT.md
 ```
+
+---
+
+# INGEST-KF04 — Canonical Hybrid Temporal-Content Selector
+
+Status: COMPLETE; NOT MERGED OR PUSHED
+
+Branch: `feat/ingest-hybrid-keyframe-selector` from fetched `origin/main`
+`e637af712b2e7f0e879c612abbac1c18e7fce73b`
+
+- Changed every runnable ingestion default to the canonical hybrid selector:
+  1s candidates, pinned MetaCLIP-2 local novelty, grayscale/Canny change
+  events, rare-event preservation, mandatory midpoint, and <=8s gap repair.
+- Preserved the original periodic implementation unchanged as explicit
+  `periodic` mode with 12s/8s controls and preserved canonical IDs/mapping.
+- Added strict candidate/embedding cache identity and hash validation plus a
+  standard selected-frame MetaCLIP provider artifact. The real feature runner
+  reused all 380 pilot vectors with zero missing/extra/invalid rows.
+- Added deterministic model-free tests for short static shots, lecture slide
+  changes, rare transients, gap safety, ties, cache validation, canonical
+  mapping, defaults, downstream reuse, and legacy regression.
+- Ran L21_V001 with one frozen 342-shot manifest and 1,398 candidates. Hybrid
+  selected 380 keyframes (22 content events, 16 repairs), covered 32/32 ALL and
+  30/30 HIGH GT rows, and measured max gap exactly 8.0s.
+- One-video English MetaCLIP retrieval: midpoint R@10 0.81250, legacy 12s/8s
+  0.84375, hybrid 0.78125. No superiority or corpus-wide claim was made.
+
+Verification:
+
+- Focused/relevant: 64 passed, 1 optional TransNetV2 skip.
+- Broader non-API: 875 passed, 14 skipped, one unrelated pre-existing
+  `tests.unit` import-path failure.
+- Full collection additionally requires the optional FastAPI extra absent from
+  the isolated MetaCLIP runtime.
+- Real production ingestion, GT evaluation, real artifact audit/reuse, Python
+  compilation, and `git diff --check`: PASS.
+
+Report: `docs/reviews/INGEST_HYBRID_KEYFRAME_SELECTOR.md`.
+
+---
+
+# INGEST multi-video keyframe re-evaluation
+
+Status: COMPLETE; MEASURED PILOT; NOT MERGED OR PUSHED
+
+- Evaluated 99 manual GT segments (86 high-confidence) across L21_V001,
+  L21_V029, L22_V018, and L24_V043 with frozen PySceneDetect and TransNetV2
+  manifests.
+- Completed midpoint, periodic 12s/8s, MetaCLIP-2, PE-Core-L, BEiT-3, and
+  Meta+edge Pass 1; all competitive pair/triple RRF fusions; and adaptive PE
+  and BEiT Pass 3.
+- Reused 1,398 prior Meta/JPEG candidates and encoded a 5,581-frame union once
+  per provider. All non-midpoint strategies satisfy the measured <=8s gap.
+- Primary fixed-Meta retrieval leaves periodic as the safest low-risk strategy:
+  98/99 PyScene and 99/99 TransNet Selection Recall, with no consistent
+  content-aware improvement across detectors. Production defaults were not
+  changed.
+- Provider-matched retrieval identifies PE as the strongest single retrieval
+  encoder and PE+BEiT as the strongest measured fusion, but those results
+  confound selector placement with retrieval space and do not change the
+  production verdict.
+
+Verification:
+
+- Focused selector/cache/keyframe/detector tests: 28 passed.
+- Real four-video detection, extraction, three-provider image/query inference,
+  fixed and provider-matched retrieval, cache validation, Python compilation,
+  and `git diff --check`: PASS.
+
+Report: `docs/reviews/INGEST_MULTI_VIDEO_KEYFRAME_REEVALUATION.md`.
+
+---
+
+# CANONICAL INGESTION V1 production freeze
+
+Status: IMPLEMENTED; FULL BATCH1 DEFERRED
+
+Branch: `feat/ingest-canonical-freeze`
+
+- Froze every runnable default at TransNetV2 `0.5` plus periodic midpoint +
+  12s/8s keyframe selection.
+- Kept PySceneDetect, midpoint-only, `hybrid_temporal_content`, and Meta/PE/BEiT
+  experiments as explicit non-default modes.
+- Preserved periodic mathematics and canonical identity/mapping semantics.
+- Verified that the default periodic path does not construct MetaCLIP-2 and
+  that TransNetV2 has no silent PySceneDetect fallback.
+- Did not run full Batch1 ingestion.
+
+Verification:
+
+- Focused ingestion/CLI/provider-isolation suite: 93 passed, 1 optional
+  TransNetV2 skip.
+- Full suite: 921 passed, 16 skipped, with one unrelated pre-existing
+  `tests.unit` import-path failure.
+- CLI/script help and direct default resolution from this worktree: PASS.
+
+Canonical contract: `docs/architecture/CANONICAL_INGESTION.md`.
+
+Freeze report: `docs/reviews/INGEST_CANONICAL_FREEZE.md`.

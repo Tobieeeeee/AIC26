@@ -12,6 +12,7 @@ from mvr.enrichment.embeddings.perception_encoder import PerceptionEncoderImageE
 from mvr.enrichment.embeddings.artifacts import verify_file_sha256
 from mvr.enrichment.embeddings.offline import (
     extract_embedding_artifacts,
+    reuse_embedding_artifact,
     run_selected_embedding_providers,
 )
 from mvr.enrichment.embeddings.provider_specs import load_provider_specs
@@ -56,6 +57,14 @@ def main():
         "--metaclip2-model",
         type=str,
         help="Pinned local/cache model path; defaults to locked Hugging Face ID",
+    )
+    parser.add_argument(
+        "--selector-embedding-artifact",
+        type=Path,
+        help=(
+            "Validated selector-produced metaclip2 artifact. By default the "
+            "runner reuses <mapping parent>/selector_embeddings/metaclip2 when present."
+        ),
     )
     parser.add_argument(
         "--allow-model-downloads",
@@ -132,6 +141,19 @@ def main():
     def run_metaclip2():
         specs = load_provider_specs(args.provider_specs)
         spec = specs.get("metaclip2")
+        selector_artifact = args.selector_embedding_artifact
+        if selector_artifact is None:
+            automatic = args.mapping_csv.parent / "selector_embeddings" / "metaclip2"
+            selector_artifact = automatic if automatic.is_dir() else None
+        if selector_artifact is not None:
+            reuse_embedding_artifact(
+                selector_artifact,
+                embeddings_root=args.output / "embeddings",
+                rows=keyframes,
+                spec=spec,
+            )
+            print(f"Reused validated selector MetaCLIP-2 artifact: {selector_artifact}")
+            return
         encoder = MetaClip2ImageEncoder(
             spec=spec,
             model_location=args.metaclip2_model,
