@@ -23,7 +23,14 @@ from .evaluation.benchmark import (
 from .indexing.faiss_index import FaissIndex
 from .indexing.semantic_builder import build_semantic_index
 from .ingestion.aic_dataset import AicDatasetRegistry
-from .ingestion.pipeline import run_pipeline
+from .ingestion.pipeline import (
+    CANONICAL_DETECTOR,
+    CANONICAL_LONG_SHOT_SECONDS,
+    CANONICAL_SAMPLE_EVERY_SECONDS,
+    CANONICAL_SELECTOR_MODE,
+    CANONICAL_TRANSNET_THRESHOLD,
+    run_pipeline,
+)
 from .retrieval.frame_refinement import RefinementWindowConfig, refine_top_candidates
 from .retrieval.kis import KisCandidate, search_kis
 from .retrieval.semantic import SemanticRetriever
@@ -54,22 +61,57 @@ def _add_ingest_parser(subparsers: argparse._SubParsersAction) -> None:
         "--methods",
         nargs="+",
         choices=["pyscenedetect", "transnetv2"],
-        default=["pyscenedetect"],
+        default=[CANONICAL_DETECTOR],
     )
     parser.add_argument(
         "--primary",
         choices=["pyscenedetect", "transnetv2"],
-        default="pyscenedetect",
+        default=CANONICAL_DETECTOR,
     )
     parser.add_argument("--pyscene-threshold", type=float, default=27.0)
-    parser.add_argument("--transnet-threshold", type=float, default=0.5)
+    parser.add_argument(
+        "--transnet-threshold", type=float, default=CANONICAL_TRANSNET_THRESHOLD
+    )
     parser.add_argument(
         "--device",
         choices=["auto", "cpu", "cuda", "mps"],
         default="auto",
     )
-    parser.add_argument("--long-shot-seconds", type=float, default=12.0)
-    parser.add_argument("--sample-every-seconds", type=float, default=8.0)
+    parser.add_argument(
+        "--selector-mode",
+        choices=["midpoint", "periodic", "hybrid_temporal_content"],
+        default=CANONICAL_SELECTOR_MODE,
+    )
+    parser.add_argument(
+        "--long-shot-seconds", type=float, default=CANONICAL_LONG_SHOT_SECONDS,
+        help="Periodic-mode long-shot threshold",
+    )
+    parser.add_argument(
+        "--sample-every-seconds", type=float, default=CANONICAL_SAMPLE_EVERY_SECONDS,
+        help="Periodic-mode interval",
+    )
+    parser.add_argument("--candidate-step-sec", type=float, default=1.0)
+    parser.add_argument("--max-temporal-gap-sec", type=float, default=8.0)
+    parser.add_argument("--clip-knn-k", type=_positive_int, default=3)
+    parser.add_argument("--clip-neighbor-window-sec", type=float, default=4.0)
+    parser.add_argument("--clip-novelty-threshold", type=float, default=0.15)
+    parser.add_argument("--clip-rare-threshold", type=float, default=0.25)
+    parser.add_argument("--min-event-gap-sec", type=float, default=2.0)
+    parser.add_argument("--edge-change-mad-multiplier", type=float, default=3.0)
+    parser.add_argument("--edge-change-min-score", type=float, default=0.08)
+    parser.add_argument(
+        "--midpoint-mandatory",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument(
+        "--provider-specs-path",
+        type=Path,
+        default=Path("configs/embedding_providers.json"),
+    )
+    parser.add_argument("--metaclip2-model")
+    parser.add_argument("--allow-model-downloads", action="store_true")
+    parser.add_argument("--embedding-batch-size", type=_positive_int, default=16)
     parser.set_defaults(command="ingest")
 
 

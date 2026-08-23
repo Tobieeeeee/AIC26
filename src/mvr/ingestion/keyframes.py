@@ -86,3 +86,45 @@ def make_keyframes(
             )
 
     return keyframes
+
+
+def make_keyframes_from_indices(
+    shots: list[Shot],
+    selected_by_shot: dict[tuple[str, int], list[int]],
+) -> list[Keyframe]:
+    """Build canonical identities for an externally selected frame set.
+
+    The formatter is shared by the hybrid selector so changing selection policy
+    cannot change the established ``K01``, ``K02``, ... identity semantics.
+    """
+
+    keyframes: list[Keyframe] = []
+    for shot in shots:
+        indices = sorted(set(selected_by_shot.get((shot.video_id, shot.shot_id), [])))
+        if not indices:
+            raise ValueError(
+                f"shot {shot.video_id}/S{shot.shot_id:04d} has no selected keyframe"
+            )
+        if indices[0] < shot.start_frame or indices[-1] > shot.end_frame:
+            raise ValueError(
+                f"selected frame is outside shot {shot.video_id}/S{shot.shot_id:04d}"
+            )
+        for ordinal, frame_idx in enumerate(indices, start=1):
+            keyframe_id = (
+                f"{shot.video_id}_S{shot.shot_id:04d}_K{ordinal:02d}"
+            )
+            relative_path = (
+                Path("keyframes") / shot.video_id / f"{keyframe_id}.jpg"
+            )
+            keyframes.append(
+                Keyframe(
+                    keyframe_id=keyframe_id,
+                    video_id=shot.video_id,
+                    shot_id=shot.shot_id,
+                    ordinal=ordinal,
+                    frame_idx=frame_idx,
+                    timestamp=frame_idx / shot.fps,
+                    image_path=relative_path.as_posix(),
+                )
+            )
+    return keyframes

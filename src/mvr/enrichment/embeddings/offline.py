@@ -263,3 +263,93 @@ def audit_embedding_artifact(provider_root: Path) -> dict[str, int]:
         "extra_ids": max(len(unique_ids) - expected, 0),
         "invalid_vectors": invalid,
     }
+
+
+def reuse_embedding_artifact(
+    source_root: Path,
+    *,
+    embeddings_root: Path,
+    rows: Sequence[Mapping[str, str]],
+    spec: ProviderSpec,
+) -> Path:
+    """Publish a validated selector-produced provider artifact without encoding."""
+    from .artifacts import load_mapping, load_provider_artifact, sha256_file
+
+    source = load_provider_artifact(
+        source_root, verify_checksum=True, verify_mapping=True
+    )
+    manifest = source.manifest
+    expected_contract = (
+        spec.model_id,
+        spec.model_name,
+        spec.checkpoint_or_pretrained,
+        spec.model_revision,
+        spec.embedding_dimension,
+        spec.dtype,
+        spec.normalized,
+    )
+    actual_contract = (
+        manifest.model_id,
+        manifest.model_name,
+        manifest.checkpoint_or_pretrained,
+        manifest.model_revision,
+        manifest.embedding_dimension,
+        manifest.dtype,
+        manifest.normalized,
+    )
+    if actual_contract != expected_contract:
+        raise OfflineEmbeddingError(
+            "selector MetaCLIP artifact does not match the downstream provider identity"
+        )
+    records = load_mapping(source)
+    expected_ids = {
+        (
+            (row.get("video_id") or "").strip(),
+            (row.get("keyframe_id") or "").strip(),
+            str(row.get("frame_idx") or row.get("frame_id") or "").strip(),
+        )
+        for row in rows
+    }
+    actual_ids = {
+        (record.video_id, record.keyframe_id, str(record.frame_id or "").strip())
+        for record in records
+    }
+    if expected_ids != actual_ids or len(expected_ids) != len(rows):
+        raise OfflineEmbeddingError(
+            "selector MetaCLIP artifact candidate identity does not match canonical mapping"
+        )
+    audit = audit_embedding_artifact(source_root)
+    if audit["invalid_vectors"] or audit["missing_ids"] or audit["extra_ids"]:
+        raise OfflineEmbeddingError(f"selector MetaCLIP artifact failed audit: {audit}")
+    try:
+        payload = json.loads((Path(source_root) / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OfflineEmbeddingError("cannot read selector MetaCLIP manifest") from exc
+    execution = payload.get("execution")
+    if not isinstance(execution, dict) or execution.get("image_preprocessing") != spec.image_preprocessing:
+        raise OfflineEmbeddingError(
+            "selector MetaCLIP preprocessing does not match downstream provider"
+        )
+    hashes = execution.get("vector_files_sha256")
+    if not isinstance(hashes, dict) or not hashes:
+        raise OfflineEmbeddingError("selector MetaCLIP artifact lacks vector hashes")
+    for name, expected_hash in hashes.items():
+        path = source.resolve_vector_path(name)
+        if sha256_file(path) != expected_hash:
+            raise OfflineEmbeddingError(
+                f"selector MetaCLIP vector hash mismatch: {name}"
+            )
+
+    target = Path(embeddings_root) / spec.model_id
+    if target.exists():
+        raise FileExistsError(f"provider artifact already exists: {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = target.parent / f".{spec.model_id}.{uuid.uuid4().hex}.reuse.tmp"
+    try:
+        shutil.copytree(source.root, staging)
+        staging.replace(target)
+    except Exception:
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
+    return target

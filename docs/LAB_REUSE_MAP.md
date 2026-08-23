@@ -382,3 +382,21 @@ BLOCKED
 ```
 
 Any later behavior change must record the original behavior, new behavior, reason, whether it is compatibility-only or semantic, and verification status.
+
+## INGEST-KF04 hybrid selector experiment
+
+This task is an explicitly approved semantic architecture change, not a silent
+alteration of the Shot Boundary Lab reuse baseline. Its implementation remains
+available as the explicit `hybrid_temporal_content` mode. The later production
+freeze below supersedes its default status without changing its algorithm.
+
+| Original/reused behavior | New production behavior | Reason and compatibility | Verification | Status |
+|---|---|---|---|---|
+| Floor midpoint for every shot; for `duration >= 12s`, add frames every 8s from shot start. | Canonical `hybrid_temporal_content`: 1s candidates, pinned MetaCLIP-2 local novelty, grayscale/Canny change events, rare-event preservation, mandatory midpoint, then repair all temporal gaps to <=8s. | Explicit KF04 architecture decision. Canonical identity, inclusive shot bounds, frame/timestamp semantics, and mapping CSV remain unchanged. The original algorithm remains byte-for-byte unchanged behind explicit `periodic` mode with 12s/8s defaults. | Deterministic CPU-only invariant/cache/reuse tests and real L21_V001 regression. | VERIFIED |
+| Downstream MetaCLIP encoded selected JPEGs independently. | Ingestion publishes selected candidate rows as a validated standard MetaCLIP provider artifact; the feature runner automatically reuses it only when model/revision/preprocessing/normalization/canonical identities and hashes match. | Avoids duplicate inference without coupling other embedding providers. Missing or mismatched artifacts fail validation; canonical hybrid selection never falls back to another model/selector. | Provider artifact audit and positive/negative reuse tests. | VERIFIED |
+
+## CANONICAL INGESTION V1 production freeze
+
+| Previous default | Frozen production default | Reason and compatibility | Verification | Status |
+|---|---|---|---|---|
+| `hybrid_temporal_content` with PySceneDetect in runnable entrypoints | TransNetV2 at `0.5` plus periodic midpoint + `duration >= 12s` / every `8s` | Approved Batch1 freeze based on the four-video/99-GT re-evaluation. Periodic mathematics and canonical identity/mapping semantics are unchanged. PySceneDetect, midpoint, hybrid, and provider experiments remain explicit non-default modes. | CLI, script, config, and library default-resolution tests; default pipeline isolation test; focused ingestion regressions. | VERIFIED |

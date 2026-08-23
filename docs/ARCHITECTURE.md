@@ -302,6 +302,24 @@ Expected output:
 
 Ingestion must not contain retrieval logic.
 
+#### Canonical keyframe selection
+
+**CANONICAL INGESTION V1** is frozen for Batch1 production:
+
+```text
+TransNetV2 shot boundaries at threshold 0.5
+  -> periodic keyframe selector
+  -> mandatory floor midpoint per shot
+  -> for shots lasting >=12s, samples every 8s from shot start
+```
+
+The periodic mathematics, inclusive shot bounds, frame/timestamp calculations,
+keyframe ordinals, IDs, and mapping CSV semantics are unchanged. The default
+path initializes no MetaCLIP-2, Perception Encoder, or BEiT-3 selector runtime.
+PySceneDetect, midpoint-only, and `hybrid_temporal_content` remain explicit
+experimental/control modes. TransNetV2 dependency/model failures are fatal and
+never trigger a silent PySceneDetect fallback.
+
 ---
 
 ### 7.2 `src/mvr/enrichment/ocr/`

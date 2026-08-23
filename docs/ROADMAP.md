@@ -16,7 +16,9 @@
 
 - Probe video bằng ffprobe.
 - So sánh PySceneDetect và TransNetV2 trên video thật.
-- Chọn keyframe midpoint + sampling shot dài.
+- Freeze CANONICAL INGESTION V1: TransNetV2 `0.5` plus deterministic periodic
+  midpoint + 12s/8s sampling. Keep PySceneDetect, midpoint-only, hybrid, and
+  Meta/PE/BEiT selector experiments available only through explicit modes.
 - Xuất manifest có `video_id`, `shot_id`, `frame_idx`, `timestamp`, `image_path`.
 
 **Metric:** coverage thủ công của cảnh quan trọng + thời gian preprocess/video.

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 
-def test_ingest_command_preserves_lab_defaults(monkeypatch, tmp_path: Path) -> None:
+def test_ingest_command_uses_canonical_periodic_defaults(monkeypatch, tmp_path: Path) -> None:
     from mvr import cli
 
     calls: list[dict] = []
@@ -16,13 +16,28 @@ def test_ingest_command_preserves_lab_defaults(monkeypatch, tmp_path: Path) -> N
         {
             "input_path": input_path,
             "output_root": output_path,
-            "methods": ["pyscenedetect"],
-            "primary": "pyscenedetect",
+            "methods": ["transnetv2"],
+            "primary": "transnetv2",
             "pyscene_threshold": 27.0,
             "transnet_threshold": 0.5,
             "device": "auto",
+            "selector_mode": "periodic",
             "long_shot_seconds": 12.0,
             "sample_every_seconds": 8.0,
+            "candidate_step_sec": 1.0,
+            "max_temporal_gap_sec": 8.0,
+            "clip_knn_k": 3,
+            "clip_neighbor_window_sec": 4.0,
+            "clip_novelty_threshold": 0.15,
+            "clip_rare_threshold": 0.25,
+            "min_event_gap_sec": 2.0,
+            "edge_change_mad_multiplier": 3.0,
+            "edge_change_min_score": 0.08,
+            "midpoint_mandatory": True,
+            "provider_specs_path": Path("configs/embedding_providers.json"),
+            "metaclip2_model": None,
+            "allow_model_downloads": False,
+            "embedding_batch_size": 16,
         }
     ]
 
