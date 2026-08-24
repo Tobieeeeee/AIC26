@@ -1043,6 +1043,36 @@ Blockers:
 
 - None. No quality claim or `rrf_k` tuning was performed.
 
+# TASK-FIX-01 — Milvus production semantic runtime
+
+Status: COMPLETE; LIVE LOCAL RUNTIME VERIFIED; FULL BATCH1 DEFERRED
+
+Branch: `fix/milvus-production-runtime`
+
+- Made `MilvusSemanticService` the FastAPI production default and retained
+  FAISS only behind explicit `MVR_SEMANTIC_BACKEND=faiss_reference` selection.
+- Reused the three provider query encoders and independent semantic retriever;
+  BEiT-3, MetaCLIP-2, and PE remain isolated and fuse by rank-only RRF `k=60`.
+- Added fail-closed runtime resolution and readiness fields for configured,
+  reachable, collection-ready, loaded, collection, and entity-count state.
+- Verified a five-entity local Milvus 2.4.13 fixture with all three canonical
+  vector fields and exact FLAT parity against FAISS 1.15.0.
+- Verified FastAPI health and semantic search through the live Milvus service;
+  no model weights and no full Batch1 artifacts were downloaded or indexed.
+
+Verification:
+
+- Milvus/runtime unit suites: 78 passed, 0 skipped.
+- KIS/TRAKE/Q&A/hybrid/default focused suites: 243 passed.
+- Opt-in live Milvus integration: 1 passed, 0 skipped, 1 upstream warning.
+- Full suite: 1,108 passed, 14 skipped, with three failures from untracked
+  benchmark tests and the documented unrelated Task05A cross-import failure.
+- Python compilation and `git diff --check`: PASS.
+
+Implementation commit: `f6bb249`.
+
+Report: `docs/reviews/MILVUS_PRODUCTION_RUNTIME_FIX.md`.
+
 # Multi-Embedding Task 14 — Fasttest and Seven Ablations
 
 Status: COMPLETE (structural fixture; real weights unavailable)
