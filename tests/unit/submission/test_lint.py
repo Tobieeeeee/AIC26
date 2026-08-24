@@ -116,6 +116,35 @@ def test_a_duplicate_prediction_is_reported(tmp_path) -> None:
     assert any("trùng" in p for p in problems)
 
 
+def test_every_duplicate_is_reported_at_once(tmp_path) -> None:
+    """Reporting only the first turned fixing them into whack-a-mole: three
+    round-1 files were cleaned, relinted, and each surfaced a different pair
+    that had been there all along."""
+    path = _write(
+        tmp_path / "query-1-kis.csv",
+        "L1,1\nL2,2\nL1,1\nL3,3\nL2,2\nL4,4\nL1,1\n",
+    )
+
+    problems = lint_file(path)
+
+    report = next(p for p in problems if "trùng" in p)
+    assert report.startswith("3 dòng trùng")
+    assert "dòng 3 (giống dòng 1)" in report
+    assert "dòng 5 (giống dòng 2)" in report
+    assert "dòng 7 (giống dòng 1)" in report
+
+
+def test_a_long_run_of_duplicates_is_summarised(tmp_path) -> None:
+    """A file that is mostly duplicates should say how many, not print a
+    dozen lines the reader has to count."""
+    path = _write(tmp_path / "query-1-kis.csv", "L1,1\n" * 12)
+
+    report = next(p for p in lint_file(path) if "trùng" in p)
+
+    assert report.startswith("11 dòng trùng")
+    assert "và 6 dòng nữa" in report
+
+
 def test_an_answer_over_the_character_limit_is_reported(tmp_path) -> None:
     path = _write(
         tmp_path / "query-3-qa.csv", f"L26_V270,3072,{'x' * 101}\n"
@@ -218,6 +247,43 @@ def test_repair_keeps_a_space_that_is_inside_an_answer(tmp_path) -> None:
     repair_file(path)
 
     assert path.read_text(encoding="utf-8").strip() == "L26_V270,3072,Năm người"
+
+
+def test_repair_drops_a_duplicate_and_keeps_the_first(tmp_path) -> None:
+    """Safe to automate, unlike the rest. R@k reads the best answer among
+    the first k, so a copy of a line already above it cannot add score in
+    any ordering -- there is no case where keeping it is right."""
+    path = _write(
+        tmp_path / "query-1-kis.csv", "L1,1\nL2,2\nL1,1\nL3,3\nL2,2\n"
+    )
+
+    repair_file(path)
+
+    assert path.read_text(encoding="utf-8").split() == ["L1,1", "L2,2", "L3,3"]
+    assert lint_file(path) == []
+
+
+def test_repair_keeps_the_ranking_order(tmp_path) -> None:
+    """Rank is the whole point of the file: R@1 is one fifth of the score.
+    Deduplicating must not reorder what survives."""
+    path = _write(tmp_path / "query-1-kis.csv", "L9,9\nL1,1\nL9,9\nL5,5\n")
+
+    repair_file(path)
+
+    assert path.read_text(encoding="utf-8").split() == ["L9,9", "L1,1", "L5,5"]
+
+
+def test_repair_keys_a_duplicate_on_video_and_frame_only(tmp_path) -> None:
+    """Two Q&A rows naming the same frame are the same prediction even when
+    the answers differ -- the second can never score where the first did
+    not, because the frame is what the interval test reads."""
+    path = _write(
+        tmp_path / "query-3-qa.csv", "L1,1,năm\nL1,1,sáu\nL2,2,bảy\n"
+    )
+
+    repair_file(path)
+
+    assert path.read_text(encoding="utf-8").split() == ["L1,1,năm", "L2,2,bảy"]
 
 
 def test_repair_leaves_a_correct_file_byte_identical(tmp_path) -> None:
