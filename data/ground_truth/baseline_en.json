@@ -1,0 +1,69 @@
+{
+  "label": "en",
+  "queries": {
+    "query-p1-1-kis": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-2-kis": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-3-qa": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-4-kis": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-5-kis": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-6-kis": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-7-kis": {
+      "video_rank": 6,
+      "final_score": 0.6
+    },
+    "query-p1-9-qa": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-10-kis": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-11-kis": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-12-kis": {
+      "video_rank": 3,
+      "final_score": 0.8
+    },
+    "query-p1-13-kis": {
+      "video_rank": 7,
+      "final_score": 0.6
+    },
+    "query-p1-15-qa": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-17-qa": {
+      "video_rank": 1,
+      "final_score": 1.0
+    },
+    "query-p1-22-kis": {
+      "video_rank": 46,
+      "final_score": 0.4
+    },
+    "query-p1-25-kis": {
+      "video_rank": null,
+      "final_score": 0.0
+    }
+  }
+}
