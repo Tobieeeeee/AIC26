@@ -1,7 +1,7 @@
 # Canonical System Defaults — AIC26
 
-Version: 1.0
-Frozen by: DATA-02
+Version: 1.1
+Frozen by: DATA-02, TASK05-MILVUS
 Config source of truth: `configs/production.yaml`
 
 ---
@@ -16,6 +16,8 @@ Objects:   RF-DETR (variant/checkpoint pin PENDING)
 Visual:    BEiT-3, MetaCLIP-2, PE-Core-L
 OCR:       DeepSolo + Vietnamese PARSeq + F-1/F/F+1
 ASR:       Silero VAD + ChunkFormer CTC Large Vie
+Semantic:  Milvus (3 vector fields: beit3, metaclip2, pe_vector)
+Lexical:   Elasticsearch BM25
 ```
 
 ---
@@ -108,6 +110,29 @@ production defaults:
 | OCR | EasyOCR / PaddleOCR | Replaced by DeepSolo + PARSeq |
 | Embeddings | Single OpenCLIP (ViT-B-32) | Replaced by 3-provider stack |
 | ASR | — | No legacy; current system is canonical |
+| Semantic DB | FAISS (faiss_reference) | Replaced by Milvus (TASK05-MILVUS) |
+
+---
+
+## Semantic Backend (TASK05-MILVUS)
+
+Production semantic backend: **Milvus**
+
+| Parameter | Value |
+|---|---|
+| Collection | `aic26_keyframes` |
+| Vector fields | `beit3_vector` (768), `metaclip2_vector` (512), `pe_vector` (1024) |
+| Metric | IP (inner product = cosine for L2-normalized vectors) |
+| Index types | FLAT (exact/reference), HNSW (production ANN), IVF_FLAT (alternative) |
+| Semantic fusion | Python RRF k=60 (no Milvus-native RRF in v1) |
+| Recovery source | Cloudflare R2 canonical vector artifacts |
+
+FAISS is retained as `faiss_reference` for:
+- Parity testing
+- Exact/reference comparisons
+- Migration regression
+
+FAISS must NOT be the production default.
 
 ---
 

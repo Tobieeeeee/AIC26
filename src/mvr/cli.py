@@ -550,6 +550,232 @@ def _run_promote(staging: Path, corpus: Path, schema: str | None,
         raise SystemExit(1)
 
 
+# ---------------------------------------------------------------------------
+# Milvus commands (TASK05-MILVUS)
+# ---------------------------------------------------------------------------
+
+def _add_milvus_parser(subparsers: "argparse._SubParsersAction") -> None:
+    milvus_parser = subparsers.add_parser("milvus", help="Milvus semantic backend operations")
+    milvus_subs = milvus_parser.add_subparsers(dest="milvus_command", required=True)
+
+    # milvus status
+    p = milvus_subs.add_parser("status", help="Check Milvus connection and collection status")
+    p.add_argument("--collection", default=None)
+    p.add_argument("--manifest", type=Path, default=None)
+    p.set_defaults(command="milvus", milvus_command="status")
+
+    # milvus init-schema
+    p = milvus_subs.add_parser("init-schema", help="Create aic26_keyframes collection schema")
+    p.add_argument("--collection", default=None)
+    p.add_argument("--drop-existing", action="store_true")
+    p.set_defaults(command="milvus", milvus_command="init-schema")
+
+    # milvus ingest
+    p = milvus_subs.add_parser(
+        "ingest",
+        help="Ingest eligible keyframes from canonical Data-02 Parquet into Milvus",
+    )
+    p.add_argument("--status-parquet", type=Path, required=True,
+                   help="Path to extraction_status.parquet")
+    p.add_argument("--keyframe-mapping", type=Path, required=True,
+                   help="Path to canonical keyframe_mapping.csv")
+    p.add_argument("--beit3-vectors", type=Path, required=True)
+    p.add_argument("--beit3-mapping", type=Path, default=None)
+    p.add_argument("--beit3-manifest", type=Path, default=None)
+    p.add_argument("--metaclip2-vectors", type=Path, required=True)
+    p.add_argument("--metaclip2-mapping", type=Path, default=None)
+    p.add_argument("--metaclip2-manifest", type=Path, default=None)
+    p.add_argument("--pe-vectors", type=Path, required=True)
+    p.add_argument("--pe-mapping", type=Path, default=None)
+    p.add_argument("--pe-manifest", type=Path, default=None)
+    p.add_argument("--manifest", type=Path, default=Path("data/milvus_index_manifest.json"))
+    p.add_argument("--index-type", choices=["FLAT", "HNSW", "IVF_FLAT"], default="FLAT")
+    p.add_argument("--collection", default=None)
+    p.add_argument("--batch-size", type=_positive_int, default=1000)
+    p.set_defaults(command="milvus", milvus_command="ingest")
+
+    # milvus build-index
+    p = milvus_subs.add_parser("build-index", help="Create ANN indexes on vector fields")
+    p.add_argument("--index-type", choices=["FLAT", "HNSW", "IVF_FLAT"], default="HNSW")
+    p.add_argument("--collection", default=None)
+    p.set_defaults(command="milvus", milvus_command="build-index")
+
+    # milvus verify
+    p = milvus_subs.add_parser("verify", help="Verify collection schema, indexes, and manifest")
+    p.add_argument("--collection", default=None)
+    p.add_argument("--manifest", type=Path, default=None)
+    p.set_defaults(command="milvus", milvus_command="verify")
+
+    # milvus show-manifest
+    p = milvus_subs.add_parser("show-manifest", help="Print the current semantic index manifest")
+    p.add_argument("--manifest", type=Path, default=Path("data/milvus_index_manifest.json"))
+    p.set_defaults(command="milvus", milvus_command="show-manifest")
+
+    # milvus stale-status
+    p = milvus_subs.add_parser("stale-status", help="Check if semantic index manifest is stale")
+    p.add_argument("--manifest", type=Path, default=Path("data/milvus_index_manifest.json"))
+    p.add_argument("--keyframe-mapping", type=Path, default=None)
+    p.add_argument("--beit3-vectors", type=Path, default=None)
+    p.add_argument("--metaclip2-vectors", type=Path, default=None)
+    p.add_argument("--pe-vectors", type=Path, default=None)
+    p.set_defaults(command="milvus", milvus_command="stale-status")
+
+
+def _run_milvus(values: dict) -> None:
+    milvus_command = values.pop("milvus_command")
+
+    from .indexing.milvus_client import MilvusClient, MilvusConfig
+    from .indexing.milvus_schema import COLLECTION_NAME
+
+    collection_name = values.pop("collection", None) or COLLECTION_NAME
+
+    if milvus_command == "status":
+        manifest_path = values.pop("manifest", None)
+        client = MilvusClient()
+        try:
+            health = client.health()
+            if client.collection_exists(collection_name):
+                info = client.collection_info(collection_name)
+                health["collection_info"] = info
+            else:
+                health["collection_exists"] = False
+            from .indexing.milvus_manifest import load_manifest
+            if manifest_path:
+                m = load_manifest(Path(manifest_path))
+                health["manifest_state"] = m.state if m else "NOT_FOUND"
+            print(json.dumps(health, indent=2, ensure_ascii=False))
+        except Exception as exc:
+            print(json.dumps({"status": "error", "error": str(exc)}, indent=2))
+            raise SystemExit(1)
+
+    elif milvus_command == "init-schema":
+        from .indexing.milvus_schema import build_collection_schema
+        drop_existing = values.pop("drop_existing", False)
+        client = MilvusClient()
+        schema = build_collection_schema()
+        client.create_collection(schema, collection_name, drop_existing=drop_existing)
+        print(json.dumps({"status": "ok", "collection": collection_name}, indent=2))
+
+    elif milvus_command == "ingest":
+        from .indexing.milvus_ingest import ingest_to_milvus
+        from .indexing.milvus_client import MilvusClient
+        provider_artifacts = {
+            "beit3": {
+                "vectors": values.pop("beit3_vectors"),
+                "mapping": values.pop("beit3_mapping"),
+                "manifest": values.pop("beit3_manifest"),
+            },
+            "metaclip2": {
+                "vectors": values.pop("metaclip2_vectors"),
+                "mapping": values.pop("metaclip2_mapping"),
+                "manifest": values.pop("metaclip2_manifest"),
+            },
+            "perception_encoder": {
+                "vectors": values.pop("pe_vectors"),
+                "mapping": values.pop("pe_mapping"),
+                "manifest": values.pop("pe_manifest"),
+            },
+        }
+        # Remove None paths
+        for pid, art in provider_artifacts.items():
+            provider_artifacts[pid] = {k: v for k, v in art.items() if v is not None}
+        result = ingest_to_milvus(
+            status_parquet=values.pop("status_parquet"),
+            keyframe_mapping_csv=values.pop("keyframe_mapping"),
+            provider_artifacts=provider_artifacts,
+            manifest_path=values.pop("manifest"),
+            index_type=values.pop("index_type"),
+            collection_name=collection_name,
+            batch_size=values.pop("batch_size"),
+        )
+        import dataclasses
+        print(json.dumps(dataclasses.asdict(result), indent=2, ensure_ascii=False))
+
+    elif milvus_command == "build-index":
+        from .indexing.milvus_client import MilvusClient
+        from .indexing.milvus_schema import VECTOR_FIELDS, INDEX_TYPE_PARAMS, CANONICAL_METRIC
+        from .indexing.milvus_client import CANONICAL_METRIC as _METRIC
+        index_type = values.pop("index_type", "HNSW")
+        client = MilvusClient()
+        client.connect()
+        for vf in VECTOR_FIELDS:
+            client.create_index(
+                vf,
+                index_type=index_type,
+                metric_type=_METRIC,
+                params=INDEX_TYPE_PARAMS.get(index_type, {}),
+                collection_name=collection_name,
+            )
+        client.load_collection(collection_name)
+        print(json.dumps({
+            "status": "ok", "collection": collection_name,
+            "index_type": index_type, "fields": list(VECTOR_FIELDS),
+        }, indent=2))
+
+    elif milvus_command == "verify":
+        from .indexing.milvus_client import MilvusClient
+        from .indexing.milvus_schema import VECTOR_FIELDS, SCALAR_FIELDS
+        from .indexing.milvus_manifest import load_manifest
+        client = MilvusClient()
+        result: dict = {}
+        try:
+            info = client.validate_collection(
+                collection_name,
+                expected_fields=list(VECTOR_FIELDS) + list(SCALAR_FIELDS),
+            )
+            result.update(info)
+        except Exception as exc:
+            result["error"] = str(exc)
+        manifest_path = values.pop("manifest", None)
+        if manifest_path:
+            m = load_manifest(Path(manifest_path))
+            result["manifest_state"] = m.state if m else "NOT_FOUND"
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+    elif milvus_command == "show-manifest":
+        from .indexing.milvus_manifest import load_manifest
+        manifest_path = values.pop("manifest")
+        m = load_manifest(Path(manifest_path))
+        if m is None:
+            print(json.dumps({"error": f"Manifest not found: {manifest_path}"}, indent=2))
+            raise SystemExit(1)
+        print(json.dumps(m.to_dict(), indent=2, ensure_ascii=False))
+
+    elif milvus_command == "stale-status":
+        from .indexing.milvus_manifest import load_manifest, check_staleness
+        from .indexing.milvus_ingest import _sha256_path
+        manifest_path = values.pop("manifest")
+        m = load_manifest(Path(manifest_path))
+        if m is None:
+            print(json.dumps({"state": "NOT_FOUND"}, indent=2))
+            raise SystemExit(1)
+        kf_path = values.pop("keyframe_mapping", None)
+        b3_path = values.pop("beit3_vectors", None)
+        m2_path = values.pop("metaclip2_vectors", None)
+        pe_path = values.pop("pe_vectors", None)
+        checksums = {}
+        if b3_path and Path(b3_path).is_file():
+            checksums["beit3"] = _sha256_path(Path(b3_path))
+        if m2_path and Path(m2_path).is_file():
+            checksums["metaclip2"] = _sha256_path(Path(m2_path))
+        if pe_path and Path(pe_path).is_file():
+            checksums["perception_encoder"] = _sha256_path(Path(pe_path))
+        kf_checksum = _sha256_path(Path(kf_path)) if kf_path and Path(kf_path).is_file() else ""
+        state, reasons = check_staleness(
+            m,
+            current_keyframe_checksum=kf_checksum,
+            current_provider_checksums=checksums,
+            current_dimensions={},
+        )
+        print(json.dumps({"state": state, "reasons": reasons}, indent=2))
+        if state == "STALE":
+            raise SystemExit(1)
+
+    else:
+        raise SystemExit(f"Unknown milvus command: {milvus_command}")
+
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m mvr.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -566,6 +792,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     _add_consolidate_parser(subparsers)
     _add_validate_staging_parser(subparsers)
     _add_promote_parser(subparsers)
+    # Task05-Milvus commands
+    _add_milvus_parser(subparsers)
     values = vars(parser.parse_args(argv))
     command = values.pop("command")
     if command == "ingest":
@@ -651,6 +879,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             values.pop("staging"), values.pop("corpus"),
             values.pop("schema"), values.pop("manifest"),
         )
+        return
+    if command == "milvus":
+        _run_milvus(values)
         return
 
     index = FaissIndex.load(values.pop("index"))

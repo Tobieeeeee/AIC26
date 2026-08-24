@@ -80,7 +80,8 @@ enrichment:
 
 retrieval:
   lexical_backend: elasticsearch
-  semantic_backend: faiss_flat_ip
+  semantic_backend: milvus          # production: Milvus (TASK05-MILVUS)
+  # faiss_reference: retained for parity tests / benchmarks only
   candidate_k: 30
   hybrid_method: weighted
   rrf_k: 60
