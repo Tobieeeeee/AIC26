@@ -106,8 +106,13 @@ def lint_file(path: Path | str, *, kind: str | None = None) -> list[str]:
             break  # one report per file is enough to act on
 
     expected = COLUMNS.get(kind or "")
-    seen: set[tuple[str, ...]] = set()
+    seen: dict[tuple[str, ...], int] = {}
+    duplicates: list[str] = []
+
     for number, row in enumerate(rows, start=1):
+        # Shape problems are systemic -- if one row has the wrong column
+        # count the whole file was built wrong -- so one report is enough
+        # and stops the scan.
         if expected is not None and len(row) != expected:
             problems.append(
                 f"dòng {number}: có {len(row)} cột, {kind} cần {expected} cột"
@@ -117,35 +122,49 @@ def lint_file(path: Path | str, *, kind: str | None = None) -> list[str]:
             problems.append(f"dòng {number}: trake cần video_id và ít nhất 1 frame")
             break
 
-        for index, value in enumerate(row[1 : (3 if kind == "qa" else len(row))], 1):
-            if kind == "qa" and index > 1:
-                continue
-            try:
-                int(value.strip())
-            except ValueError:
-                problems.append(
-                    f"dòng {number}: frame_idx {value!r} không phải số nguyên"
-                )
-                break
+        frames = row[1:2] if kind == "qa" else row[1:]
+        bad = next(
+            (value for value in frames if not _is_integer(value)),
+            None,
+        )
+        if bad is not None:
+            problems.append(f"dòng {number}: frame_idx {bad!r} không phải số nguyên")
+            break
+
+        # Duplicates are reported ALL AT ONCE. Reporting only the first
+        # turned fixing them into whack-a-mole: three files were cleaned,
+        # relinted, and each surfaced a different duplicate pair that had
+        # been there the whole time.
+        key = tuple(value.strip() for value in row[:2])
+        if key in seen:
+            duplicates.append(f"dòng {number} (giống dòng {seen[key]}): {key[0]},{key[1]}")
         else:
-            key = tuple(value.strip() for value in row[:2])
-            if key in seen:
-                problems.append(
-                    f"dòng {number}: trùng với một dòng trước ({key[0]},{key[1]}) "
-                    f"— tốn một slot mà không thêm điểm"
-                )
-                break
-            seen.add(key)
-            if kind == "qa" and len(row) >= 3 and len(row[2]) > MAX_ANSWER_CHARS:
-                problems.append(
-                    f"dòng {number}: answer dài {len(row[2])} ký tự, "
-                    f"tối đa {MAX_ANSWER_CHARS} ký tự"
-                )
-                break
-            continue
-        break
+            seen[key] = number
+
+        if kind == "qa" and len(row) >= 3 and len(row[2]) > MAX_ANSWER_CHARS:
+            problems.append(
+                f"dòng {number}: answer dài {len(row[2])} ký tự, "
+                f"tối đa {MAX_ANSWER_CHARS} ký tự"
+            )
+            break
+
+    if duplicates:
+        shown = duplicates[:5]
+        more = f" (và {len(duplicates) - 5} dòng nữa)" if len(duplicates) > 5 else ""
+        problems.append(
+            f"{len(duplicates)} dòng trùng — mỗi dòng tốn một slot mà không "
+            f"thêm điểm: " + "; ".join(shown) + more
+        )
 
     return problems
+
+
+def _is_integer(value: str) -> bool:
+    try:
+        int(value.strip())
+    except ValueError:
+        return False
+    return True
 
 
 def lint_directory(directory: Path | str) -> dict[str, list[str]]:
@@ -166,29 +185,59 @@ def lint_directory(directory: Path | str) -> dict[str, list[str]]:
 
 
 def repair_file(path: Path | str) -> list[str]:
-    """Strip the BOM and the stray whitespace. Nothing else.
+    """Strip the BOM, the stray whitespace, and the duplicate rows.
 
     Only whitespace *around* a field goes: a space inside an answer, as in
     ``Năm người``, is part of the answer and trimming it would change what
     was submitted.
 
-    Everything the linter reports beyond these two needs a person to decide
-    -- a wrong column count could be a missing field or an extra one, and
-    guessing would be worse than reporting.
+    **Deduplication is safe to automate**, unlike everything else the
+    linter reports. R@k reads the best answer among the first k, so a copy
+    of a line already above it cannot add score under any ordering -- there
+    is no case where keeping it is right, and each one costs a slot out of
+    100. Measured in round 1: one file spent 72 of its 100 slots on
+    duplicates and offered 28 distinct answers.
+
+    The first occurrence stays and the order is preserved, because rank is
+    what the file is for: R@1 is one fifth of the score.
+
+    Rows are keyed on ``(video_id, frame_idx)`` only. Two Q&A rows naming
+    one frame are the same prediction even when the answers differ -- the
+    frame is what the interval test reads, so the second can never score
+    where the first did not.
+
+    Everything else the linter reports needs a person: a wrong column count
+    could be a missing field or an extra one, and guessing is worse than
+    reporting.
     """
     path = Path(path)
-    text = path.read_bytes().decode("utf-8-sig")
+    raw = path.read_bytes()
+    text = raw.decode("utf-8-sig")
     if not text.strip():
         return []
 
     rows = _rows(text)
-    cleaned = [[value.strip() for value in row] for row in rows]
-    if cleaned == rows and not path.read_bytes().startswith(b"\xef\xbb\xbf"):
+    cleaned: list[list[str]] = []
+    seen: set[tuple[str, ...]] = set()
+    for row in rows:
+        stripped = [value.strip() for value in row]
+        key = tuple(stripped[:2])
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(stripped)
+
+    if cleaned == rows and not raw.startswith(b"\xef\xbb\xbf"):
         return []
 
     with path.open("w", newline="", encoding="utf-8") as handle:
         csv.writer(handle, quoting=csv.QUOTE_MINIMAL).writerows(cleaned)
-    return ["đã bỏ BOM và khoảng trắng thừa"]
+
+    notes = ["đã bỏ BOM và khoảng trắng thừa"]
+    dropped = len(rows) - len(cleaned)
+    if dropped:
+        notes.append(f"bỏ {dropped} dòng trùng")
+    return notes
 
 
 def format_report(report: Mapping[str, list[str]], total: int) -> str:
