@@ -13,8 +13,6 @@
 #   export MILVUS_HOST=localhost MILVUS_PORT=19530
 #   python -m mvr.cli milvus status
 
-version: "3.8"
-
 services:
   etcd:
     container_name: milvus-etcd

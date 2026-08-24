@@ -31,6 +31,7 @@ semantic = [
     "torchvision>=0.17,<1",
 ]
 search = ["elasticsearch>=8,<9"]
+milvus = ["pymilvus==2.4.15"]
 ocr = [
     "easyocr>=1.7,<2",
     "paddleocr>=2,<4",

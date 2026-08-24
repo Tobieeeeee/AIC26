@@ -31,11 +31,10 @@ class KeyframeFrameIndexResolver:
     """Resolves ``(video_id, keyframe_id)`` -> original-video ``frame_idx``.
 
     Backed by the Phase 02 ``keyframe_mapping.csv`` (columns include
-    ``video_id``, ``keyframe_id`` and ``frame_idx``): the FAISS/Elasticsearch
-    search index built from that file does not itself persist ``frame_idx``,
-    only ``timestamp`` (see the Task 01/04 audit notes), so this small lookup
-    supplies the missing original-frame identity without touching the
-    existing, already-verified indexing code.
+    ``video_id``, ``keyframe_id`` and ``frame_idx``): the legacy
+    FAISS/Elasticsearch index built from that file does not itself persist
+    ``frame_idx``, only ``timestamp`` (see the Task 01/04 audit notes), so this
+    small lookup verifies original-frame identity for either semantic backend.
 
     Keyed on the PAIR, never on ``keyframe_id`` alone. Measured on the real
     mapping: 166,550 rows, every ``(video_id, keyframe_id)`` pair distinct,
@@ -145,14 +144,15 @@ def search_kis(
 
     Uses hybrid search (existing semantic + OCR branches fused via the
     existing RRF utility) when Elasticsearch is configured, otherwise falls
-    back to semantic-only FAISS search. Never builds an index or loads a
-    model itself -- both services are the same lazily-initialized singletons
-    the plain `/search/*` routes already use.
+    back to the configured semantic service (Milvus in production and FAISS
+    only when explicitly selected as the reference backend). Never builds an
+    index or loads a model itself -- both services are the same
+    lazily-initialized singletons the plain `/search/*` routes already use.
 
-    ``query`` feeds the dense branch and must be English: the encoder is
-    OpenCLIP ``RN50/openai``. ``lexical_query`` feeds BM25 and should be the
-    original Vietnamese, because the OCR and ASR indexed under it are
-    Vietnamese. Leave it None to send one string to both, as before.
+    ``query`` feeds the configured provider-matched dense encoders.
+    ``lexical_query`` feeds BM25 and should be the original Vietnamese,
+    because the OCR and ASR indexed under it are Vietnamese. Leave it None to
+    send one string to both, as before.
     """
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query must be a non-empty string")
@@ -186,7 +186,7 @@ def search_kis(
     seen: set[tuple[str, int]] = set()
     for hit in raw_hits:
         video_id = str(hit["video_id"])
-        keyframe_id = str(hit["frame_id"])
+        keyframe_id = str(hit.get("keyframe_id", hit["frame_id"]))
         frame_id = resolve_original_frame_id(
             video_id=video_id,
             keyframe_id=keyframe_id,

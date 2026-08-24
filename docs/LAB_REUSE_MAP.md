@@ -400,3 +400,15 @@ freeze below supersedes its default status without changing its algorithm.
 | Previous default | Frozen production default | Reason and compatibility | Verification | Status |
 |---|---|---|---|---|
 | `hybrid_temporal_content` with PySceneDetect in runnable entrypoints | TransNetV2 at `0.5` plus periodic midpoint + `duration >= 12s` / every `8s` | Approved Batch1 freeze based on the four-video/99-GT re-evaluation. Periodic mathematics and canonical identity/mapping semantics are unchanged. PySceneDetect, midpoint, hybrid, and provider experiments remain explicit non-default modes. | CLI, script, config, and library default-resolution tests; default pipeline isolation test; focused ingestion regressions. | VERIFIED |
+
+## Milvus production semantic runtime fix
+
+This approved runtime fix migrates no new lab implementation. It reuses the
+Task05 Milvus client, schema, backend, manifest, provider-query encoders,
+independent provider retriever, and rank-only semantic RRF implementation.
+
+| Previous runtime behavior | New production behavior | Reason and compatibility | Verification | Status |
+|---|---|---|---|---|
+| Production configuration named `milvus`, but FastAPI always constructed `LazyFaissSemanticService`. | FastAPI constructs `MilvusSemanticService` by default; `faiss_reference` remains an explicit-only test/parity selection. Milvus unavailability reports semantic not-ready and returns an explicit search error, with no FAISS fallback. | Closes the audited config/runtime mismatch without changing provider models, dimensions, inner-product metric, or RRF mathematics. | Default-resolution, failure-path, API, KIS, TRAKE, Q&A, hybrid, and production-default regressions. | VERIFIED |
+| The Task05 service exposed provider-field search but was not a complete query-to-fused-results API service. | The existing three provider query encoders route only to `beit3_vector` (768), `metaclip2_vector` (512), and `pe_vector` (1024), then reuse rank-only RRF with `k=60`. | Compatibility wiring only; required-provider failure policy remains fail-closed and raw scores are never summed across providers. | Deterministic unit routing/RRF assertions plus a five-entity live Milvus FLAT fixture compared with real FAISS exact search. | VERIFIED |
+| Readiness checked field presence but did not expose dimensions, loaded state, or all-vector-index readiness to the API. | Readiness distinguishes configured, reachable, collection-ready, and loaded state and validates all canonical dimensions and vector indexes. | Makes runtime state observable; it does not relax schema or manifest checks. | Live Docker Milvus 2.4.13 status and FastAPI health smoke. | VERIFIED |

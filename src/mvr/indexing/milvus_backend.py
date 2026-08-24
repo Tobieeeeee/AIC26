@@ -151,6 +151,8 @@ class MilvusProviderBackend:
             self.client.upsert_batch(self._staged, collection_name=collection_name)
             self._staged = []
 
+        self.client.flush_collection(collection_name)
+
         # Create indexes on all vector fields
         for vector_field in VECTOR_FIELDS:
             self.client.create_index(

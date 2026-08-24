@@ -44,6 +44,7 @@ from .schemas import (
 
 
 DEFAULT_ES_INDEX = "keyframes"
+DEFAULT_SEMANTIC_BACKEND = "milvus"
 TOP_N_EACH = 30
 _UNSET = object()
 # Evidence-backed default from the real-data benchmark (see
@@ -71,7 +72,7 @@ def _resolve_trake_semantic_service(service: Any) -> Any:
     Accepts either shape, because ``create_app`` documents its services as
     injectable and both are legitimate injections:
 
-    - ``LazyFaissSemanticService`` (the production default) hides them behind
+    - ``LazyFaissSemanticService`` (the explicit reference backend) hides them behind
       a lazy ``retriever()`` so the model/index still load on first use only.
     - A plain ``SemanticRetriever`` already exposes them directly -- this is
       exactly what the real-data integration tests construct.
@@ -277,11 +278,12 @@ class ElasticsearchMultimodalService:
         *,
         index_name: str = DEFAULT_ES_INDEX,
         device: str = "auto",
+        semantic_service: Any | None = None,
     ) -> None:
         self.client = client
         self.index_name = index_name
         self.device = device
-        self._semantic: Any | None = None
+        self.semantic_service = semantic_service
 
     def document_count(self) -> int:
         return int(self.client.count(index=self.index_name)["count"])
@@ -311,22 +313,6 @@ class ElasticsearchMultimodalService:
             index_name=self.index_name,
         )
 
-    def _semantic_retriever(self):
-        if self._semantic is None:
-            from ..retrieval.semantic import (
-                ElasticsearchSemanticRetriever,
-                create_lab6_openclip_encoder,
-            )
-
-            encoder = create_lab6_openclip_encoder(device=self.device)
-            self._semantic = ElasticsearchSemanticRetriever(
-                encoder,
-                self.client,
-                index_name=self.index_name,
-                num_candidates=200,
-            )
-        return self._semantic
-
     def search_hybrid(
         self,
         query: str,
@@ -340,32 +326,45 @@ class ElasticsearchMultimodalService:
             person_min=0,
             car_min=0,
         )
-        semantic = self._semantic_retriever().search(
-            query,
-            top_k=TOP_N_EACH,
-        )
+        if self.semantic_service is None:
+            raise RuntimeError("semantic retrieval service is unavailable")
+        semantic_results = self.semantic_service.search(query, top_k=TOP_N_EACH)
         lexical_hits = list(lexical["hits"]["hits"])
-        semantic_hits = list(semantic["hits"]["hits"])
+        lexical_payloads = [
+            _hit_payload(hit, rank=rank)
+            for rank, hit in enumerate(lexical_hits, start=1)
+        ]
+        semantic_payloads = []
+        for result in semantic_results:
+            payload = result.to_dict() if hasattr(result, "to_dict") else dict(result)
+            if not payload.get("image_path") and payload.get("keyframe_id"):
+                payload["image_path"] = (
+                    f"/keyframes/{payload['video_id']}/{payload['keyframe_id']}.jpg"
+                )
+            semantic_payloads.append(payload)
+
+        def identity(payload: dict[str, Any]) -> str:
+            keyframe_id = payload.get("keyframe_id", payload["frame_id"])
+            return f"{payload['video_id']}\x1f{keyframe_id}"
+
         ranked_lists = [
-            [hit["_source"]["frame_id"] for hit in lexical_hits],
-            [hit["_source"]["frame_id"] for hit in semantic_hits],
+            [identity(payload) for payload in lexical_payloads],
+            [identity(payload) for payload in semantic_payloads],
         ]
         fused = rrf_fuse(ranked_lists, rrf_k=rrf_k, top_k=top_k)
 
         payloads: dict[str, dict[str, Any]] = {}
         for hits, rank_name in (
-            (lexical_hits, "rank_lexical"),
-            (semantic_hits, "rank_semantic"),
+            (lexical_payloads, "rank_lexical"),
+            (semantic_payloads, "rank_semantic"),
         ):
-            for rank, hit in enumerate(hits, start=1):
-                frame_id = str(hit["_source"]["frame_id"])
-                payloads.setdefault(frame_id, _hit_payload(hit, rank=1))[
-                    rank_name
-                ] = rank
+            for rank, payload in enumerate(hits, start=1):
+                candidate_id = identity(payload)
+                payloads.setdefault(candidate_id, dict(payload))[rank_name] = rank
 
         results = []
-        for rank, (frame_id, score) in enumerate(fused, start=1):
-            payload = dict(payloads[frame_id])
+        for rank, (candidate_id, score) in enumerate(fused, start=1):
+            payload = dict(payloads[candidate_id])
             payload.update(rank=rank, score=float(score))
             results.append(payload)
         return results
@@ -420,7 +419,13 @@ def _servable_keyframe_url(raw_path: str | None, keyframe_dir: Path | None) -> s
 
 def _semantic_payload(result: Any, keyframe_dir: Path | None) -> dict[str, Any]:
     payload = result.to_dict()
-    if keyframe_dir is None:
+    if not payload.get("image_path") and payload.get("keyframe_id"):
+        payload["image_path"] = (
+            f"/keyframes/{payload['video_id']}/{payload['keyframe_id']}.jpg"
+        )
+    if keyframe_dir is None or str(payload.get("image_path", "")).startswith(
+        "/keyframes/"
+    ):
         return payload
     image_path = Path(payload["image_path"]).resolve()
     try:
@@ -447,16 +452,31 @@ def _response_from_es(query: str, response: dict[str, Any]) -> SearchResponse:
     )
 
 
-def _default_semantic_service() -> LazyFaissSemanticService:
-    raw_path = os.environ.get("MVR_SEMANTIC_INDEX", "").strip()
-    index_root = Path(raw_path).resolve() if raw_path else None
-    return LazyFaissSemanticService(
-        index_root,
-        device=os.environ.get("MVR_DEVICE", "auto"),
+def _default_semantic_service() -> Any:
+    backend_name = os.environ.get(
+        "MVR_SEMANTIC_BACKEND", DEFAULT_SEMANTIC_BACKEND
+    ).strip().lower()
+    if backend_name == "milvus":
+        from ..retrieval.milvus_semantic import MilvusSemanticService
+
+        return MilvusSemanticService.from_env(
+            index_type=os.environ.get("MVR_MILVUS_INDEX_TYPE", "FLAT").strip().upper()
+        )
+    if backend_name == "faiss_reference":
+        raw_path = os.environ.get("MVR_SEMANTIC_INDEX", "").strip()
+        index_root = Path(raw_path).resolve() if raw_path else None
+        return LazyFaissSemanticService(
+            index_root,
+            device=os.environ.get("MVR_DEVICE", "auto"),
+        )
+    raise RuntimeError(
+        "MVR_SEMANTIC_BACKEND must be 'milvus' or 'faiss_reference'"
     )
 
 
-def _default_multimodal_service() -> tuple[Any | None, bool]:
+def _default_multimodal_service(
+    semantic_service: Any | None = None,
+) -> tuple[Any | None, bool]:
     es_url = os.environ.get("MVR_ES_URL", "").strip()
     if not es_url:
         return None, False
@@ -477,6 +497,7 @@ def _default_multimodal_service() -> tuple[Any | None, bool]:
                 client,
                 index_name=index_name,
                 device=os.environ.get("MVR_DEVICE", "auto"),
+                semantic_service=semantic_service,
             ),
             True,
         )
@@ -538,6 +559,9 @@ def _semantic_status(service: Any | None) -> SemanticRuntimeStatus:
             available=False,
             loaded=False,
         )
+    runtime_status = getattr(service, "runtime_status", None)
+    if callable(runtime_status):
+        return SemanticRuntimeStatus(**runtime_status())
     return SemanticRuntimeStatus(
         configured=bool(getattr(service, "configured", True)),
         available=bool(getattr(service, "available", True)),
@@ -560,7 +584,9 @@ def create_app(
     if semantic_service is _UNSET:
         semantic_service = _default_semantic_service()
     if multimodal_service is _UNSET:
-        multimodal_service, detected_configuration = _default_multimodal_service()
+        multimodal_service, detected_configuration = _default_multimodal_service(
+            semantic_service
+        )
         if elasticsearch_configured is None:
             elasticsearch_configured = detected_configuration
     if elasticsearch_configured is None:

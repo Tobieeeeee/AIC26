@@ -11,6 +11,7 @@ docker compose -f docker/milvus/docker-compose.milvus.yml ps
 
 # Check CLI connection
 $env:MILVUS_HOST = "localhost"; $env:MILVUS_PORT = "19530"
+python -m pip install -e ".[api,milvus]"
 python -m mvr.cli milvus status
 ```
 
@@ -27,7 +28,7 @@ python -m mvr.cli milvus status
 
 ## Environment Variables (no credentials committed)
 
-Copy `.env.milvus.example` to `.env.milvus` and edit:
+Set these in the shell or deployment secret/config system:
 
 ```
 MILVUS_HOST=localhost
@@ -35,7 +36,12 @@ MILVUS_PORT=19530
 MILVUS_TOKEN=
 MILVUS_DATABASE=default
 MILVUS_COLLECTION=aic26_keyframes
+MVR_SEMANTIC_BACKEND=milvus
 ```
+
+`milvus` is the production default. `faiss_reference` is accepted only when
+explicitly selected with `MVR_SEMANTIC_BACKEND=faiss_reference`; the API never
+falls back to it when Milvus is unavailable.
 
 ## CLI Commands
 
