@@ -123,24 +123,25 @@ def main() -> None:
             "published example from https://sotuyenaic.oj.io.vn/. This is "
             "NOT the same file as --output-dir's local verification export; "
             "write both if you want to keep the debug copy too. Prefer "
-            "--query-number + --official-dir below unless you need an exact "
-            "custom path/filename."
+            "--official-dir below unless you need an exact custom path."
         ),
     )
     parser.add_argument(
         "--query-number", type=int, default=None,
         help=(
-            "This query's sequence number in the organizer's batch (the 'N' "
-            "in the query-N-trake.txt file the organizer handed out). "
-            "Combined with --official-dir, generates the exact "
-            "query-<N>-trake.csv filename the organizer expects "
-            "(mvr.submission.trake_export.official_submission_filename) -- "
-            "ignored if --official-csv is also given."
+            "Optional. The submission carries the QUERY FILE's own name, so "
+            "--official-dir alone is enough: query-p1-16-trake.txt writes "
+            "query-p1-16-trake.csv. Give a number only when the query file "
+            "is named something else -- it rebuilds query-<N>-trake.csv, "
+            "which loses any batch prefix. Ignored if --official-csv is given."
         ),
     )
     parser.add_argument(
         "--official-dir", type=Path, default=None,
-        help="Directory to write the --query-number-generated official CSV into",
+        help=(
+            "Write the official CSV here, named after the query file: "
+            "query-p1-16-trake.json -> query-p1-16-trake.csv"
+        ),
     )
     args = parser.parse_args()
 
@@ -162,12 +163,23 @@ def main() -> None:
     )
 
     official_csv_path = args.official_csv
-    if official_csv_path is None and args.query_number is not None:
-        if args.official_dir is None:
-            raise SystemExit("--query-number requires --official-dir")
-        official_csv_path = args.official_dir / official_submission_filename(
-            args.query_number, "trake"
+    if official_csv_path is None and args.official_dir is not None:
+        # The query file's own name IS the submission name, so prefer it
+        # over --query-number: a real pack is `query-p1-16-trake.txt`, and
+        # a number can only ever rebuild `query-16-trake.csv`, which the
+        # organizer's directory listing does not contain.
+        # `.stem`, not `.name`: this script's query file is JSON, and only
+        # `.txt`/`.csv` are recognised extensions downstream.
+        source = (
+            args.query_file.stem
+            if args.query_number is None
+            else args.query_number
         )
+        official_csv_path = args.official_dir / official_submission_filename(
+            source, "trake"
+        )
+    elif official_csv_path is None and args.query_number is not None:
+        raise SystemExit("--query-number requires --official-dir")
 
     events, gap_phrases = load_query_file(args.query_file)
     query_id = args.query_id or args.query_file.stem
