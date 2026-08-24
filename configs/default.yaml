@@ -41,9 +41,15 @@ enrichment:
 
   # --- Object detection (production: RF-DETR) ---
   object_detector: rfdetr
+  object_variant: large
+  object_model_class: RFDETRLarge
+  object_checkpoint: rf-detr-large-2026.pth
+  object_checkpoint_sha256: 0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38
+  object_checkpoint_lock: configs/rfdetr_model.lock.json
   object_confidence: 0.4
-  # RF-DETR variant/checkpoint pinning is pending.
-  # Legacy Faster R-CNN remains available by explicit --rcnn-model flag.
+  object_device: cuda
+  object_allow_download: false
+  # Faster R-CNN and YOLO remain reference/legacy backends by explicit opt-in.
 
   # --- Visual embeddings (production: three-provider stack) ---
   embedding_providers:

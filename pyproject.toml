@@ -37,7 +37,8 @@ ocr = [
     "paddleocr>=2,<4",
     "paddlepaddle>=2,<4",
 ]
-objects = ["ultralytics>=8,<9", "rfdetr>=1.9,<2"]
+objects = ["rfdetr==1.9.3"]
+objects-legacy = ["ultralytics>=8,<9"]
 asr = [
     "chunkformer==1.2.2",
     "huggingface-hub>=0.28,<2",

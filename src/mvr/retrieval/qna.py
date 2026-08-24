@@ -18,8 +18,8 @@ through an injected `objects_path_resolver` that returns a path to the
 organizer's per-frame objects JSON, or `None` when unavailable -- never
 guessed. As recorded in the Task 01/03 notes, this repository now has
 *multiple, non-interchangeable* object-detection label spaces (organizer
-OpenImages-labeled files, and this repo's own COCO-labeled live detectors
--- YOLO and the newer torchvision Faster R-CNN from PR #4). This module
+OpenImages-labeled files, and this repo's pinned COCO RF-DETR Large production
+output. YOLO and torchvision Faster R-CNN are legacy/reference inputs. This module
 deliberately wires only the organizer's file-based objects through
 `build_frame_context` for now; falling back to a live COCO detector when
 the organizer file is absent is an explicit, separately-scoped follow-up

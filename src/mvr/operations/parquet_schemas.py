@@ -16,6 +16,7 @@ COL_BATCH_ID = "batch_id"
 COL_SHOT_ID = "shot_id"
 COL_ORDINAL = "ordinal"
 COL_FRAME_IDX = "frame_idx"
+COL_FRAME_ID = "frame_id"
 COL_TIMESTAMP = "timestamp"
 COL_IMAGE_PATH = "image_path"
 COL_VIDEO_OBJECT_KEY = "video_object_key"
@@ -96,6 +97,12 @@ ASR_SCHEMA = (
 OBJECT_SCHEMA = (
     SchemaField(COL_KEYFRAME_ID, "Utf8"),
     SchemaField(COL_VIDEO_ID, "Utf8"),
+    SchemaField(
+        COL_FRAME_ID,
+        "Int64",
+        nullable=True,
+        description="Original-video frame identity; equals canonical frame_idx",
+    ),
     SchemaField(COL_FRAME_IDX, "Int64"),
     SchemaField(COL_LABEL, "Utf8", description="Object class label"),
     SchemaField(COL_CLASS_ID, "Int64", nullable=True, description="Object class ID"),

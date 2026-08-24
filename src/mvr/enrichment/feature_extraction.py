@@ -6,7 +6,7 @@ from tqdm import tqdm
 from PIL import Image
 
 from mvr.enrichment.embeddings.openclip import OpenClipEncoder
-from mvr.enrichment.objects.rf_detr import RfDetr
+from mvr.enrichment.objects.rfdetr import RFDETRDetector, add_keyframe_identity
 
 def sort_keyframes_deterministically(mapping_csv: Path) -> list[dict]:
     with mapping_csv.open("r", encoding="utf-8") as f:
@@ -117,7 +117,7 @@ from collections import defaultdict
 def extract_objects(
     dataset_name: str,
     keyframes: list[dict],
-    detector: RfDetr,
+    detector: RFDETRDetector,
     output_dir: Path,
     keyframe_root: Path,
     mapping_source: Path
@@ -125,6 +125,8 @@ def extract_objects(
     output_dir.mkdir(parents=True, exist_ok=True)
     obj_dir = output_dir / "objects"
     obj_dir.mkdir(parents=True, exist_ok=True)
+    staging_dir = output_dir / "objects_staging"
+    staging_dir.mkdir(parents=True, exist_ok=True)
 
     json_count = 0
     shot_stats = defaultdict(lambda: {"keyframe_count": 0, "person_count_max": 0, "car_count_max": 0})
@@ -134,13 +136,47 @@ def extract_objects(
         if not img_path.exists():
             raise FileNotFoundError(f"Keyframe image not found: {img_path}")
 
-        detections = detector.detect(img_path)
+        frame_id = int(frame["frame_idx"])
+        if hasattr(detector, "detect_keyframe"):
+            detections = detector.detect_keyframe(
+                img_path,
+                keyframe_id=frame["keyframe_id"],
+                video_id=frame["video_id"],
+                frame_id=frame_id,
+            )
+        else:
+            # Preserve compatibility with injected test/reference detectors
+            # while enforcing the production row identity and field names.
+            raw_detections = detector.detect(img_path)
+            normalized = []
+            for detection in raw_detections:
+                bbox = detection["bbox"]
+                normalized.append(
+                    {
+                        **detection,
+                        "confidence": float(
+                            detection.get("confidence", detection.get("score"))
+                        ),
+                        "x1": float(bbox[0]),
+                        "y1": float(bbox[1]),
+                        "x2": float(bbox[2]),
+                        "y2": float(bbox[3]),
+                    }
+                )
+            detections = add_keyframe_identity(
+                normalized,
+                keyframe_id=frame["keyframe_id"],
+                video_id=frame["video_id"],
+                frame_id=frame_id,
+            )
 
         person_count = sum(1 for d in detections if d["label"] == "person")
         car_count = sum(1 for d in detections if d["label"] == "car")
 
         video_dir = obj_dir / frame["video_id"]
         video_dir.mkdir(parents=True, exist_ok=True)
+        staging_video_dir = staging_dir / frame["video_id"]
+        staging_video_dir.mkdir(parents=True, exist_ok=True)
 
         target_json = video_dir / f"{frame['keyframe_id']}.json"
 
@@ -148,7 +184,8 @@ def extract_objects(
             "keyframe_id": frame["keyframe_id"],
             "video_id": frame["video_id"],
             "shot_id": int(frame["shot_id"]),
-            "frame_idx": int(frame["frame_idx"]),
+            "frame_id": frame_id,
+            "frame_idx": frame_id,
             "timestamp": float(frame["timestamp"]),
             "image_path": frame["image_path"],
             "person_count": person_count,
@@ -156,6 +193,10 @@ def extract_objects(
             "objects": detections
         }
         target_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        (staging_video_dir / f"{frame['keyframe_id']}.json").write_text(
+            json.dumps(detections, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
         json_count += 1
 
         shot_key = (frame["video_id"], int(frame["shot_id"]))
@@ -174,13 +215,15 @@ def extract_objects(
         })
 
     (obj_dir / "shot_summary.json").write_text(json.dumps(shot_summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    provider_info = getattr(detector, "provider_info", {})
     manifest = {
         "schema_version": "1.0",
         "feature_type": "object_detection",
         "storage_format": "one_json_per_keyframe",
         "model_family": detector.model_family,
         "model": detector.model_name,
-        "weights": "DEFAULT",
+        "weights": provider_info.get("checkpoint", "reference detector"),
+        "provider": provider_info,
         "score_threshold": detector.score_threshold,
         "nms_enabled": detector.nms_enabled,
         "nms_threshold": detector.nms_threshold,
@@ -194,3 +237,28 @@ def extract_objects(
         "mapping_source": str(mapping_source)
     }
     (obj_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    (staging_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "schema": "objects",
+                "storage_format": "flat_detection_rows_per_keyframe_json",
+                "frame_id_contract": "frame_id == frame_idx from canonical mapping",
+                "identity_columns": [
+                    "video_id",
+                    "keyframe_id",
+                    "class_id",
+                    "x1",
+                    "y1",
+                    "x2",
+                    "y2",
+                ],
+                "keyframe_count": len(keyframes),
+                "mapping_source": str(mapping_source),
+                "provider": provider_info,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )

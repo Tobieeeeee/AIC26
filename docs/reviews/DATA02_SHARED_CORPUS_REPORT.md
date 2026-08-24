@@ -1,6 +1,9 @@
 # DATA-02: Shared Corpus, Parquet/Polars Layer, and System Defaults — Report
 
 **Status**: ✅ IMPLEMENTED  
+> Superseded status (2026-08-24): TASK-FIX-02 completed the RF-DETR runtime pin.
+> Pending references below describe DATA-02's state at its original freeze.
+
 **Branch**: `feat/data02-shared-corpus-parquet`  
 **Date**: 2026-08-24  
 

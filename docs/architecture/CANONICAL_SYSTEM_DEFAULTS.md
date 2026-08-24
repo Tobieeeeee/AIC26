@@ -1,7 +1,7 @@
 # Canonical System Defaults — AIC26
 
-Version: 1.1
-Frozen by: DATA-02, TASK05-MILVUS
+Version: 1.2
+Frozen by: DATA-02, TASK05-MILVUS, TASK-FIX-02
 Config source of truth: `configs/production.yaml`
 
 ---
@@ -12,7 +12,7 @@ Config source of truth: `configs/production.yaml`
 Canonical Production Defaults
 ------------------------------
 Ingestion: TransNetV2 @ 0.5 + periodic 12s/8s
-Objects:   RF-DETR (variant/checkpoint pin PENDING)
+Objects:   RFDETRLarge / rf-detr-large-2026.pth @ 0.4
 Visual:    BEiT-3, MetaCLIP-2, PE-Core-L
 OCR:       DeepSolo + Vietnamese PARSeq + F-1/F/F+1
 ASR:       Silero VAD + ChunkFormer CTC Large Vie
@@ -41,14 +41,22 @@ Status: **Frozen**. Do not silently fall back to PySceneDetect.
 | Parameter | Value |
 |---|---|
 | Provider | RF-DETR |
-| Variant | **Pin pending** |
-| Checkpoint | **Pin pending** |
+| Variant / class | Large / `RFDETRLarge` |
+| Package | `rfdetr==1.9.3` (`3f7748b1783533bc2e62804ca5975fe9b9cfc041`) |
+| Checkpoint | `rf-detr-large-2026.pth` |
+| Checkpoint bytes | 135,954,129 |
+| Checkpoint SHA-256 | `0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38` |
+| Resolution | 704 x 704 |
+| Vocabulary | MS COCO 2017, 80 labels, sparse IDs in 90 slots |
+| Threshold / NMS | 0.4 / none (set prediction) |
+| Runtime | local checkpoint, CUDA batch 1, downloads disabled |
 
-Status: **Identity frozen, runtime pin pending**. Full object extraction is
-blocked until the exact RF-DETR variant and checkpoint are resolved.
+Status: **Production runtime pinned and real-CUDA verified**. Full Batch1
+object extraction remains a separately scheduled offline operation.
 
-Legacy Faster R-CNN / OpenImages V4 is available by explicit opt-in only.
-It is NOT the production default.
+Faster R-CNN and YOLO are reference/legacy backends by explicit opt-in only.
+OpenImages V4 describes organizer-provided historical object artifacts, not
+the production detector vocabulary. The production RF-DETR vocabulary is COCO.
 
 ---
 

@@ -153,6 +153,18 @@ def test_extract_objects(tmp_path):
     assert data1["car_count"] == 1
     assert data1["video_id"] == "video1"
     assert data1["shot_id"] == 1
+    assert data1["frame_id"] == data1["frame_idx"] == 10
+    assert all(item["keyframe_id"] == data1["keyframe_id"] for item in data1["objects"])
+    assert all(item["video_id"] == data1["video_id"] for item in data1["objects"])
+    assert all(item["frame_id"] == data1["frame_idx"] for item in data1["objects"])
+    assert all("confidence" in item and "x1" in item for item in data1["objects"])
+
+    staging1 = json.loads(
+        (output_dir / "objects_staging" / "video1" / "video1_S0001_K01.json").read_text()
+    )
+    assert len(staging1) == 3
+    assert staging1[0]["keyframe_id"] == "video1_S0001_K01"
+    assert staging1[0]["frame_id"] == staging1[0]["frame_idx"] == 10
 
     # Check JSON 2
     json_path2 = obj_dir / "video1" / "video1_S0001_K02.json"
@@ -183,3 +195,10 @@ def test_extract_objects(tmp_path):
     assert manifest["nms_threshold"] == 0.5
     assert manifest["nms_mode"] == "class_aware"
     assert manifest["nms_implementation"] == "built_in_faster_rcnn"
+    staging_manifest = json.loads(
+        (output_dir / "objects_staging" / "manifest.json").read_text()
+    )
+    assert staging_manifest["schema"] == "objects"
+    assert staging_manifest["frame_id_contract"] == (
+        "frame_id == frame_idx from canonical mapping"
+    )

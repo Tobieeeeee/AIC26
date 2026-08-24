@@ -341,15 +341,26 @@ OCR engine selection must initially preserve the reused lab behavior unless an a
 
 Responsible for structured object information.
 
+The production provider is the offline, fail-closed RF-DETR adapter in
+`rfdetr.py`, pinned to `RFDETRLarge`, `rfdetr==1.9.3`, and
+`rf-detr-large-2026.pth` (704 x 704, COCO vocabulary, confidence 0.4). It
+verifies the local checkpoint size and SHA-256 before loading and never falls
+back to Faster R-CNN, YOLO, or another RF-DETR variant. Those detectors are
+reference/legacy implementations only.
+
 Possible output:
 
-    frame_id
-    object_label
-    count
+    keyframe_id
+    video_id
+    frame_id == canonical frame_idx
+    label
+    class_id
     confidence
-    bounding_boxes
+    x1, y1, x2, y2
 
-This supports object-aware or metadata-filtered retrieval.
+Flat detection rows consolidate into DATA-02 object Parquet. A separate
+per-keyframe JSON envelope projects labels/counts into Task05A and
+Elasticsearch object filters without applying a second threshold or NMS pass.
 
 ---
 

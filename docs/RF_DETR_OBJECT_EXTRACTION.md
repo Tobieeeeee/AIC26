@@ -1,28 +1,39 @@
 # RF-DETR object extraction
 
-Object detection for keyframes uses `RfDetr`
-(`src/mvr/enrichment/objects/rf_detr.py`), a COCO-pretrained RF-DETR model.
-It replaced the previous live `FasterRCNN` detector (also COCO-pretrained,
-not OpenImages V4) as of 2026-08-23; `faster_rcnn.py` was removed from the
-repo (still recoverable from git history if ever needed).
+Production object detection uses the canonical
+`mvr.enrichment.objects.rfdetr.RFDETRDetector`: `RFDETRLarge` from
+`rfdetr==1.9.3`, the released `rf-detr-large-2026.pth` checkpoint, 704 x 704
+input, CUDA batch 1, and the existing confidence threshold 0.4. The older
+`rf-detr-large.pth` release is legacy and superseded; it is not a runtime
+candidate.
 
-Prerequisites:
+The released detector emits the MS COCO 2017 vocabulary (80 names using
+sparse COCO category IDs in 90 model slots). It does not emit OpenImages V4
+labels and does not run NMS.
 
-1. Install the `objects` dependency group, which now includes `rfdetr`
-   alongside the existing `ultralytics` (YOLO) dependency:
+## Installation and checkpoint
 
-   ```powershell
-   py -3.12 -m pip install -e ".[objects]"
-   ```
+Install the exact production package:
 
-2. No manual checkpoint download is required. Unlike the `beit3` /
-   `metaclip2` / `perception-encoder` providers (which use a locked,
-   SHA256-pinned local checkpoint — see `docs/BEIT3_OFFLINE_EXTRACTION.md`),
-   RF-DETR downloads its own official Roboflow-hosted COCO weights
-   automatically on first construction of the model. Check available disk
-   space before the first run.
+```powershell
+py -3.12 -m pip install -e ".[objects]"
+```
 
-Example offline object extraction:
+Download the official checkpoint once through an approved provisioning path,
+then verify it against `configs/rfdetr_model.lock.json`. The required identity
+is:
+
+```text
+filename: rf-detr-large-2026.pth
+bytes:    135954129
+sha256:   0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38
+```
+
+Runtime downloads are disabled. Supply the verified local path with
+`--detector-checkpoint` or `MVR_RFDETR_CHECKPOINT`. A missing, renamed,
+wrong-size, or wrong-hash checkpoint fails closed; no model fallback occurs.
+
+## Example
 
 ```powershell
 python scripts/run_feature_extraction.py `
@@ -30,33 +41,45 @@ python scripts/run_feature_extraction.py `
   --keyframe-root <canonical-keyframes> `
   --output <feature-root> `
   --embedding-providers clip `
-  --detector-model rfdetr_medium `
-  --detector-threshold 0.5 `
+  --detector-model rfdetr_large `
+  --detector-checkpoint <local-cache>/rf-detr-large-2026.pth `
+  --detector-threshold 0.4 `
   --device cuda
 ```
 
-`--detector-model` accepts `rfdetr_nano`, `rfdetr_small`, `rfdetr_medium`
-(default), or `rfdetr_large` — larger variants trade latency for accuracy.
-Pass `--skip-objects` to run only the embedding providers.
+`--detector-model` accepts only the production `rfdetr_large` identity. Faster
+R-CNN and YOLO remain separate reference/legacy implementations and are never
+automatic fallbacks. Pass `--skip-objects` to run only embedding providers.
 
-RF-DETR is a set-prediction (DETR-style) detector: it does not run NMS.
-`--detector-nms-threshold` is accepted for interface parity with the old
-Faster R-CNN flags but has no effect.
+## Output contracts
 
-Output layout (unchanged from the previous Faster R-CNN detector):
+Task05A-compatible envelopes remain under:
 
 ```text
 <feature-root>/objects/
-|-- <video_id>/<keyframe_id>.json   # one file per keyframe
+|-- <video_id>/<keyframe_id>.json
 |-- shot_summary.json
 `-- manifest.json
 ```
 
-Each per-keyframe JSON has the shape
-`{keyframe_id, video_id, shot_id, frame_idx, timestamp, image_path,
-person_count, car_count, objects: [{label, class_id, score, bbox}]}`,
-with `bbox` as pixel-space `[x1, y1, x2, y2]` in the original image. This
-contract is what other pipeline code and tests rely on; it did not change
-when the detector backend changed. `manifest.json` now reports the
-detector's own `model_family`/`nms_*` fields instead of hardcoded
-Faster R-CNN values.
+Every envelope preserves `keyframe_id`, `video_id`, and both `frame_id` and
+`frame_idx`, where `frame_id == frame_idx` from the canonical mapping. Its
+`objects` list retains `score`/`bbox` for existing consumers and also includes
+the canonical flat fields `confidence,x1,y1,x2,y2` plus the identity fields.
+
+DATA-02 staging is written separately so Task05A never mistakes flat rows for
+additional keyframe artifacts:
+
+```text
+<feature-root>/objects_staging/
+|-- <video_id>/<keyframe_id>.json  # list of detection rows
+`-- manifest.json
+```
+
+Consolidate this directory with schema `objects`. Object deduplication uses
+`video_id,keyframe_id,class_id,x1,y1,x2,y2`, preserving multiple objects in
+one frame and repeated keyframe IDs across different videos.
+
+The pin and real runtime evidence are recorded in
+`docs/reviews/RFDETR_PRODUCTION_PIN_REPORT.md`. Full Batch1 extraction was not
+run as part of the pin task.

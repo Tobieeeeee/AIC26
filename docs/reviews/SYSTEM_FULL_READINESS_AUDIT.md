@@ -1,5 +1,9 @@
 # SYSTEM-AUDIT-01 — Full Readiness Audit
 
+> Superseded status (2026-08-24): TASK-FIX-02 pinned and real-CUDA verified
+> RFDETRLarge / `rf-detr-large-2026.pth`. The RF-DETR blocker statements below
+> are retained as the historical audit finding that triggered that fix.
+
 **Date**: 2026-08-24
 **Branch**: `audit/system-full-readiness` (branched from `feat/task05-milvus-semantic-backend`, commit `d47ade0`)
 **Auditor**: Antigravity automated inspection + real test execution

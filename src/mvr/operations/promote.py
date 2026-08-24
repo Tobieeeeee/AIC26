@@ -129,13 +129,19 @@ def validate_parquet(
     if expected_row_count is not None:
         checks["row_count_valid"] = True
 
-    # Identity check: no duplicate keyframe_id if that column exists
+    # Identity check. Object datasets intentionally contain multiple rows per
+    # keyframe, so their identity includes class and box coordinates.
     if "keyframe_id" in df.columns:
-        dupes = df.filter(df["keyframe_id"].is_duplicated())
+        identity_columns = (
+            ["video_id", "keyframe_id", "class_id", "x1", "y1", "x2", "y2"]
+            if schema_name == "objects"
+            else ["keyframe_id"]
+        )
+        dupes = df.filter(pl.struct(identity_columns).is_duplicated())
         if len(dupes) > 0:
-            dupe_ids = dupes["keyframe_id"].unique().to_list()[:5]
+            dupe_ids = dupes.select(identity_columns).head(5).to_dicts()
             raise PromotionError(
-                f"staging Parquet has duplicate keyframe_id values: {dupe_ids}"
+                f"staging Parquet has duplicate identity values: {dupe_ids}"
             )
         checks["identity_unique"] = True
 
