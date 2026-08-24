@@ -300,3 +300,5 @@ Mean Final       0.0000 tiếng Việt  |  0.3333 tiếng Anh   (n=3, ground tru
 ```
 
 `n=3` là rất nhỏ. Đừng coi 0.3333 là dự báo điểm thi — nó chỉ chứng minh **tiếng Anh ăn đứt tiếng Việt**, và đó là điều duy nhất cần nhớ.
+
+Sau vòng 1 đã có bộ đo lớn hơn, n=16, dựng từ chính các câu người xác minh — xem [DO_LUONG_VONG_2.md](DO_LUONG_VONG_2.md). Kết luận về ngôn ngữ không đổi, chỉ chắc chắn hơn: **0.0125 tiếng Việt so với 0.8375 tiếng Anh**, tìm ra đúng video 1/16 so với 15/16.

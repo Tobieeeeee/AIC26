@@ -1,0 +1,151 @@
+{
+  "pack": "round-1",
+  "source": "artifacts/submissions row 1, verified by the operator",
+  "note": "Đáp án được người xác minh bằng mắt sau vòng 1 — BTC không công bố kết quả. Người xác minh mô tả là 'đúng hoặc tương đối đúng', nên chỉ có VIDEO là chắc chắn; frame_idx là một frame đúng đã thấy, KHÔNG phải khoảng [start,end] thật của BTC. Vì vậy hãy đo ở mức video (xem mvr.evaluation.verified_set).",
+  "queries": {
+    "query-p1-1-kis": {
+      "kind": "kis",
+      "video_id": "L30_V046",
+      "query_vi": "Cảnh quay một nhóm hơn 5 người xếp thành hàng tập thể dục, cùng thực hiện động tác hai tay chạm mũi chân. Trong nhóm chỉ có một người đeo kính và ba người đội nón có màu đỏ.",
+      "verified_by": "human",
+      "query_en": "a group of more than five people exercising in a row, touching their toes with both hands, one person wearing glasses and three wearing red hats",
+      "frame_idx": 6613
+    },
+    "query-p1-2-kis": {
+      "kind": "kis",
+      "video_id": "L30_V048",
+      "query_vi": "Đoạn phim bắt đầu bằng một bản đồ, trên đó một loại công trình thủy lợi lần lượt xuất hiện bốn lần. Sau đó chuyển sang cảnh một con đập được quay từ trên cao, tiếp đến là cảnh cận con đập dưới trời mưa.",
+      "verified_by": "human",
+      "query_en": "a map with a water dam icon appearing four times, then an aerial shot of a large dam, followed by a close-up of the dam in the rain",
+      "frame_idx": 8165
+    },
+    "query-p1-3-qa": {
+      "kind": "qa",
+      "video_id": "L26_V270",
+      "query_vi": "Hình ảnh một con cá được đặt lên cân, sau đó có cảnh một con cá khác cùng loại bị một người cầm đuôi. Con số hiển thị cuối cùng trên cân là bao nhiêu?",
+      "verified_by": "human",
+      "query_en": "a hand holding up a fish on a hanging scale to weigh it, another similar fish held by the tail nearby",
+      "frame_idx": 3072,
+      "answer": "1.2"
+    },
+    "query-p1-4-kis": {
+      "kind": "kis",
+      "video_id": "L22_V021",
+      "query_vi": "Một đàn sư tử đang nghỉ ngơi và leo trèo trên các bục gỗ trong khu nuôi dưỡng, phía trước có bảng thông tin của London Zoo phục vụ công tác theo dõi và bảo tồn động vật.. Sau đó có cảnh hai nhân viên mặc áo xanh lá đang cân và ghi nhận số liệu của một con vật trong khuôn viên sở thú.",
+      "verified_by": "human",
+      "query_en": "a pride of lions resting and climbing on wooden platforms in a zoo enclosure with an information sign in front, followed by two zoo staff in green shirts weighing an animal",
+      "frame_idx": 19836
+    },
+    "query-p1-5-kis": {
+      "kind": "kis",
+      "video_id": "L26_V177",
+      "query_vi": "Đoạn clip bắt đầu bằng việc đậu hà lan được bỏ vào với mực đang được xào trên chảo, bên cạnh là đĩa hành tây và ớt đỏ thái lát chuẩn bị cho vào món ăn. Đoạn clip kết thúc với khung quay chậm (slow motion) cảnh lắc chảo trên bếp lửa.",
+      "verified_by": "human",
+      "query_en": "green peas being added to squid stir frying in a wok, sliced onions and red peppers beside it, ending with slow motion of the pan being tossed over open flame",
+      "frame_idx": 5547
+    },
+    "query-p1-6-kis": {
+      "kind": "kis",
+      "video_id": "L22_V023",
+      "query_vi": "Mẩu tin bắt đầu với hình ảnh nột người đàn ông mặc vest xanh đậm, sơ mi trắng và cà vạt, đang ngồi trên một chiếc ghế lớn. Ông cầm bằng hai tay một khối đá quý thô khá lớn, đưa lên gần mặt để quan sát.\nBên phải là một phụ nữ mặc trang phục công sở màu đen và khăn trùm đầu màu hồng tím, đang đứng cạnh và mỉm cười. Tiếp theo có hình ảnh toàn cảnh từ trên cao của một mỏ đá quý lộ thiên quy mô lớn với hố khai thác sâu nhiều tầng và hệ thống đường vận chuyển bao quanh.",
+      "verified_by": "human",
+      "query_en": "a man in a dark blue suit and tie sitting in a large chair holding a large rough gemstone close to his face, a woman in black office attire and a pink purple headscarf standing beside him smiling, followed by an aerial view of a large open pit mine",
+      "frame_idx": 18065
+    },
+    "query-p1-7-kis": {
+      "kind": "kis",
+      "video_id": "L26_V041",
+      "query_vi": "Đoạn clip bắt đầu bằng cảnh cà rốt cắt hình ngôi sao đang được luộc trong nồi nước sôi, đặt trong rổ lưới kim loại và được đảo bằng đôi đũa gỗ. \nĐoạn clip kết thúc bằng hình ảnh đĩa rau củ luộc và đồ chiên được trình bày đẹp mắt, gồm đậu bắp, súp lơ, cà rốt hình ngôi sao, bí xanh, chén nước chấm màu hồng ở giữa và đôi đũa màu hồng nhạt đặt bên phải",
+      "verified_by": "human",
+      "query_en": "star shaped carrot slices boiling in a pot with a metal basket stirred with wooden chopsticks, ending with a plate of boiled and fried vegetables including okra, cauliflower, star shaped carrots and zucchini around a pink dipping sauce bowl",
+      "frame_idx": 3645
+    },
+    "query-p1-9-qa": {
+      "kind": "qa",
+      "video_id": "L28_V020",
+      "query_vi": "Đoạn phim ghi lại cảnh những chiếc xe ô tô lội nước, chiếc xe màu vàng, màu đỏ và màu đen lần lượt chuẩn bị đi qua cầu. Con số được ghi trên biển báo bên trái của cây cầu là bao nhiêu?",
+      "verified_by": "human",
+      "query_en": "yellow, red and black cars wading through water preparing to cross a bridge, a numbered sign visible to the left of the bridge",
+      "frame_idx": 8441,
+      "answer": "10"
+    },
+    "query-p1-10-kis": {
+      "kind": "kis",
+      "video_id": "L29_V013",
+      "query_vi": "Hành động cắt chùm nho bằng kéo từ giàn nho bằng một chiếc kéo màu đen. Có thể thấy có một sợi dây màu xanh dương được buộc vào cuống của chùm nho này trước khi nó được cắt.",
+      "verified_by": "human",
+      "query_en": "a hand cutting a bunch of grapes from a vine with black scissors, a blue string tied around the stem",
+      "frame_idx": 11276
+    },
+    "query-p1-11-kis": {
+      "kind": "kis",
+      "video_id": "L23_V022",
+      "query_vi": "Cảnh quay chậm tại vị trí vạch đích của cuộc đua xe đạp. Góc máy sát mặt đường bắt trọn khoảnh khắc về đích theo thứ tự nhất, nhì, ba lần lượt là 1 tay đua áo vàng quần đen, 1 tay đua áo xanh dương quần đen và 1 tay đua áo xanh dương quần đỏ",
+      "verified_by": "human",
+      "query_en": "slow motion finish line of a cycling race at ground level, first place in a yellow jersey and black shorts, second in a blue jersey and black shorts, third in a blue jersey and red shorts",
+      "frame_idx": 6463
+    },
+    "query-p1-12-kis": {
+      "kind": "kis",
+      "video_id": "L22_V029",
+      "query_vi": "Có thể thấy trong cảnh quay có 4 tài xế xe ôm công nghệ trong trạm xăng, trong đó 3 người đứng đợi còn 1 người lái xe từ trái sang phải khung hình. Trước đó là cảnh một người đậy nắp bình xăng xe máy của họ. Có thông tin về giá dầu mazut được hiển thị trong khung hình.",
+      "verified_by": "human",
+      "query_en": "four motorbike taxi drivers at a gas station, three standing and waiting while one rides across the frame, a fuel price sign visible",
+      "frame_idx": 6261
+    },
+    "query-p1-13-kis": {
+      "kind": "kis",
+      "video_id": "L29_V021",
+      "query_vi": "Một người đứng dưới nước và rọi đèn. Tiếp theo là cảnh người này kéo lưới cá lúc bình minh, sau đó được một nhóm người khác tiến đến dùng máy quay ghi hình.",
+      "verified_by": "human",
+      "query_en": "a person standing in water shining a flashlight, then pulling in a fishing net at dawn while a group with a camera approaches",
+      "frame_idx": 6210
+    },
+    "query-p1-15-qa": {
+      "kind": "qa",
+      "video_id": "L21_V010",
+      "query_vi": "Bản đồ phân bố động đất tại một vùng trên thế giới, với một bảng chú giải phía bên trái gồm các kí hiệu nhiều màu sắc tương ứng với các vị trí tâm chấn có cấp độ động đất khác nhau. Không tính bảng chú giải, có bao nhiêu vị trí ghi nhận động đất cấp độ 4?",
+      "verified_by": "human",
+      "query_en": "a world map showing earthquake epicenters with a colored legend on the left side indicating different magnitude levels",
+      "frame_idx": 19890,
+      "answer": "26"
+    },
+    "query-p1-16-trake": {
+      "kind": "trake",
+      "video_id": "L24_V035",
+      "query_vi": "Đoạn video bắt đầu bằng ảnh cận đầu một con lân trắng, mũi đỏ, bên cạnh lá cờ trắng viền đỏ.\nE1 Khoảnh khắc đầu tiên xuất hiện đầy đủ hai con rồng vàng đang xoay vòng.\nE2 Khoảnh khắc đầu tiên con lân hoàn tất cú xoay người trên các thanh trụ (thời điểm đâu tiên các chân của lân đặt trên trụ sau khi xoay).\nE3 Khoảnh khắc đầu tiên dùi chạm vào kẻng đồng múa lân.",
+      "verified_by": "human",
+      "frames": [
+        3800,
+        4104,
+        5049
+      ],
+      "frame_idx": 3800
+    },
+    "query-p1-17-qa": {
+      "kind": "qa",
+      "video_id": "L21_V006",
+      "query_vi": "Đoạn clip mô tả hậu quả của hiện tượng sạt lở đất nghiêm trọng, đất đá tràn xuống gây tắc nghẽn hoàn toàn một đoạn đường đèo. Trong một cảnh quay cận, có thể thấy một cột mốc đường bộ với phần đỉnh màu đỏ chỉ còn lộ ra phần trên, phần lớn đã bị đất đá vùi lấp. Ở cảnh quay cuối, một người đi xe máy đang vật lộn để điều khiển phương tiện vượt qua khu vực bùn lầy, trên chiếc xe máy có treo một vật màu xanh lá. Tên của con đèo là gì?",
+      "verified_by": "human",
+      "query_en": "a mountain road blocked by a landslide with mud and rocks, a red topped road marker mostly buried, a person on a motorbike struggling through the mud with a green object hanging on the bike",
+      "frame_idx": 3924,
+      "answer": "Cổng Trời Mường Lát"
+    },
+    "query-p1-22-kis": {
+      "kind": "kis",
+      "video_id": "L25_V041",
+      "query_vi": "Người phụ nữ mặc áo dài màu hồng, đeo kính đang giảng giải về các trường hợp sử dụng khác nhau của động từ 'remember' dựa trên mốc thời gian của hành động được nhắc tới.",
+      "verified_by": "human",
+      "query_en": "a woman in a pink traditional dress and glasses giving an English grammar lesson in front of a whiteboard or screen",
+      "frame_idx": 17069
+    },
+    "query-p1-25-kis": {
+      "kind": "kis",
+      "video_id": "L30_V003",
+      "query_vi": "Hai bạn học sinh mặc đồng phục áo trắng, quần xanh, quàng khăn đỏ đang làm MC trên một sân khấu tại trường học, phía sau là một bộ trống cơ màu đỏ và một cây đàn piano.",
+      "verified_by": "human",
+      "query_en": "two students in white shirt uniforms, blue pants and red scarves hosting on a school stage, a red drum set and a piano behind them",
+      "frame_idx": 6550
+    }
+  }
+}
