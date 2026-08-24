@@ -117,44 +117,52 @@ def write_qna_submission(
 #: teammate, but the filename rule is the same for all three.
 QUERY_KINDS = ("kis", "qa", "trake")
 
-#: The pack names a query `query-p1-23-kis.txt`; the organizer's required
-#: directory listing shows `query-23-kis.csv`. The `p1-` is the package,
-#: not the number, and it does not belong in the submission name.
-_PACK_NAME = re.compile("query-(?:p[0-9]+-)?([0-9]+)-(kis|qa|trake)", re.IGNORECASE)
+#: A query file, whatever the pack calls it: `query-1-kis`, `query-p1-23-kis`.
+#: The trailing kind is the only part the format depends on.
+_QUERY_NAME = re.compile("query-(.+)-(kis|qa|trake)", re.IGNORECASE)
 
 
-def submission_filename(stt: object, kind: object) -> str:
-    """``(23, "kis")`` -> ``"query-23-kis.csv"``.
+def submission_filename(query_name: object, kind: object = None) -> str:
+    """``"query-p1-23-kis.txt"`` -> ``"query-p1-23-kis.csv"``.
 
-    `stt` must be a plain number. Passing the pack's own `p1-23` raises
-    rather than producing `query-p1-23-kis.csv`, which is precisely the
-    name the organizer's directory listing does not contain -- and a
-    misnamed file is a query scored zero on a system that found the frame.
+    **The submission carries the query file's own name.** The organizer
+    states it by example: their pack holds `query-1-kis.txt` and their
+    required listing holds `query-1-kis.csv` -- same name, new extension.
+    Their example pack simply has no batch prefix; a real one does.
+
+    This used to renumber `query-p1-23-kis` to `query-23-kis`, read out of
+    that same directory listing. That was an over-reading: the listing was
+    showing their example pack's names, not a renumbering rule.
+
+    A bare number or a bare id still works for the interactive writer,
+    where the operator types a fragment rather than a filename: ``23`` and
+    ``p1-23`` become ``query-23-kis.csv`` and ``query-p1-23-kis.csv``.
+    Nothing is invented -- the id is used exactly as typed.
     """
+    text = str(query_name).strip()
+    if text.lower().endswith((".csv", ".txt")):
+        text = text[: -len(".csv")]
+
+    match = _QUERY_NAME.fullmatch(text)
+    if match is not None:
+        return f"query-{match.group(1)}-{match.group(2).lower()}.csv"
+
+    # Not a full query name: treat it as the id, and take the kind from the
+    # caller. This is the interactive `:w kis 23` path.
     kind_text = str(kind).strip().lower()
     if kind_text not in QUERY_KINDS:
         raise SubmissionFormatError(
             f"dạng truy vấn không hợp lệ: {kind!r}; phải là một trong {QUERY_KINDS}"
         )
-    stt_text = str(stt).strip()
-    if not re.fullmatch("[0-9]+", stt_text):
+    # An id is a number, optionally behind a batch prefix: `23`, `p1-23`.
+    # Anything else is not an id, and building `query-notes-kis-kis.csv`
+    # out of it would be worse than refusing.
+    if not re.fullmatch(r"(?:[A-Za-z]+[0-9]*-)?[0-9]+", text):
         raise SubmissionFormatError(
-            f"stt phải là số, nhận {stt!r}. Tiền tố gói như 'p1-' không "
-            "thuộc tên file nộp"
+            f"không dựng được tên file nộp từ {query_name!r}; gõ tên câu truy "
+            f"vấn (ví dụ query-p1-23-kis) hoặc số thứ tự của nó (23, p1-23)"
         )
-    return f"query-{int(stt_text)}-{kind_text}.csv"
-
-
-def query_number(name: object) -> int:
-    """``"query-p1-23-kis.txt"`` -> ``23``."""
-    stem = Path(str(name)).stem
-    match = _PACK_NAME.fullmatch(stem)
-    if match is None:
-        raise SubmissionFormatError(
-            f"không đọc được số thứ tự từ tên {name!r}; cần dạng "
-            "query-<stt>-<kis|qa|trake>"
-        )
-    return int(match.group(1))
+    return f"query-{text}-{kind_text}.csv"
 
 
 __all__ = [
@@ -162,7 +170,6 @@ __all__ = [
     "QUERY_KINDS",
     "MAX_ROWS",
     "SubmissionFormatError",
-    "query_number",
     "submission_filename",
     "write_kis_submission",
     "write_qna_submission",
