@@ -14,8 +14,19 @@ artifacts/keyframe_mapping.csv           15 MB
 ```
 
 **Đừng chép chúng từ máy người khác.** Cả hai nhúng đường dẫn tuyệt đối
-kiểu `D:\AIC26_data\Keyframes_L21\...`, sang máy khác là trỏ vào hư không —
+kiểu `E:\AIC26_data\Keyframes_L21\...`, sang máy khác là trỏ vào hư không —
 mà không báo lỗi, chỉ ra kết quả sai. Dựng lại tại chỗ, mất vài phút.
+
+**Cũng phải dựng lại nếu bạn di chuyển thư mục dữ liệu.** Đã xảy ra một
+lần: dataset chuyển từ `D:` sang `E:`, tìm kiếm vẫn chạy bình thường nhưng
+**100% đường dẫn ảnh chết** — `:o` không mở được ảnh và cột `image_path`
+trong file review Q&A trỏ vào hư không. Kiểm nhanh:
+
+```powershell
+.venv\Scripts\python.exe -c "import csv,os;r=next(csv.DictReader(open('artifacts/keyframe_mapping.csv',newline='',encoding='utf-8')));print(r['image_path'], os.path.isfile(r['image_path']))"
+```
+
+In ra `False` là phải chạy lại hai lệnh dựng ở trên.
 
 ### Cần có trước
 
@@ -88,7 +99,7 @@ dir artifacts\keyframe_mapping.csv                          # bảng tra frame
 Thiếu `keyframe_mapping.csv` thì sinh lại, 10 giây:
 
 ```powershell
-.venv\Scripts\python.exe scripts\build_keyframe_mapping.py --dataset-root D:\AIC26_data --output artifacts\keyframe_mapping.csv
+.venv\Scripts\python.exe scripts\build_keyframe_mapping.py --dataset-root E:\AIC26_data --output artifacts\keyframe_mapping.csv
 ```
 
 ---
@@ -167,7 +178,7 @@ nạp một lần rồi mỗi lần thử chỉ **0,2 giây**:
 ```
 > volunteers in matching club shirts handing charity gift boxes to villagers
   100 dòng / 61 video  (2.69s)
-    1.   L30_V072/1776    0.364  D:\AIC26_data\...\L30_V072.jpg
+    1.   L30_V072/1776    0.364  E:\AIC26_data\...\L30_V072.jpg
     2.   L21_V009/387     0.343  ...
 > :o                      ← mở ảnh hạng 1 để xem có đúng không
 > :v 1                    ← mỗi video chỉ 1 dòng, trải rộng hơn
@@ -198,7 +209,7 @@ thẳng lên hạng 1 và ghi file trong một lệnh:
 Cú pháp `<video_id>_<keyframe_id>`, lấy thẳng từ đường dẫn ảnh:
 
 ```
-D:\AIC26_data\Keyframes_L21\keyframes\L21_V001\050.jpg
+E:\AIC26_data\Keyframes_L21\keyframes\L21_V001\050.jpg
                                       ^^^^^^^^ ^^^
                                       video_id id
 
@@ -225,7 +236,7 @@ Muốn có điểm answer, mở `query-3-qa.review.csv`:
 
 ```
 rank,video_id,frame_idx,answer,score,image_path
-1,L25_V045,15300,,0.346,D:\AIC26_data\Keyframes_L25\...\170.jpg
+1,L25_V045,15300,,0.346,E:\AIC26_data\Keyframes_L25\...\170.jpg
 ```
 
 Mở ảnh ở cột `image_path`, nhìn, gõ câu trả lời vào cột `answer`. Chỉ cần làm **20–30 dòng đầu** — R@k thưởng việc xếp đáp án đúng lên sớm.
@@ -275,7 +286,7 @@ Cần nộp gấp mà chưa kịp gì: **file `.csv` rỗng vẫn hợp lệ** v
 Nói rõ để khỏi mất thời gian tìm:
 
 - **OCR, ASR, Elasticsearch** — không kịp trong vòng này. Nhánh BM25 hiện trả rỗng vì index lexical chưa có dữ liệu. Đây là việc vòng 2.
-- **GPU** — toàn bộ vòng 1 chạy CPU trên máy có `D:\AIC26_data`. Index đã dựng sẵn từ CLIP feature BTC cung cấp.
+- **GPU** — toàn bộ vòng 1 chạy CPU trên máy có `E:\AIC26_data`. Index đã dựng sẵn từ CLIP feature BTC cung cấp.
 - **TRAKE** — do người khác phụ trách. Script tự bỏ qua file `-trake`.
 
 ## Con số đã đo, để so sánh về sau
