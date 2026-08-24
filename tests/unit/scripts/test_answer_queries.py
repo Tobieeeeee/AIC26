@@ -96,29 +96,29 @@ def test_a_review_file_saved_by_excel_is_still_readable(tmp_path) -> None:
 
 # -- Submission naming in interactive mode ----------------------------
 #
-# The organizer's required listing is `query-23-kis.csv`, while the query
-# pack they sent is `query-p1-23-kis.txt`. Whatever the operator types,
-# the file that lands must carry the organizer's name.
+# The submission carries the query file's own name, prefix included.
 
 
 def test_w_accepts_a_bare_number() -> None:
     assert _module().resolve_output_name("23", "kis") == "query-23-kis.csv"
 
 
-def test_w_normalises_a_pack_name_to_the_organizer_name() -> None:
-    # Typing the pack's own name is the habit from the batch run; it must
-    # not write `query-p1-23-kis.csv`, a name the organizer never lists.
+def test_w_keeps_the_packs_own_name() -> None:
     assert (
         _module().resolve_output_name("query-p1-23-kis", "kis")
-        == "query-23-kis.csv"
+        == "query-p1-23-kis.csv"
     )
 
 
-def test_w_rejects_a_name_carrying_no_number() -> None:
+def test_w_accepts_a_bare_id_carrying_the_batch_prefix() -> None:
+    assert _module().resolve_output_name("p1-23", "kis") == "query-p1-23-kis.csv"
+
+
+def test_w_rejects_something_that_is_not_a_name() -> None:
     from mvr.submission.official import SubmissionFormatError
 
     with pytest.raises(SubmissionFormatError):
-        _module().resolve_output_name("ket-qua-cuoi", "kis")
+        _module().resolve_output_name("a/b", "kis")
 
 
 # -- Manual top-1 insertion -------------------------------------------
@@ -200,14 +200,11 @@ def test_write_submission_qa_also_writes_a_review_file(tmp_path) -> None:
 # -- Batch-mode filename (main(), not interactive) ----------------------
 
 
-def test_batch_output_filename_strips_the_pack_prefix() -> None:
-    # Batch mode used to write query-p1-23-kis.csv straight from the query
-    # file's own stem -- exactly the name the organizer's directory listing
-    # does not contain.
+def test_batch_output_filename_keeps_the_query_files_name() -> None:
     m = _module()
     assert (
         m.batch_output_filename(Path("query-p1-23-kis.txt"), "kis")
-        == "query-23-kis.csv"
+        == "query-p1-23-kis.csv"
     )
 
 
@@ -215,6 +212,4 @@ def test_batch_output_filename_falls_back_for_an_unparseable_name() -> None:
     # An oddly-named query file must cost that one query, not crash
     # everything still queued behind it in the batch.
     m = _module()
-    assert (
-        m.batch_output_filename(Path("notes-kis.txt"), "kis") == "notes-kis.csv"
-    )
+    assert m.batch_output_filename(Path("notes-kis.txt"), "kis") == "notes-kis.csv"

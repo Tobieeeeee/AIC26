@@ -68,10 +68,14 @@ for candidate in (REPOSITORY_ROOT, REPOSITORY_ROOT / "src"):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
+from mvr.submission.lint import (  # noqa: E402
+    format_report,
+    lint_directory,
+    repair_file,
+)
 from mvr.submission.official import (  # noqa: E402
     MAX_ROWS,
     SubmissionFormatError,
-    query_number,
     submission_filename,
     write_kis_submission,
     write_qna_submission,
@@ -95,17 +99,13 @@ def _force_utf8_output() -> None:
 
 
 def resolve_output_name(typed: str, kind: str) -> str:
-    """What the operator types after ``:w kis`` -> the organizer's filename.
+    """What the operator types after ``:w kis`` -> the submission filename.
 
-    Accepts a bare number (``23``) or the pack's own name for the query
-    (``query-p1-23-kis``, with or without ``.csv``); either way the file
-    written carries the organizer's required name, ``query-23-kis.csv``,
-    never the pack's ``p1-`` prefix.
+    The submission carries the query file's own name, so typing that name
+    is the direct path. A bare id (``23``, ``p1-23``) is accepted too,
+    because mid-competition an operator types a fragment, not a filename.
     """
-    text = typed.strip()
-    if text.isdigit():
-        return submission_filename(text, kind)
-    return submission_filename(query_number(text), kind)
+    return submission_filename(typed.strip(), kind)
 
 
 def insert_top_row(rows: list[dict], video_id: str, frame_idx: int) -> list[dict]:
@@ -302,14 +302,15 @@ def _write_submission(rows: list[dict], kind: str, out: Path) -> None:
 
 
 def batch_output_filename(path: Path, kind: str) -> str:
-    """The organizer's ``query-<stt>-<kind>.csv`` for a batch query file.
+    """The query file's own name with a ``.csv`` extension.
 
-    ``path`` is the pack's own name, ``query-p1-23-kis.txt`` -- writing
-    that stem straight to disk produces exactly the filename the
-    organizer's required directory listing does not contain. Falls back
-    to the file's own stem when it doesn't follow the convention: one
-    oddly-named query should cost that query, not crash everything still
-    queued behind it in the batch.
+    ``query-p1-23-kis.txt`` -> ``query-p1-23-kis.csv``. The organizer shows
+    the rule by example: their pack holds `query-1-kis.txt` and their
+    required listing holds `query-1-kis.csv`.
+
+    Falls back to the stem for a name that does not follow the convention:
+    one oddly-named query should cost that query, not crash everything
+    still queued behind it in the batch.
     """
     try:
         return resolve_output_name(path.stem, kind)
@@ -470,12 +471,39 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="dựng lại file nộp Q&A từ file review đã điền answer",
     )
+    parser.add_argument(
+        "--lint",
+        type=Path,
+        help="kiểm thư mục file nộp trước khi upload",
+    )
+    parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="với --lint: bỏ BOM và khoảng trắng thừa",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_output()
     args = build_parser().parse_args(argv)
+
+    if args.lint:
+        files = [
+            path
+            for path in sorted(Path(args.lint).glob("*.csv"))
+            if not path.name.endswith(".review.csv")
+        ]
+        if args.fix:
+            # Repair first, then report what is left: the two whitespace
+            # defects are mechanical, and everything still listed afterwards
+            # is something a person has to decide about.
+            fixed = [path.name for path in files if repair_file(path)]
+            if fixed:
+                print(f"Đã sửa {len(fixed)} file: {', '.join(fixed)}")
+        report = lint_directory(args.lint)
+        print(format_report(report, len(files)))
+        return 1 if report else 0
 
     if args.from_review:
         output = args.output
