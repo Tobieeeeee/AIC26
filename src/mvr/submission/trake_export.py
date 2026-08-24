@@ -259,22 +259,49 @@ OFFICIAL_MAX_ROWS_PER_QUERY = 100
 OFFICIAL_QUERY_TYPES = ("kis", "qa", "trake")
 
 
-def official_submission_filename(query_number: int, query_type: str) -> str:
-    """Build the exact ``query-<N>-<type>.csv`` filename the organizer
-    expects (e.g. ``query-3-trake.csv``), per
-    https://sotuyenaic.oj.io.vn/'s published naming convention.
+def official_submission_filename(query_number, query_type: str | None = None) -> str:
+    """The organizer's submission filename for one query.
 
-    Raises ``ValueError`` on an out-of-range number or unrecognized type
-    rather than silently producing a filename the upload system would
-    reject.
+    **The submission carries the query file's own name.** The organizer
+    says so by example: their pack holds ``query-1-trake.txt`` and their
+    required listing holds ``query-1-trake.csv`` -- same name, new
+    extension. Their example pack happens to carry no batch prefix; a real
+    one does, so ``query-p1-16-trake.txt`` becomes ``query-p1-16-trake.csv``.
+
+    This used to take only a number and always write ``query-<N>-<type>``,
+    which turns a real pack's ``query-p1-16-trake`` into
+    ``query-16-trake.csv`` -- a name the organizer's listing does not
+    contain. Pass the query file's name (or stem) and it is preserved.
+
+    A number still works and behaves exactly as before, for callers that
+    hold one rather than a filename.
+
+    Delegates to `mvr.submission.official.submission_filename` so the rule
+    lives in one place: this module already said KIS and Q&A should share
+    the helper rather than duplicate the naming rule.
     """
-    if not isinstance(query_number, int) or isinstance(query_number, bool) or query_number < 1:
-        raise ValueError(f"query_number must be a positive integer, got {query_number!r}")
-    if query_type not in OFFICIAL_QUERY_TYPES:
+    from .official import SubmissionFormatError, submission_filename
+
+    if isinstance(query_number, int) and not isinstance(query_number, bool):
+        if query_number < 1:
+            raise ValueError(
+                f"query_number must be a positive integer, got {query_number!r}"
+            )
+        if query_type not in OFFICIAL_QUERY_TYPES:
+            raise ValueError(
+                f"query_type must be one of {OFFICIAL_QUERY_TYPES}, got {query_type!r}"
+            )
+        return f"query-{query_number}-{query_type}.csv"
+
+    if not isinstance(query_number, str):
         raise ValueError(
-            f"query_type must be one of {OFFICIAL_QUERY_TYPES}, got {query_type!r}"
+            f"query_number must be a positive integer or a query name, "
+            f"got {query_number!r}"
         )
-    return f"query-{query_number}-{query_type}.csv"
+    try:
+        return submission_filename(query_number, query_type)
+    except SubmissionFormatError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def export_official_trake_submission_csv(
