@@ -498,10 +498,10 @@ and 248) — the system can only emit frame indices of existing keyframes.
 ```
 repo            D:\AIC26 (branch feat/qna-competition-ready)
 venv            D:\AIC26\.venv  (py -3.12, extras dev,api,semantic,qna,ocr)
-organizer data  D:\AIC26_data          (raw layout: Keyframes_L*/, map-keyframes-aic25-b1/, ...)
+organizer data  E:\AIC26_data          (raw layout: Keyframes_L*/, map-keyframes-aic25-b1/, ...)
 registry root   D:\AIC26_test_root     (normalized layout AicDatasetRegistry needs)
 queries         D:\AIC_query           (9 Q&A queries across p1/p2/p3)
-index           artifacts/indexes/qna_organizer_all   (850 videos, quickgelu+openai)
+index           artifacts/indexes/qna_organizer_all   (873 videos, 177,321 vec, quickgelu+openai)
 ground truth    artifacts/qna/ground_truth.json       (3 p1 queries, human-verified)
 ```
 
