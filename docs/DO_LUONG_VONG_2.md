@@ -55,7 +55,17 @@ Chấm với `--frame-window N`, tức chỉ tính đúng khi frame nằm trong 
 | ± 125 | 0.3750 | 0.5000 | 0.5125 |
 | ± 500 | 0.3750 | 0.5625 | 0.5750 |
 
-**Khoảng cách 0.8375 → 0.51 là chỗ mất điểm lớn nhất còn lại.** Tìm đúng video rồi nhưng rơi vào sai khoảnh khắc trong video đó. Nới cửa sổ từ ±25 lên ±125 không thay đổi gì — lưới keyframe quá thưa, frame đúng gần nhất cách xa hơn thế.
+**Khoảng cách 0.8375 → 0.51 là chỗ mất điểm lớn nhất còn lại.** Tìm đúng video rồi nhưng rơi vào sai khoảnh khắc trong video đó.
+
+Vì sao nới cửa sổ ±25 lên ±125 không đổi gì — đo trên 15 câu tìm đúng video, độ lệch giữa frame ta trả về và frame đã xác minh:
+
+```
+0, 0, 0, 0, 0, 0, 0, 0, 15  |  300, 475, 675, 1046, 1080, 1481
+```
+
+Phân bố **hai cụm, rỗng ở giữa**. Trúng thì trúng chính xác; trượt thì trượt 300–1500 frame, tức 12–60 giây — một khoảnh khắc khác hẳn. Không có kiểu lỗi "lệch sang keyframe kế bên", nên mọi cửa sổ nằm trong vùng chết 15–300 đều cho cùng một con số.
+
+**Không phải do lưới keyframe thưa.** Keyframe BTC phát sẵn cách nhau trung vị **2,16 giây** (55 frame), p95 là 6,00 giây — thích ứng và có trần cứng. Trích dày hơn sẽ không cứu được các câu đang hỏng: chúng không thiếu keyframe, chúng thiếu khả năng phân biệt hai khoảnh khắc trong cùng một video. Đó là việc của OCR, ASR và re-rank theo thời gian, không phải của selector.
 
 ## Bộ này đo được gì, và KHÔNG đo được gì
 
