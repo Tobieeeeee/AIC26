@@ -1,25 +1,25 @@
 {
-  "label": "en",
+  "label": "en (n=24, sau khi sửa bằng sublan1)",
   "queries": {
     "query-p1-1-kis": {
       "video_rank": 1,
       "final_score": 1.0
     },
     "query-p1-2-kis": {
-      "video_rank": 1,
-      "final_score": 1.0
+      "video_rank": 6,
+      "final_score": 0.6
     },
     "query-p1-3-qa": {
-      "video_rank": 1,
-      "final_score": 1.0
+      "video_rank": 52,
+      "final_score": 0.2
     },
     "query-p1-4-kis": {
       "video_rank": 1,
       "final_score": 1.0
     },
     "query-p1-5-kis": {
-      "video_rank": 1,
-      "final_score": 1.0
+      "video_rank": 56,
+      "final_score": 0.2
     },
     "query-p1-6-kis": {
       "video_rank": 1,
@@ -30,20 +30,20 @@
       "final_score": 0.6
     },
     "query-p1-9-qa": {
-      "video_rank": 1,
-      "final_score": 1.0
+      "video_rank": 97,
+      "final_score": 0.2
     },
     "query-p1-10-kis": {
       "video_rank": 1,
       "final_score": 1.0
     },
     "query-p1-11-kis": {
-      "video_rank": 1,
-      "final_score": 1.0
+      "video_rank": 2,
+      "final_score": 0.8
     },
     "query-p1-12-kis": {
-      "video_rank": 3,
-      "final_score": 0.8
+      "video_rank": 7,
+      "final_score": 0.6
     },
     "query-p1-13-kis": {
       "video_rank": 7,
@@ -54,8 +54,8 @@
       "final_score": 1.0
     },
     "query-p1-17-qa": {
-      "video_rank": 1,
-      "final_score": 1.0
+      "video_rank": 5,
+      "final_score": 0.8
     },
     "query-p1-22-kis": {
       "video_rank": 46,
@@ -64,6 +64,38 @@
     "query-p1-25-kis": {
       "video_rank": null,
       "final_score": 0.0
+    },
+    "query-p1-8-kis": {
+      "video_rank": null,
+      "final_score": 0.0
+    },
+    "query-p1-14-kis": {
+      "video_rank": null,
+      "final_score": 0.0
+    },
+    "query-p1-18-kis": {
+      "video_rank": null,
+      "final_score": 0.0
+    },
+    "query-p1-19-kis": {
+      "video_rank": 10,
+      "final_score": 0.6
+    },
+    "query-p1-20-kis": {
+      "video_rank": 20,
+      "final_score": 0.6
+    },
+    "query-p1-21-kis": {
+      "video_rank": null,
+      "final_score": 0.0
+    },
+    "query-p1-23-kis": {
+      "video_rank": 87,
+      "final_score": 0.2
+    },
+    "query-p1-24-kis": {
+      "video_rank": 5,
+      "final_score": 0.8
     }
   }
 }

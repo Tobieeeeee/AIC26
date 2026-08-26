@@ -25,60 +25,79 @@ python scripts/score_verified_set.py --against data/ground_truth/baseline_en.jso
 
 `--compare` chấm cả tiếng Việt lẫn tiếng Anh trong một lần nạp model (~40 giây nạp, ~5 giây cho 16 câu).
 
-## Số đo được, ngày 24/08/2026
+## CẢNH BÁO: số đo ngày 24/08 bị vòng lặp tự xác nhận, đã sửa ngày 26/08
 
-Index 177.321 vector, `ViT-B-32-quickgelu/openai`, CPU, `--per-video 3`.
+Số 0.8375 dưới đây **không dùng làm mốc nữa**. Lý do, đo được chứ không phải suy đoán:
+
+Ground truth 17 câu ban đầu được dựng bằng cách: chạy tìm kiếm, xem top kết quả, thấy hợp lý thì chấp nhận làm "đã xác minh". Đối chiếu với `artifacts/sublan1` (bài nộp một đội khác, chia sẻ tự nguyện) phát hiện **8/17 câu lệch hẳn video**. Xem lại bằng mắt qua quy trình ở [DUNG_SUBLAN1.md](DUNG_SUBLAN1.md), 7/7 trường hợp tranh chấp — không phải một vài — sublan1 đúng, đội mình sai.
+
+Bằng chứng vòng lặp: dò lại hạng của **video bị bác** trong chính kết quả tìm kiếm của hệ thống mình:
+
+```
+câu               hạng video CŨ (bị bác)   hạng video MỚI (đúng)
+query-p1-2-kis                   1                    6
+query-p1-3-qa                    1                   52
+query-p1-5-kis                   1                   56
+query-p1-9-qa                    1                   97
+query-p1-11-kis                  1                    2
+query-p1-12-kis                  3                    7
+query-p1-17-qa                   1                    5
+```
+
+**5/7 video bị bác đứng hạng 1**, một hạng 3. Người xác minh không hề sai lười — họ nhìn top kết quả, thấy có vẻ hợp lý, chấp nhận. Nhưng đó là lấy chính hệ thống cần đo để tạo ra thước đo cho nó: hệ thống luôn "đúng" theo ground truth do chính nó gợi ý. 0.8375 phần lớn là ảo giác từ vòng lặp này.
+
+Ground truth hiện đã sửa 7 câu này và thêm 8 câu chưa từng xác minh (8, 14, 18, 19, 20, 21, 23, 24) từ cùng nguồn đối chiếu — **n=25, phủ trọn vòng 1**, hết lệch chọn mẫu theo hướng "chỉ chọn câu dễ".
+
+## Số đo được, ngày 26/08/2026 (sau khi sửa)
+
+Index 177.321 vector, `ViT-B-32-quickgelu/openai`, CPU, `--per-video 3`, n=24 (KIS+QA, trake loại trừ).
 
 ### Mức video — "có tìm ra đúng video không, ở hạng mấy"
 
-| | tiếng Việt | tiếng Anh |
+| | trước khi sửa (n=16, có vòng lặp) | sau khi sửa (n=24) |
 |---|---|---|
-| R@1 | 0.0000 | **0.6875** |
-| R@5 | 0.0000 | 0.7500 |
-| R@20 | 0.0000 | 0.8750 |
-| R@50 | 0.0000 | 0.9375 |
-| R@100 | 0.0625 | 0.9375 |
-| **Mean Final** | **0.0125** | **0.8375** |
-| tìm ra video | 1/16 | 15/16 |
+| R@1 | 0.6875 | **0.2083** |
+| R@5 | 0.7500 | 0.3333 |
+| R@20 | 0.8750 | 0.5833 |
+| R@50 | 0.9375 | 0.6250 |
+| R@100 | 0.9375 | 0.7917 |
+| **Mean Final** | 0.8375 | **0.5083** |
+| tìm ra video | 15/16 | 19/24 |
 
-Đây là bằng chứng thứ hai, trên n=16 thay vì n=3, cho cùng một kết luận: **encoder không hiểu tiếng Việt**. Không phải "hiểu kém" — là 1/16 so với 15/16.
+0.5083 là con số trung thực đầu tiên. Vẫn cao hơn thực tế thi thật một chút — 5 câu (25, 8, 14, 18, 21) không tìm ra video ở bất kỳ hạng nào, và các câu này lại nằm trong nhóm "khó nhất" (chưa ai xác minh nổi ở vòng 1).
+
+Kết luận tiếng Việt-vs-Anh **không đổi**, vì đó là so sánh có kiểm soát (cùng ground truth, chỉ đổi ngôn ngữ câu hỏi) — không phải chỗ vòng lặp xảy ra: Việt 0.0125, Anh giờ 0.5083 (thay vì 0.8375), vẫn là chênh lệch áp đảo.
 
 ### Mức frame — "có trúng đúng khoảnh khắc không"
 
-Chấm với `--frame-window N`, tức chỉ tính đúng khi frame nằm trong `frame_idx ± N`:
-
 | cửa sổ | R@1 | R@5 | Final |
 |---|---|---|---|
-| cả video | 0.6875 | 0.7500 | **0.8375** |
-| ± 0 | 0.3125 | 0.4375 | 0.4500 |
-| ± 25 | 0.3750 | 0.5000 | 0.5125 |
-| ± 125 | 0.3750 | 0.5000 | 0.5125 |
-| ± 500 | 0.3750 | 0.5625 | 0.5750 |
+| cả video | 0.2083 | 0.3333 | **0.5083** |
+| ± 0 | 0.0417 | 0.1250 | 0.1083 |
+| ± 25 | 0.0417 | 0.1667 | 0.1417 |
+| ± 125 | 0.0417 | 0.1667 | 0.1583 |
+| ± 500 | 0.0417 | 0.2083 | 0.2833 |
 
-**Khoảng cách 0.8375 → 0.51 là chỗ mất điểm lớn nhất còn lại.** Tìm đúng video rồi nhưng rơi vào sai khoảnh khắc trong video đó.
-
-Vì sao nới cửa sổ ±25 lên ±125 không đổi gì — đo trên 15 câu tìm đúng video, độ lệch giữa frame ta trả về và frame đã xác minh:
-
-```
-0, 0, 0, 0, 0, 0, 0, 0, 15  |  300, 475, 675, 1046, 1080, 1481
-```
-
-Phân bố **hai cụm, rỗng ở giữa**. Trúng thì trúng chính xác; trượt thì trượt 300–1500 frame, tức 12–60 giây — một khoảnh khắc khác hẳn. Không có kiểu lỗi "lệch sang keyframe kế bên", nên mọi cửa sổ nằm trong vùng chết 15–300 đều cho cùng một con số.
-
-**Không phải do lưới keyframe thưa.** Keyframe BTC phát sẵn cách nhau trung vị **2,16 giây** (55 frame), p95 là 6,00 giây — thích ứng và có trần cứng. Trích dày hơn sẽ không cứu được các câu đang hỏng: chúng không thiếu keyframe, chúng thiếu khả năng phân biệt hai khoảnh khắc trong cùng một video. Đó là việc của OCR, ASR và re-rank theo thời gian, không phải của selector.
+Vẫn cùng một mẫu hình như trước khi sửa: khoảng cách video→frame là chỗ mất điểm lớn nhất (0.51 → 0.11–0.28), và nới cửa sổ chỉ giúp chút ít cho tới ±500. Không phải do lưới keyframe thưa — lý do y hệt bản đo trước (xem lịch sử file này): keyframe BTC cách nhau trung vị 2,16s, phân bố lệch frame vẫn kiểu "trúng chính xác hoặc trượt xa", không có vùng giữa.
 
 ## Bộ này đo được gì, và KHÔNG đo được gì
 
 Phải đọc kỹ mục này trước khi tin bất kỳ con số nào ở trên.
 
-**17 câu này được chọn vì chúng là những câu đã làm được.** 8 câu còn lại của vòng 1 (8, 14, 18, 19, 20, 21, 23, 24) không có mặt ở đây, vì không ai biết đáp án đúng của chúng. Nên:
+**n=25, phủ trọn vòng 1** — lệch chọn mẫu theo hướng "chỉ giữ câu dễ" đã hết, vì 8 câu khó nhất (chưa ai xác minh nổi bằng mắt) giờ đã có trong bộ nhờ đối chiếu sublan1. Nhưng còn hai giới hạn khác, phải nhớ:
 
-- **0.8375 không phải điểm hệ thống.** Nó là điểm trên tập con hệ thống vốn đã giải được. Điểm thi thật thấp hơn.
-- **Bắt tụt điểm thì rất tốt.** 11/16 câu đang ở hạng 1. Một thay đổi làm chúng tụt xuống là hồi quy thật, và bộ này thấy ngay.
-- **Chứng minh cải tiến thì yếu — ở mức video.** Trần đã gần chạm: chỉ còn 1 câu chưa tìm ra video (p1-25) và 2 câu ở hạng > 5.
-- **Chứng minh cải tiến thì mạnh — ở mức frame.** Chỉ 5/16 frame trong ground truth trùng với frame máy trả về; 11/16 còn lại do người tự tìm trong video. Phần này không bị lệch chọn mẫu, và còn nhiều dư địa (0.45–0.51).
+- **Ground truth vẫn chỉ là "khả năng cao đúng", không phải BTC xác nhận.** 7 câu sửa và 8 câu thêm đều dựa trên phán đoán của một người xem ảnh, cộng với việc một đội khác (không phải BTC) tự tin vào đáp án của họ. Sai số dư vẫn có thể còn.
+- **Mean Final 0.5083 vẫn cao hơn thực tế** một chút, vì 5 câu chưa tìm ra video ở bất kỳ hạng nào lại chính là các câu khó nhất — nếu có ground truth cho toàn bộ query vòng 1 kể cả những câu không ai từng thử xác minh, điểm thật sẽ còn thấp hơn.
+- **Bắt tụt điểm vẫn rất tốt.** 5 câu đang ở hạng 1 (1, 4, 6, 10, 15). Một thay đổi làm chúng tụt xuống là hồi quy thật.
+- **Chứng minh cải tiến giờ có chỗ để đo cả hai mức** — mức video còn nhiều dư địa (0.5083, không còn gần trần như 0.8375 cũ), mức frame cũng vậy (0.11–0.28).
 
-Kết luận thực dụng: **dùng mức video để canh hồi quy, dùng mức frame để đo tiến bộ.**
+Kết luận thực dụng không đổi: **dùng mức video để canh hồi quy, dùng mức frame để đo tiến bộ** — chỉ là con số mốc giờ trung thực hơn.
+
+## Vì sao không tự chạy lại `build_round1_ground_truth.py` mà không cẩn thận
+
+Script đó dựng ground truth từ `artifacts/submissions` — nguồn duy nhất nó biết là 17 câu gốc. Chạy lại với tham số mặc định sẽ **ghi đè cả 7 câu vừa sửa bằng đáp án cũ (đã biết sai)**, vì nó không biết `apply_sublan1_review.py` đã sửa gì.
+
+Từ commit sửa lỗi này, script tự bảo vệ: nó đọc file ground truth hiện có, và **bỏ qua** bất kỳ câu nào có `verified_by` khác `"human"` — trừ khi truyền `--force`. Chạy bình thường thì an toàn; `--force` chỉ dùng khi thật sự muốn ghi đè một câu đã sửa.
 
 ## Vì sao chấm ở mức video, không phải mức frame
 

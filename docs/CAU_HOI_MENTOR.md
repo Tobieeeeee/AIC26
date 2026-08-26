@@ -51,9 +51,15 @@ Và con số đáng giá nhất: trong 15 câu tìm ra đúng video, **L25_V041 
 
 ## 2. Xin ground truth
 
-> BTC **không công bố kết quả vòng 1**, nên bọn em đang không có thước đo. Bọn em tự dựng một bộ từ 17 câu đã xác minh bằng mắt, nhưng nó **lệch chọn mẫu**: 17 câu đó được chọn vì chúng là những câu đã làm được, nên điểm đo ra cao giả tạo và chỉ bắt được hồi quy chứ khó chứng minh cải tiến.
+> BTC **không công bố kết quả vòng 1**, nên bọn em đang không có thước đo. Bọn em tự dựng một bộ từ 17 câu đã xác minh bằng mắt, và vừa phát hiện ra một lỗi nghiêm trọng trong chính cách xác minh: người xác minh chạy tìm kiếm, thấy top kết quả có vẻ hợp lý, rồi chấp nhận làm "đáp án đúng" — tức **lấy chính hệ thống cần đo để tạo ra thước đo cho nó**.
 >
-> Hỏi: thầy/anh có **ground truth của các mùa trước (AIC 2023/2024/2025)** hoặc bộ query có đáp án nào bọn em dùng để benchmark được không? Cần khoảng bao nhiêu câu thì con số mới đáng tin?
+> Đối chiếu với bài nộp một đội khác (họ tự nguyện chia sẻ), tụi em phát hiện 8/17 câu "đã xác minh" đó lệch hẳn **video**, không phải lệch frame. Dò lại thì **5/7 video bị bác đứng hạng 1** trong chính kết quả tìm kiếm hệ thống của tụi em — đúng như nghi ngờ: người xác minh vô tình chọn cái hệ thống tự đưa ra, không phải cái đúng thật. Sau khi sửa, Mean Final Score tụt từ 0.8375 xuống còn **0.5083** — con số cũ phần lớn là ảo giác.
+>
+> Hỏi:
+>
+> 1. Thầy/anh có **ground truth của các mùa trước (AIC 2023/2024/2025)** hoặc bộ query có đáp án nào bọn em dùng để benchmark độc lập, không tự chấm bằng chính hệ thống của mình không?
+> 2. Cần khoảng bao nhiêu câu thì con số mới đáng tin?
+> 3. Ngoài việc nhờ một nguồn độc lập đối chiếu (như tụi em vừa làm), có quy trình chuẩn nào để tránh vòng lặp tự xác nhận này khi không có ground truth chính thức không?
 
 ## 3. Lưu trữ thứ 3 (Cloudflare R2)
 
@@ -108,7 +114,7 @@ Và con số đáng giá nhất: trong 15 câu tìm ra đúng video, **L25_V041 
 
 Nhóm này tobie chưa nêu, nhưng theo số đo thì nó là câu hỏi có đòn bẩy lớn nhất.
 
-> Encoder bọn em là OpenCLIP `ViT-B-32-quickgelu/openai`, **chỉ hiểu tiếng Anh**. Đo trên 16 câu: truy vấn tiếng Việt được **0.0125**, tiếng Anh **0.8375** — tìm ra đúng video 1/16 so với 15/16. Máy dịch tự động (`opus-mt-vi-en`) cũng ra 0.0000 vì dịch sai danh từ riêng.
+> Encoder bọn em là OpenCLIP `ViT-B-32-quickgelu/openai`, **chỉ hiểu tiếng Anh**. Đo trên 24 câu: truy vấn tiếng Việt được **0.0333**, tiếng Anh **0.5083** — tìm ra đúng video 2/24 so với 19/24. Máy dịch tự động (`opus-mt-vi-en`) cũng ra 0.0000 vì dịch sai danh từ riêng.
 >
 > Hiện đội đang **viết tay câu mô tả tiếng Anh** cho từng truy vấn, rất tốn thời gian lúc thi.
 >
@@ -120,7 +126,7 @@ Nhóm này tobie chưa nêu, nhưng theo số đo thì nó là câu hỏi có đ
 
 Đọc mục này trước khi hỏi nhóm 1, để không mô tả sai vấn đề cho mentor.
 
-Bọn em tìm **đúng video 0.8375** nhưng **đúng frame chỉ 0.45–0.51**. Câu hỏi tự nhiên là "lưới keyframe thưa quá à?" — đã đo, và **không phải**.
+Bọn em tìm **đúng video 0.5083** nhưng **đúng frame chỉ 0.11–0.28**. Câu hỏi tự nhiên là "lưới keyframe thưa quá à?" — đã đo, và **không phải**.
 
 Độ lệch giữa frame trả về và frame đã xác minh, trên 15 câu tìm đúng video:
 
@@ -138,9 +144,10 @@ Nên khi hỏi mentor, nhóm 1 là **chuẩn bị cho vòng 2/3** (tự trích k
 
 | Con số | Đo ở đâu |
 |---|---|
-| 0.8375 video / 0.45–0.51 frame; ±25 và ±125 bằng nhau | `scripts/score_verified_set.py`, n=16 |
+| 0.5083 video / 0.11–0.28 frame | `scripts/score_verified_set.py`, n=24 (sau khi sửa bằng sublan1) |
 | L25_V041 hạng 46 | cùng phép đo, bảng chi tiết từng câu |
-| Việt 0.0125 so với Anh 0.8375 | `--compare` cùng script |
+| Việt 0.0333 so với Anh 0.5083 | `--compare` cùng script |
+| 5/7 video bị bác đứng hạng 1, vòng lặp tự xác nhận | đối chiếu `artifacts/sublan1`, xem `docs/DO_LUONG_VONG_2.md` |
 | 12/25 file lỗi định dạng | `mvr.submission.lint`, quét `artifacts/submissions/` |
 | 40s khởi động, 0,2–2s mỗi truy vấn | `scripts/answer_queries.py`, đo lúc chạy vòng 1 |
 | 177.321 vector, 873 video | manifest của `artifacts/indexes/qna_organizer_all` |
