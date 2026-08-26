@@ -190,10 +190,17 @@ def test_a_trake_chain_is_loaded_whole(tmp_path) -> None:
 
 def test_the_real_ground_truth_file_loads() -> None:
     """The committed file is the yardstick; a typo in it breaks every
-    measurement downstream and nothing else would notice."""
+    measurement downstream and nothing else would notice.
+
+    25, not 17: all of round 1 is covered now. The original 17 came from
+    the operator's own eyeball pass; the other 8 were added, and 7 of the
+    original 17 corrected, by cross-checking against a voluntarily-shared
+    team's submission (see docs/DUNG_SUBLAN1.md) -- every one of the 7
+    disagreements was resolved in that team's favor after a person looked
+    at both frames."""
     queries = load_verified_set()
 
-    assert len(queries) == 17
+    assert len(queries) == 25
     assert {q.kind for q in queries} == {"kis", "qa", "trake"}
     assert all(q.video_id and q.query_vi for q in queries)
 

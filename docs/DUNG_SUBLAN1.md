@@ -60,7 +60,16 @@ Quy tắc áp dụng:
 python scripts/score_verified_set.py --against data/ground_truth/baseline_en.json
 ```
 
-Bộ đo lớn hơn (có thể lên tới n=25 nếu xác minh hết 8 câu mới), và tối đa 8 mục cũ đã được sửa nếu sai.
+## Kết quả thật, ngày 26/08/2026
+
+Đã làm hết quy trình trên. Kết quả:
+
+- **7/7 xung đột** (câu 2, 3, 5, 9, 11, 12, 17) đều chọn đáp án của sublan1, không câu nào giữ đáp án cũ.
+- **8/8 câu chưa xác minh** (8, 14, 18, 19, 20, 21, 23, 24) đều xác minh được — ground truth giờ **n=25, phủ trọn vòng 1**.
+- Dò lại hạng của 7 video bị bác trong chính kết quả tìm kiếm hệ thống mình: **5/7 đứng hạng 1**. Đây là bằng chứng đội mình mắc lỗi **vòng lặp tự xác nhận** — xác minh vòng 1 bằng cách xem top kết quả tìm kiếm rồi chấp nhận, tức lấy chính hệ thống cần đo để tạo ra thước đo cho nó.
+- Mean Final Score (mức video, n=24 KIS+QA) tụt từ **0.8375 xuống 0.5083** — không phải hệ thống kém đi, mà là con số cũ phần lớn ảo do vòng lặp trên.
+
+Chi tiết đầy đủ, gồm bảng hạng trước/sau và số đo mức frame, xem [DO_LUONG_VONG_2.md](DO_LUONG_VONG_2.md).
 
 ## Vì sao không tự động hoá bước 2
 

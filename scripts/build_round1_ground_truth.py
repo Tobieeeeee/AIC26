@@ -122,6 +122,30 @@ def build(
     }
 
 
+def merge_queries(
+    existing: dict, new_queries: dict, *, force: bool
+) -> tuple[dict, list[tuple[str, object]]]:
+    """Fold freshly-built entries onto whatever ground truth already
+    exists, without reverting a correction this script did not make.
+
+    This script's own route is "human": the operator's eyeball pass over
+    artifacts/submissions. apply_sublan1_review.py can add or CORRECT
+    entries afterwards and tags them with a different verified_by.
+    Re-running this script with its defaults must not silently revert
+    those -- a correction born from a real cross-check disagreement would
+    vanish and nothing would say so.
+    """
+    skipped: list[tuple[str, object]] = []
+    merged = dict(existing)
+    for name, entry in new_queries.items():
+        prior = existing.get(name)
+        if prior is not None and prior.get("verified_by") != "human" and not force:
+            skipped.append((name, prior.get("verified_by")))
+            continue
+        merged[name] = entry
+    return merged, skipped
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -139,22 +163,47 @@ def main() -> None:
         "--verified", type=int, nargs="+", default=list(VERIFIED_ROUND_1),
         help="Query numbers the operator confirmed. Defaults to round 1's 17.",
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help=(
+            "Overwrite an entry even if it was verified through a "
+            "different route (e.g. scripts/apply_sublan1_review.py). "
+            "Without this, such an entry is left untouched and reported, "
+            "never silently reverted."
+        ),
+    )
     args = parser.parse_args()
 
     payload = build(args.submissions, args.queries, tuple(args.verified))
+    new_queries = payload["queries"]
+    assert isinstance(new_queries, dict)
+
+    existing: dict = {}
+    if args.output.exists():
+        existing = json.loads(args.output.read_text(encoding="utf-8")).get("queries", {})
+
+    merged, skipped = merge_queries(existing, new_queries, force=args.force)
+    payload["queries"] = merged
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    queries = payload["queries"]
-    assert isinstance(queries, dict)
     kinds: dict[str, int] = {}
-    for entry in queries.values():
+    for entry in merged.values():
         assert isinstance(entry, dict)
         kind = str(entry["kind"])
         kinds[kind] = kinds.get(kind, 0) + 1
-    print(f"wrote {len(queries)} câu vào {args.output}", file=sys.stderr)
+    print(f"wrote {len(merged)} câu vào {args.output}", file=sys.stderr)
     print(f"  {kinds}", file=sys.stderr)
+    if skipped:
+        print(
+            f"  giữ nguyên {len(skipped)} câu đã xác minh bằng nguồn khác "
+            f"(dùng --force nếu thật sự muốn ghi đè):",
+            file=sys.stderr,
+        )
+        for name, source in skipped:
+            print(f"    {name}  (verified_by={source!r})", file=sys.stderr)
 
 
 if __name__ == "__main__":

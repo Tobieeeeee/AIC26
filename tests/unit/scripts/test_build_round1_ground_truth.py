@@ -175,3 +175,66 @@ def test_the_default_list_is_the_seventeen_the_operator_confirmed() -> None:
 
     assert len(module.VERIFIED_ROUND_1) == 17
     assert 8 not in module.VERIFIED_ROUND_1  # a query that was NOT verified
+
+
+# -- merge_queries: don't revert a correction this script did not make ---
+
+
+def test_a_query_verified_by_this_scripts_own_route_is_overwritten() -> None:
+    """Re-running the ordinary way -- e.g. the operator fixed a typo in a
+    round-1 submission and wants the ground truth to pick it up -- must
+    still work without needing --force."""
+    module = _module()
+    existing = {"query-p1-1-kis": {"video_id": "OLD", "verified_by": "human"}}
+    new = {"query-p1-1-kis": {"video_id": "NEW", "verified_by": "human"}}
+
+    merged, skipped = module.merge_queries(existing, new, force=False)
+
+    assert merged["query-p1-1-kis"]["video_id"] == "NEW"
+    assert skipped == []
+
+
+def test_a_query_verified_through_sublan1_is_not_silently_reverted() -> None:
+    """This is the failure this function exists to prevent: rerunning the
+    original 17-query build must not throw away a correction born from a
+    real cross-check disagreement with another team's submission."""
+    module = _module()
+    existing = {
+        "query-p1-2-kis": {
+            "video_id": "L28_V018", "verified_by": "human (đối chiếu sublan1)"
+        }
+    }
+    new = {"query-p1-2-kis": {"video_id": "L30_V048", "verified_by": "human"}}
+
+    merged, skipped = module.merge_queries(existing, new, force=False)
+
+    assert merged["query-p1-2-kis"]["video_id"] == "L28_V018"
+    assert skipped == [("query-p1-2-kis", "human (đối chiếu sublan1)")]
+
+
+def test_force_overrides_the_protection() -> None:
+    module = _module()
+    existing = {
+        "query-p1-2-kis": {
+            "video_id": "L28_V018", "verified_by": "human (đối chiếu sublan1)"
+        }
+    }
+    new = {"query-p1-2-kis": {"video_id": "L30_V048", "verified_by": "human"}}
+
+    merged, skipped = module.merge_queries(existing, new, force=True)
+
+    assert merged["query-p1-2-kis"]["video_id"] == "L30_V048"
+    assert skipped == []
+
+
+def test_an_entry_from_another_route_absent_from_the_rebuild_survives() -> None:
+    """The 8 queries added purely from sublan1 (never in VERIFIED_ROUND_1,
+    so never in a fresh build's output) must not disappear just because
+    they are not part of what this script knows how to rebuild."""
+    module = _module()
+    existing = {"query-p1-8-kis": {"video_id": "L26_V171", "verified_by": "human (đối chiếu sublan1)"}}
+
+    merged, skipped = module.merge_queries(existing, new_queries={}, force=False)
+
+    assert merged == existing
+    assert skipped == []
