@@ -120,7 +120,9 @@ def extract_objects(
     detector: RFDETRDetector,
     output_dir: Path,
     keyframe_root: Path,
-    mapping_source: Path
+    mapping_source: Path,
+    *,
+    resume: bool = False,
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     obj_dir = output_dir / "objects"
@@ -136,49 +138,77 @@ def extract_objects(
         if not img_path.exists():
             raise FileNotFoundError(f"Keyframe image not found: {img_path}")
 
-        frame_id = int(frame["frame_idx"])
-        if hasattr(detector, "detect_keyframe"):
-            detections = detector.detect_keyframe(
-                img_path,
-                keyframe_id=frame["keyframe_id"],
-                video_id=frame["video_id"],
-                frame_id=frame_id,
-            )
-        else:
-            # Preserve compatibility with injected test/reference detectors
-            # while enforcing the production row identity and field names.
-            raw_detections = detector.detect(img_path)
-            normalized = []
-            for detection in raw_detections:
-                bbox = detection["bbox"]
-                normalized.append(
-                    {
-                        **detection,
-                        "confidence": float(
-                            detection.get("confidence", detection.get("score"))
-                        ),
-                        "x1": float(bbox[0]),
-                        "y1": float(bbox[1]),
-                        "x2": float(bbox[2]),
-                        "y2": float(bbox[3]),
-                    }
-                )
-            detections = add_keyframe_identity(
-                normalized,
-                keyframe_id=frame["keyframe_id"],
-                video_id=frame["video_id"],
-                frame_id=frame_id,
-            )
-
-        person_count = sum(1 for d in detections if d["label"] == "person")
-        car_count = sum(1 for d in detections if d["label"] == "car")
-
         video_dir = obj_dir / frame["video_id"]
         video_dir.mkdir(parents=True, exist_ok=True)
         staging_video_dir = staging_dir / frame["video_id"]
         staging_video_dir.mkdir(parents=True, exist_ok=True)
 
         target_json = video_dir / f"{frame['keyframe_id']}.json"
+        staging_json = staging_video_dir / f"{frame['keyframe_id']}.json"
+        frame_id = int(frame["frame_idx"])
+        detections = None
+        reused = False
+        if resume and target_json.is_file() and staging_json.is_file():
+            try:
+                existing = json.loads(target_json.read_text(encoding="utf-8"))
+                staged = json.loads(staging_json.read_text(encoding="utf-8"))
+                existing_detections = existing.get("objects")
+                identity_matches = (
+                    existing.get("keyframe_id") == frame["keyframe_id"]
+                    and existing.get("video_id") == frame["video_id"]
+                    and existing.get("frame_id") == frame_id
+                    and existing.get("frame_idx") == frame_id
+                )
+                rows_match = isinstance(existing_detections, list) and staged == existing_detections
+                detection_identity_matches = rows_match and all(
+                    item.get("keyframe_id") == frame["keyframe_id"]
+                    and item.get("video_id") == frame["video_id"]
+                    and item.get("frame_id") == frame_id
+                    and item.get("frame_idx") == frame_id
+                    for item in existing_detections
+                )
+                if identity_matches and detection_identity_matches:
+                    detections = existing_detections
+                    reused = True
+            except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+                detections = None
+
+        if detections is None:
+            if hasattr(detector, "detect_keyframe"):
+                detections = detector.detect_keyframe(
+                    img_path,
+                    keyframe_id=frame["keyframe_id"],
+                    video_id=frame["video_id"],
+                    frame_id=frame_id,
+                )
+            else:
+                # Preserve compatibility with injected test/reference detectors
+                # while enforcing the production row identity and field names.
+                raw_detections = detector.detect(img_path)
+                normalized = []
+                for detection in raw_detections:
+                    bbox = detection["bbox"]
+                    normalized.append(
+                        {
+                            **detection,
+                            "confidence": float(
+                                detection.get("confidence", detection.get("score"))
+                            ),
+                            "x1": float(bbox[0]),
+                            "y1": float(bbox[1]),
+                            "x2": float(bbox[2]),
+                            "y2": float(bbox[3]),
+                        }
+                    )
+                detections = add_keyframe_identity(
+                    normalized,
+                    keyframe_id=frame["keyframe_id"],
+                    video_id=frame["video_id"],
+                    frame_id=frame_id,
+                )
+
+        person_count = sum(1 for d in detections if d["label"] == "person")
+        car_count = sum(1 for d in detections if d["label"] == "car")
 
         payload = {
             "keyframe_id": frame["keyframe_id"],
@@ -192,11 +222,12 @@ def extract_objects(
             "car_count": car_count,
             "objects": detections
         }
-        target_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        (staging_video_dir / f"{frame['keyframe_id']}.json").write_text(
-            json.dumps(detections, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        if not reused:
+            target_json.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+            staging_json.write_text(
+                json.dumps(detections, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
         json_count += 1
 
         shot_key = (frame["video_id"], int(frame["shot_id"]))

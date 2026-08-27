@@ -7,8 +7,31 @@ import json
 WORKER_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent / "docker" / "ocr" / "worker"
 sys.path.insert(0, str(WORKER_DIR))
 
-from mvr.enrichment.ocr.docker_ocr import process_candidates_to_canonical
+from mvr.enrichment.ocr.docker_ocr import (
+    _build_request_payload,
+    process_candidates_to_canonical,
+)
 from json_file_contract import OcrCandidateFile, CandidateObject, write_json_file
+
+
+def test_request_payload_uses_external_runtime_mount() -> None:
+    sample = type(
+        "Sample",
+        (),
+        {
+            "keyframe_id": "K1",
+            "video_id": "V1",
+            "shot_id": 1,
+            "frame_idx": 12,
+            "timestamp": 0.48,
+            "image_path": "temp/V1_K1_12.jpg",
+        },
+    )()
+    anchor = {"frame_idx": 13, "timestamp": 0.52}
+
+    payload = _build_request_payload(sample, anchor)
+
+    assert payload["image_path"] == "/ocr-runtime/frames/V1/temp/V1_K1_12.jpg"
 
 def test_process_candidates_to_canonical(tmp_path):
     # Setup candidate JSON directory

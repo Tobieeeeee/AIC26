@@ -42,7 +42,7 @@ def _build_anchor_lookup(keyframes: list) -> dict:
     }
 
 
-def _build_request_payload(sample, anchor, temp_dir_abs: Path, workspace_root: Path) -> dict:
+def _build_request_payload(sample, anchor, container_temp_root: str = "/ocr-runtime") -> dict:
     return {
         "schema_version": "1.0",
         "artifact_type": "ocr_frame_request",
@@ -55,8 +55,7 @@ def _build_request_payload(sample, anchor, temp_dir_abs: Path, workspace_root: P
         "source_frame_idx": sample.frame_idx,
         "source_timestamp": sample.timestamp,
         "image_path": (
-            f"/workspace/{temp_dir_abs.relative_to(workspace_root).as_posix()}"
-            f"/frames/{sample.video_id}/{sample.image_path}"
+            f"{container_temp_root}/frames/{sample.video_id}/{sample.image_path}"
         ),
     }
 
@@ -196,6 +195,7 @@ def run_docker_pipeline(
 
     temp_dir_abs = temp_dir.resolve()
     workspace_root = Path.cwd().resolve()
+    container_temp_root = "/ocr-runtime"
 
     requests_dir = temp_dir_abs / "requests"
     detections_dir = temp_dir_abs / "detections"
@@ -215,27 +215,29 @@ def run_docker_pipeline(
             raise KeyError(
                 f"Missing anchor keyframe metadata for {kf.video_id}/{kf.keyframe_id}"
             )
-        req = _build_request_payload(kf, anchor, temp_dir_abs, workspace_root)
+        req = _build_request_payload(kf, anchor, container_temp_root)
         with req_path.open("w", encoding="utf-8") as f:
             json.dump(req, f, ensure_ascii=False)
 
     # Run DeepSolo
     subprocess.run([
         "docker", "run", "--rm", "--gpus", "all",
-        "-v", f"{workspace_root}:/workspace",
+        "-v", f"{workspace_root}:/workspace:ro",
+        "--mount", f"type=bind,src={temp_dir_abs},dst={container_temp_root}",
         "-v", model_mount,
         "mvr-ocr-deepsolo:task04b",
         "python", "/workspace/docker/ocr/worker/deepsolo_worker.py",
         "--requests-dir",
-        f"/workspace/{requests_dir.relative_to(workspace_root).as_posix()}",
+        f"{container_temp_root}/requests",
         "--output-dir",
-        f"/workspace/{detections_dir.relative_to(workspace_root).as_posix()}",
+        f"{container_temp_root}/detections",
         "--weights",
         str(deepsolo["runtime_path"]),
         "--config",
         str(deepsolo["runtime_config"]),
         "--expected-sha256",
         str(deepsolo["sha256"]),
+        "--resume",
     ], check=True)
 
     request_count = len(list(requests_dir.rglob("*.json")))
@@ -250,14 +252,16 @@ def run_docker_pipeline(
     # Run PARSeq
     subprocess.run([
         "docker", "run", "--rm", "--gpus", "all",
-        "-v", f"{workspace_root}:/workspace",
+        "-v", f"{workspace_root}:/workspace:ro",
+        "--mount", f"type=bind,src={temp_dir_abs},dst={container_temp_root}",
         "-v", model_mount,
         "mvr-ocr-parseq-vi:task04b",
         "python", "/workspace/docker/ocr/worker/parseq_worker.py",
-        "--detections-dir", f"/workspace/{detections_dir.relative_to(workspace_root).as_posix()}",
-        "--output-dir", f"/workspace/{candidates_dir.relative_to(workspace_root).as_posix()}",
+        "--detections-dir", f"{container_temp_root}/detections",
+        "--output-dir", f"{container_temp_root}/candidates",
         "--weights", str(parseq_vi["runtime_path"]),
         "--expected-sha256", str(parseq_vi["sha256"]),
+        "--resume",
     ], check=True)
 
     candidate_count = len(list(candidates_dir.rglob("*.json")))
@@ -449,11 +453,16 @@ def process_dataset_docker_ocr(
         video_frames_dir = frames_dir / video_id
         video_frames_dir.mkdir(parents=True, exist_ok=True)
 
+        missing_frames = [
+            frame
+            for frame in v_frames
+            if not (video_frames_dir / frame.image_path).is_file()
+        ]
         extract_keyframes(
             video_path,
-            v_frames,
+            missing_frames,
             video_frames_dir,
-    )
+        )
     # # Group extraction by video
     # by_video = defaultdict(list)
     # for kf in frames_to_extract:
