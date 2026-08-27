@@ -109,6 +109,16 @@ def main():
         action="store_true",
         help="Run only selected embedding providers",
     )
+    parser.add_argument(
+        "--skip-embeddings",
+        action="store_true",
+        help="Run only the pinned production object provider",
+    )
+    parser.add_argument(
+        "--resume-objects",
+        action="store_true",
+        help="Reuse identity-valid per-keyframe object artifacts",
+    )
 
     args = parser.parse_args()
 
@@ -214,15 +224,18 @@ def main():
             checkpoint_sha256=checkpoint_hash,
         )
 
-    run_selected_embedding_providers(
-        args.embedding_providers,
-        {
-            "clip": run_clip,
-            "beit3": run_beit3,
-            "metaclip2": run_metaclip2,
-            "perception_encoder": run_perception_encoder,
-        },
-    )
+    if args.skip_embeddings:
+        print("Embedding extraction skipped.")
+    else:
+        run_selected_embedding_providers(
+            args.embedding_providers,
+            {
+                "clip": run_clip,
+                "beit3": run_beit3,
+                "metaclip2": run_metaclip2,
+                "perception_encoder": run_perception_encoder,
+            },
+        )
     
     # 2. RF-DETR
     if args.skip_objects:
@@ -236,7 +249,15 @@ def main():
             score_threshold=args.detector_threshold,
         )
     )
-    extract_objects(dataset_name, keyframes, object_detector, args.output, args.keyframe_root, args.mapping_csv)
+    extract_objects(
+        dataset_name,
+        keyframes,
+        object_detector,
+        args.output,
+        args.keyframe_root,
+        args.mapping_csv,
+        resume=args.resume_objects,
+    )
     
     print(f"Feature extraction completed. Outputs saved to {args.output}")
 

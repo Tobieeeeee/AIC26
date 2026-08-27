@@ -18,6 +18,7 @@ class FakeEncoder:
 
 class FakeDetector:
     def __init__(self):
+        self.calls = 0
         self.model_name = "FakeRCNN"
         self.score_threshold = 0.5
         self.nms_threshold = 0.5
@@ -27,6 +28,7 @@ class FakeDetector:
         self.nms_implementation = "built_in_faster_rcnn"
 
     def detect(self, path):
+        self.calls += 1
         # Return 2 persons and 1 car
         return [
             {"label": "person", "class_id": 1, "score": 0.99, "bbox": [0.0, 0.0, 10.0, 10.0]},
@@ -202,3 +204,15 @@ def test_extract_objects(tmp_path):
     assert staging_manifest["frame_id_contract"] == (
         "frame_id == frame_idx from canonical mapping"
     )
+
+    resumed_detector = FakeDetector()
+    extract_objects(
+        "test_dataset",
+        keyframes,
+        resumed_detector,
+        output_dir,
+        keyframe_root,
+        mapping_source,
+        resume=True,
+    )
+    assert resumed_detector.calls == 0
