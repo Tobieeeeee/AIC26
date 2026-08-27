@@ -1,5 +1,10 @@
 # AIC Q&A Implementation Notes — Repository Contract Audit
 
+> Production status update (2026-08-24): live object extraction is now pinned
+> to RFDETRLarge with the COCO `rf-detr-large-2026.pth` checkpoint. References
+> below to organizer Faster R-CNN/OpenImages artifacts remain valid historical
+> input-contract notes; Faster R-CNN and YOLO are not production defaults.
+
 Task 01 output for the Q&A competition-ready task pack (branch
 `feat/qna-competition-ready`). Records the exact current interfaces,
 identifiers, contracts, and gaps that all later Q&A task-pack work must reuse

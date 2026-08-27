@@ -42,7 +42,7 @@ class TestParquetSchemas:
 
     def test_objects_schema_columns(self):
         cols = schema_columns("objects")
-        for col in ("keyframe_id", "label", "confidence", "x1", "y1", "x2", "y2"):
+        for col in ("keyframe_id", "frame_id", "frame_idx", "label", "confidence", "x1", "y1", "x2", "y2"):
             assert col in cols
 
     def test_extraction_status_columns(self):
@@ -110,6 +110,37 @@ class TestConsolidation:
         result = consolidate_to_parquet(staging, output, "ocr")
         assert result["duplicates_removed"] == 1
         assert result["total_records"] == 1
+
+    def test_objects_preserve_multiple_detections_per_keyframe(self, tmp_path):
+        import json
+        import polars as pl
+
+        from mvr.operations.consolidate import consolidate_to_parquet
+
+        staging = tmp_path / "objects"
+        staging.mkdir()
+        common = {
+            "keyframe_id": "kf001",
+            "video_id": "V01",
+            "frame_id": 100,
+            "frame_idx": 100,
+        }
+        (staging / "kf001.json").write_text(
+            json.dumps(
+                [
+                    {**common, "label": "person", "class_id": 1, "confidence": 0.9, "x1": 1.0, "y1": 2.0, "x2": 3.0, "y2": 4.0},
+                    {**common, "label": "person", "class_id": 1, "confidence": 0.8, "x1": 10.0, "y1": 20.0, "x2": 30.0, "y2": 40.0},
+                    {**common, "video_id": "V02", "label": "person", "class_id": 1, "confidence": 0.7, "x1": 1.0, "y1": 2.0, "x2": 3.0, "y2": 4.0},
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        output = tmp_path / "objects.parquet"
+        result = consolidate_to_parquet(staging, output, "objects")
+
+        assert result["total_records"] == 3
+        assert pl.read_parquet(output).height == 3
 
     def test_consolidate_empty_raises(self, tmp_path):
         from mvr.operations.consolidate import ConsolidationError, consolidate_to_parquet

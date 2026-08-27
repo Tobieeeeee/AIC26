@@ -18,8 +18,8 @@ through an injected `objects_path_resolver` that returns a path to the
 organizer's per-frame objects JSON, or `None` when unavailable -- never
 guessed. As recorded in the Task 01/03 notes, this repository now has
 *multiple, non-interchangeable* object-detection label spaces (organizer
-OpenImages-labeled files, and this repo's own COCO-labeled live detectors
--- YOLO and the newer torchvision Faster R-CNN from PR #4). This module
+OpenImages-labeled files, and this repo's pinned COCO RF-DETR Large production
+output. YOLO and torchvision Faster R-CNN are legacy/reference inputs. This module
 deliberately wires only the organizer's file-based objects through
 `build_frame_context` for now; falling back to a live COCO detector when
 the organizer file is absent is an explicit, separately-scoped follow-up
@@ -304,12 +304,13 @@ def search_qna(
     """Run one Q&A query against the existing retrieval baseline plus the
     Task 03 answer reasoner.
 
-    Uses hybrid search (existing semantic + OCR branches fused via RRF)
-    when Elasticsearch is configured, otherwise falls back to semantic-only
-    FAISS search over ``event_description`` -- exactly the same branch
-    selection as ``search_kis``. Never builds an index, reloads a retrieval
-    model, or loads the answer-reasoning model itself -- all three are the
-    same lazily-initialized singletons other routes already use.
+    Uses hybrid search (existing semantic + OCR branches fused via RRF) when
+    Elasticsearch is configured, otherwise uses the configured semantic
+    service over ``event_description`` -- Milvus in production and FAISS only
+    when explicitly selected as the reference backend. This is exactly the
+    same branch selection as ``search_kis``. Never builds an index, reloads a
+    retrieval model, or loads the answer-reasoning model itself -- all three
+    are the same lazily-initialized singletons other routes already use.
 
     ``temporal_radius`` additionally predicts each hit's neighbouring
     keyframes (see ``_expansion_plan``); ``0``, the default, is retrieval's
@@ -362,7 +363,7 @@ def search_qna(
     for rank_index, offset in _expansion_plan(len(raw_hits), temporal_radius, neighbour_cost):
         hit = raw_hits[rank_index]
         video_id = str(hit["video_id"])
-        hit_keyframe_id = str(hit["frame_id"])
+        hit_keyframe_id = str(hit.get("keyframe_id", hit["frame_id"]))
         if offset == 0:
             keyframe_id: str | None = hit_keyframe_id
         elif neighbour_index is not None:

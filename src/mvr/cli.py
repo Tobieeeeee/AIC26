@@ -460,7 +460,7 @@ def _run_show_defaults() -> None:
     else:
         lines.extend([
             "Ingestion: TransNetV2 @ 0.5 + periodic 12s/8s",
-            "Objects:   RF-DETR (pin: pending)",
+            "Objects:   RFDETRLarge / rf-detr-large-2026.pth (pin: pinned)",
             "Visual:    beit3, metaclip2, perception_encoder",
             "OCR:       DeepSolo + Vietnamese PARSeq + F-1/F/F+1",
             "ASR:       Silero VAD + ChunkFormer CTC Large Vie",

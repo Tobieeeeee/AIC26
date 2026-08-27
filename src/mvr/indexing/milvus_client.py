@@ -216,6 +216,14 @@ class MilvusClient:
         col.load()
         LOGGER.info("Loaded collection: %s", target)
 
+    def flush_collection(self, name: str | None = None) -> None:
+        """Flush pending inserts/upserts so counts and indexes see them."""
+        self._ensure_connected()
+        pm = _require_pymilvus()
+        target = name or self.config.collection
+        pm.Collection(name=target).flush()
+        LOGGER.info("Flushed collection: %s", target)
+
     def insert_batch(
         self,
         entities: list[dict[str, Any]],
@@ -304,10 +312,21 @@ class MilvusClient:
         if not pm.utility.has_collection(target):
             raise MilvusCollectionError(f"Collection does not exist: {target}")
         col = pm.Collection(name=target)
+        dimensions = {
+            field.name: int(field.params["dim"])
+            for field in col.schema.fields
+            if "dim" in field.params
+        }
+        try:
+            loaded = str(pm.utility.load_state(target)).endswith("Loaded")
+        except Exception:
+            loaded = False
         return {
             "name": target,
             "fields": [f.name for f in col.schema.fields],
+            "dimensions": dimensions,
             "num_entities": col.num_entities,
+            "loaded": loaded,
             "indexes": [
                 {"field": idx.field_name, "type": idx.params.get("index_type")}
                 for idx in col.indexes

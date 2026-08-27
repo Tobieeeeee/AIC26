@@ -1043,6 +1043,36 @@ Blockers:
 
 - None. No quality claim or `rrf_k` tuning was performed.
 
+# TASK-FIX-01 — Milvus production semantic runtime
+
+Status: COMPLETE; LIVE LOCAL RUNTIME VERIFIED; FULL BATCH1 DEFERRED
+
+Branch: `fix/milvus-production-runtime`
+
+- Made `MilvusSemanticService` the FastAPI production default and retained
+  FAISS only behind explicit `MVR_SEMANTIC_BACKEND=faiss_reference` selection.
+- Reused the three provider query encoders and independent semantic retriever;
+  BEiT-3, MetaCLIP-2, and PE remain isolated and fuse by rank-only RRF `k=60`.
+- Added fail-closed runtime resolution and readiness fields for configured,
+  reachable, collection-ready, loaded, collection, and entity-count state.
+- Verified a five-entity local Milvus 2.4.13 fixture with all three canonical
+  vector fields and exact FLAT parity against FAISS 1.15.0.
+- Verified FastAPI health and semantic search through the live Milvus service;
+  no model weights and no full Batch1 artifacts were downloaded or indexed.
+
+Verification:
+
+- Milvus/runtime unit suites: 78 passed, 0 skipped.
+- KIS/TRAKE/Q&A/hybrid/default focused suites: 243 passed.
+- Opt-in live Milvus integration: 1 passed, 0 skipped, 1 upstream warning.
+- Full suite: 1,108 passed, 14 skipped, with three failures from untracked
+  benchmark tests and the documented unrelated Task05A cross-import failure.
+- Python compilation and `git diff --check`: PASS.
+
+Implementation commit: `f6bb249`.
+
+Report: `docs/reviews/MILVUS_PRODUCTION_RUNTIME_FIX.md`.
+
 # Multi-Embedding Task 14 — Fasttest and Seven Ablations
 
 Status: COMPLETE (structural fixture; real weights unavailable)
@@ -1388,3 +1418,30 @@ Verification:
 Canonical contract: `docs/architecture/CANONICAL_INGESTION.md`.
 
 Freeze report: `docs/reviews/INGEST_CANONICAL_FREEZE.md`.
+
+---
+
+# TASK-FIX-02 — RF-DETR production pin
+
+Status: COMPLETE; FULL OBJECT EXTRACTION DEFERRED; NOT MERGED
+
+Branch: `fix/rfdetr-production-pin` from `a284b00`
+
+- Pinned `rfdetr==1.9.3`, `RFDETRLarge`, and the current official
+  `rf-detr-large-2026.pth` checkpoint. The 135,954,129-byte file was verified
+  at SHA-256 `0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38`.
+- Replaced the fail-closed placeholder and competing auto-download adapter
+  with one lazy, reusable, offline adapter. It verifies package and checkpoint
+  identity before load and has no detector/model fallback.
+- Preserved `keyframe_id`, `video_id`, and original-video identity as
+  `frame_id == frame_idx`; emitted flat DATA-02 rows and compatible Task05A
+  keyframe envelopes from the same inference result.
+- Corrected object consolidation/promotion identity so multiple boxes per
+  keyframe and repeated keyframe IDs across videos survive while exact
+  duplicate detections are rejected.
+- Real CUDA gate: 20 existing keyframes from 20 videos, 60 detections, two
+  repeat runs, successful Parquet promotion/Polars join/Task05A/Elasticsearch
+  compatibility, NVIDIA RTX 4050 Laptop GPU, CUDA 12.4, batch 1.
+- Full Batch1 and full object extraction were not run.
+
+Report: `docs/reviews/RFDETR_PRODUCTION_PIN_REPORT.md`.

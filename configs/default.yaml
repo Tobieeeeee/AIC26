@@ -41,9 +41,15 @@ enrichment:
 
   # --- Object detection (production: RF-DETR) ---
   object_detector: rfdetr
+  object_variant: large
+  object_model_class: RFDETRLarge
+  object_checkpoint: rf-detr-large-2026.pth
+  object_checkpoint_sha256: 0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38
+  object_checkpoint_lock: configs/rfdetr_model.lock.json
   object_confidence: 0.4
-  # RF-DETR variant/checkpoint pinning is pending.
-  # Legacy Faster R-CNN remains available by explicit --rcnn-model flag.
+  object_device: cuda
+  object_allow_download: false
+  # Faster R-CNN and YOLO remain reference/legacy backends by explicit opt-in.
 
   # --- Visual embeddings (production: three-provider stack) ---
   embedding_providers:
@@ -81,12 +87,23 @@ enrichment:
 retrieval:
   lexical_backend: elasticsearch
   semantic_backend: milvus          # production: Milvus (TASK05-MILVUS)
-  # faiss_reference: retained for parity tests / benchmarks only
+  # Runtime override: MVR_SEMANTIC_BACKEND=faiss_reference (tests/parity only).
+  # There is no automatic Milvus -> FAISS fallback.
   candidate_k: 30
   hybrid_method: weighted
   rrf_k: 60
   weighted_alpha: 0.25
   elasticsearch_num_candidates: 100
+
+milvus:
+  collection: aic26_keyframes
+  index_type: FLAT
+  metric: IP
+  rrf_k: 60
+  provider_fields:
+    beit3: beit3_vector
+    metaclip2: metaclip2_vector
+    perception_encoder: pe_vector
 
 elasticsearch:
   url: http://localhost:9200

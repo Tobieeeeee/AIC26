@@ -70,11 +70,26 @@ class TestObjectDefaults:
         assert production_config["objects"]["provider"] != "yolov8n"
 
     def test_pin_status_documented(self, production_config):
-        assert "pin_status" in production_config["objects"]
+        assert production_config["objects"]["pin_status"] == "pinned"
+
+    def test_large_checkpoint_is_exactly_pinned(self, production_config):
+        objects = production_config["objects"]
+        assert objects["variant"] == "large"
+        assert objects["model_class"] == "RFDETRLarge"
+        assert objects["checkpoint"] == "rf-detr-large-2026.pth"
+        assert objects["checkpoint_bytes"] == 135_954_129
+        assert objects["checkpoint_sha256"] == (
+            "0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38"
+        )
+        assert objects["package_version"] == "1.9.3"
+        assert objects["allow_download"] is False
 
     def test_faster_rcnn_is_legacy(self, production_config):
         legacy = production_config["objects"].get("legacy_backends", [])
         assert "faster_rcnn" in legacy
+
+    def test_yolo_is_legacy(self, production_config):
+        assert "yolov8" in production_config["objects"]["legacy_backends"]
 
     def test_default_yaml_aligned(self, default_config):
         assert default_config["enrichment"]["object_detector"] == "rfdetr"
@@ -163,23 +178,48 @@ class TestRFDETRProvider:
         assert RFDETRDetector is not None
         assert RFDETRConfig is not None
 
-    def test_default_config_unpinned(self):
+    def test_default_config_pinned(self):
         from mvr.enrichment.objects.rfdetr import RFDETRConfig
         config = RFDETRConfig()
         assert config.provider_id == "rfdetr"
-        assert not config.is_pinned
-        assert config.pin_status == "pending"
+        assert config.is_pinned
+        assert config.pin_status == "pinned"
 
-    def test_detect_fails_without_pin(self):
-        from mvr.enrichment.objects.rfdetr import RFDETRDetector, RFDETRPinError
-        detector = RFDETRDetector()
+    def test_detect_fails_without_pin(self, tmp_path):
+        from mvr.enrichment.objects.rfdetr import (
+            RFDETRConfig,
+            RFDETRDetector,
+            RFDETRPinError,
+        )
+        image = tmp_path / "image.jpg"
+        image.touch()
+        detector = RFDETRDetector(RFDETRConfig(variant=None))
         with pytest.raises(RFDETRPinError):
-            detector.detect("fake_image.jpg")
+            detector.detect(image)
 
     def test_no_silent_fallback(self):
         """RF-DETR must not silently fall back to Faster R-CNN."""
         from mvr.enrichment.objects import PRODUCTION_BACKEND
         assert PRODUCTION_BACKEND == "rfdetr"
+
+    def test_only_rfdetr_is_available_for_production(self):
+        from mvr.enrichment.objects import AVAILABLE_BACKENDS, LEGACY_BACKENDS
+        assert set(AVAILABLE_BACKENDS) == {"rfdetr"}
+        assert LEGACY_BACKENDS == {"faster_rcnn", "yolov8"}
+
+    def test_model_lock_matches_config(self, production_config):
+        import json
+
+        lock = json.loads(
+            (REPO_ROOT / "configs" / "rfdetr_model.lock.json").read_text(
+                encoding="utf-8"
+            )
+        )["production_model"]
+        objects = production_config["objects"]
+        assert lock["checkpoint"]["filename"] == objects["checkpoint"]
+        assert lock["checkpoint"]["bytes"] == objects["checkpoint_bytes"]
+        assert lock["checkpoint"]["sha256"] == objects["checkpoint_sha256"]
+        assert lock["upstream_revision"] == objects["revision"]
 
 
 # --------------------------------------------------------------------------

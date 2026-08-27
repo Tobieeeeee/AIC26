@@ -118,7 +118,23 @@ def consolidate_to_parquet(
     _validate_schema(records, schema, schema_name)
 
     # Dedup
-    id_cols = identity_columns or ["keyframe_id"]
+    if identity_columns is not None:
+        id_cols = identity_columns
+    elif schema_name == "objects":
+        # Object metadata is one row per detection, not one row per keyframe.
+        # Include the class and coordinates so multiple detections on the same
+        # keyframe survive consolidation while exact duplicate rows do not.
+        id_cols = [
+            "video_id",
+            "keyframe_id",
+            "class_id",
+            "x1",
+            "y1",
+            "x2",
+            "y2",
+        ]
+    else:
+        id_cols = ["keyframe_id"]
     original_count = len(records)
     records = _dedup_records(records, id_cols)
     dedup_count = original_count - len(records)

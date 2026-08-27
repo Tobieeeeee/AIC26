@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _require_non_blank(value: str) -> str:
@@ -146,8 +146,10 @@ class QnaSearchResponse(BaseModel):
 
 
 class SearchHit(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     rank: int = Field(ge=1)
-    frame_id: str
+    frame_id: str | int
     video_id: str
     timestamp: float
     score: float
@@ -174,6 +176,12 @@ class SemanticRuntimeStatus(BaseModel):
     configured: bool
     available: bool
     loaded: bool
+    backend: str | None = None
+    reachable: bool | None = None
+    collection_ready: bool | None = None
+    collection: str | None = None
+    entities: int | None = Field(default=None, ge=0)
+    error: str | None = None
 
 
 class ElasticsearchRuntimeStatus(BaseModel):

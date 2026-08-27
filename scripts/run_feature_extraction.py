@@ -16,7 +16,7 @@ from mvr.enrichment.embeddings.offline import (
     run_selected_embedding_providers,
 )
 from mvr.enrichment.embeddings.provider_specs import load_provider_specs
-from mvr.enrichment.objects.rf_detr import RfDetr
+from mvr.enrichment.objects.rfdetr import RFDETRConfig, RFDETRDetector
 
 
 def parse_embedding_providers(value: str) -> tuple[str, ...]:
@@ -76,11 +76,28 @@ def main():
         type=Path,
         help="Local locked PE-Core-L14-336 checkpoint; never downloaded implicitly",
     )
-    parser.add_argument("--detector-model", type=str, default="rfdetr_medium", help="RF-DETR model variant (rfdetr_nano/small/medium/large)")
-    parser.add_argument("--detector-threshold", type=float, default=0.5, help="RF-DETR score threshold")
-    parser.add_argument("--detector-nms-threshold", type=float, default=0.5, help="Unused: RF-DETR is NMS-free; kept for interface parity")
+    parser.add_argument(
+        "--detector-model",
+        choices=("rfdetr_large",),
+        default="rfdetr_large",
+        help="Pinned production RF-DETR model (alternate variants are not runtime fallbacks)",
+    )
+    parser.add_argument(
+        "--detector-checkpoint",
+        type=Path,
+        help=(
+            "Local rf-detr-large-2026.pth; may instead be supplied through "
+            "MVR_RFDETR_CHECKPOINT. It is never downloaded implicitly."
+        ),
+    )
+    parser.add_argument("--detector-threshold", type=float, default=0.4, help="Pinned RF-DETR score threshold")
     
-    parser.add_argument("--device", type=str, default="auto", help="Device (cpu/cuda/auto)")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        help="Device (production default: cuda; cpu/auto are explicit overrides)",
+    )
     parser.add_argument(
         "--embedding-batch-size",
         type=int,
@@ -211,8 +228,14 @@ def main():
     if args.skip_objects:
         print("Object extraction skipped.")
         return
-    print(f"Initializing RF-DETR ({args.detector_model})...")
-    object_detector = RfDetr(model_name=args.detector_model, device=args.device, score_threshold=args.detector_threshold, nms_threshold=args.detector_nms_threshold)
+    print(f"Initializing pinned RF-DETR ({args.detector_model})...")
+    object_detector = RFDETRDetector(
+        RFDETRConfig(
+            checkpoint_path=args.detector_checkpoint,
+            device=args.device,
+            score_threshold=args.detector_threshold,
+        )
+    )
     extract_objects(dataset_name, keyframes, object_detector, args.output, args.keyframe_root, args.mapping_csv)
     
     print(f"Feature extraction completed. Outputs saved to {args.output}")

@@ -31,16 +31,32 @@ ingestion:
 # --------------------------------------------------------------------------
 objects:
   provider: rfdetr
-  # RF-DETR variant and checkpoint are NOT YET PINNED.
-  # Full object extraction is BLOCKED until these are resolved.
-  variant: null
-  checkpoint: null
-  checkpoint_sha256: null
-  revision: null
-  pin_status: pending
+  variant: large
+  model_class: RFDETRLarge
+  checkpoint: rf-detr-large-2026.pth
+  checkpoint_bytes: 135954129
+  checkpoint_sha256: 0f4e20e19a99c0f8a62b5685f57f6c8b5c371c59081feda6752a0561a79ccf38
+  checkpoint_source: https://storage.googleapis.com/rfdetr/rf-detr-large-2026.pth
+  package: rfdetr
+  package_version: 1.9.3
+  source: https://github.com/roboflow/rf-detr
+  revision: 3f7748b1783533bc2e62804ca5975fe9b9cfc041
+  license: Apache-2.0
+  vocabulary: MS COCO 2017
+  class_count: 80
+  class_id_space: sparse COCO category IDs in 90 model slots
+  resolution: 704
+  score_threshold: 0.4
+  nms: false
+  device: cuda
+  batch_size: 1
+  checkpoint_lock: configs/rfdetr_model.lock.json
+  pin_status: pinned
+  allow_download: false
   # Legacy backends remain available by explicit opt-in only.
   legacy_backends:
     - faster_rcnn
+    - yolov8
 
 # --------------------------------------------------------------------------
 # Visual semantic embeddings — canonical three-provider stack
@@ -117,12 +133,23 @@ cache:
 retrieval:
   lexical_backend: elasticsearch
   semantic_backend: milvus          # production: Milvus (TASK05-MILVUS)
-  # faiss_reference: retained for parity tests / benchmarks only
+  # Runtime override: MVR_SEMANTIC_BACKEND=faiss_reference (tests/parity only).
+  # There is no automatic Milvus -> FAISS fallback.
   candidate_k: 30
   hybrid_method: weighted
   rrf_k: 60
   weighted_alpha: 0.25
   elasticsearch_num_candidates: 100
+
+milvus:
+  collection: aic26_keyframes
+  index_type: FLAT
+  metric: IP
+  rrf_k: 60
+  provider_fields:
+    beit3: beit3_vector
+    metaclip2: metaclip2_vector
+    perception_encoder: pe_vector
 
 elasticsearch:
   url: http://localhost:9200
