@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--weights", required=True)
     parser.add_argument("--expected-sha256", required=True)
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
     detections_dir = Path(args.detections_dir)
@@ -84,6 +85,20 @@ def main():
 
     for det_file in sorted(detections_dir.rglob("*.json")):
         det_result = read_json_file(det_file, OcrDetectionFile)
+        out_file = output_dir / det_file.relative_to(detections_dir)
+        if args.resume and out_file.is_file():
+            try:
+                existing = read_json_file(out_file, OcrCandidateFile)
+                if (
+                    existing.status == "ok"
+                    and existing.request_id == det_result.request_id
+                    and existing.video_id == det_result.video_id
+                    and existing.keyframe_id == det_result.keyframe_id
+                    and existing.source_frame_idx == det_result.source_frame_idx
+                ):
+                    continue
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
 
         candidates = []
         for det in det_result.detections:
@@ -140,7 +155,6 @@ def main():
                 except Exception as e:
                     print(f"ERROR processing detection {det.detection_index} in {det_file}: {e}", file=sys.stderr)
 
-        out_file = output_dir / det_file.relative_to(detections_dir)
         cand_result = OcrCandidateFile(
             schema_version="1.0",
             artifact_type="parseq_candidate_result",

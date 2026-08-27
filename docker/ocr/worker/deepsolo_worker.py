@@ -26,6 +26,7 @@ def main():
     parser.add_argument("--weights", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--expected-sha256", required=True)
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
     requests_dir = Path(args.requests_dir)
@@ -87,6 +88,21 @@ def main():
 
     for req_file in sorted(requests_dir.rglob("*.json")):
         req = read_json_file(req_file, OcrRequest)
+        out_file = output_dir / req_file.relative_to(requests_dir)
+        if args.resume and out_file.is_file():
+            try:
+                existing = read_json_file(out_file, OcrDetectionFile)
+                if (
+                    existing.status == "ok"
+                    and existing.request_id == req.request_id
+                    and existing.video_id == req.video_id
+                    and existing.keyframe_id == req.keyframe_id
+                    and existing.source_frame_idx == req.source_frame_idx
+                    and existing.image_path == req.image_path
+                ):
+                    continue
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
 
         detections = []
         if is_dummy:
@@ -144,7 +160,6 @@ def main():
             except Exception as e:
                 print(f"ERROR processing {req_file}: {e}", file=sys.stderr)
 
-        out_file = output_dir / req_file.relative_to(requests_dir)
         det_result = OcrDetectionFile(
             schema_version="1.0",
             artifact_type="deepsolo_detection_result",
