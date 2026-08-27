@@ -12,7 +12,6 @@ import os
 import time
 from pathlib import Path
 
-import polars as pl
 import pytest
 import torch
 
@@ -24,9 +23,6 @@ from mvr.enrichment.objects.rfdetr import RFDETRConfig, RFDETRDetector
 from mvr.indexing.documents import build_search_document
 from mvr.indexing.elasticsearch_index import build_mappings
 from mvr.indexing.task05a import build_index_documents
-from mvr.operations.consolidate import consolidate_to_parquet
-from mvr.operations.polars_api import prepare_task05_documents, scan_parquet
-from mvr.operations.promote import promote_file, validate_parquet
 from mvr.retrieval.object_search import build_object_filters
 
 
@@ -81,6 +77,12 @@ def _assert_repeatable(
 
 
 def test_rfdetr_large_real_cuda_data02_task05_smoke(tmp_path) -> None:
+    import polars as pl
+
+    from mvr.operations.consolidate import consolidate_to_parquet
+    from mvr.operations.polars_api import prepare_task05_documents, scan_parquet
+    from mvr.operations.promote import promote_file, validate_parquet
+
     checkpoint = Path(CHECKPOINT)
     source_mapping = Path(MAPPING)
     keyframe_root = source_mapping.parent

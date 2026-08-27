@@ -17,10 +17,24 @@ is about not discarding it rather than about producing anything new.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from mvr.indexing.validation import Task05AValidationError, validate_task05a_document
+
+
+def _make_image_path_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    features_root = tmp_path / "features"
+    features_root.mkdir()
+    mapping_csv = tmp_path / "ingest" / "keyframe_mapping.csv"
+    mapping_csv.parent.mkdir()
+    mapping_csv.write_text(
+        "keyframe_id,video_id,shot_id,frame_idx,timestamp,image_path\n"
+        "V1_S0001_K01,V1,1,10,0.4,keyframes/V1/V1_S0001_K01.jpg\n",
+        encoding="utf-8",
+    )
+    return features_root, mapping_csv
 
 
 def _document(**overrides):
@@ -67,11 +81,9 @@ def test_a_non_string_image_path_is_rejected() -> None:
 
 def test_the_pipeline_emits_the_image_path_from_the_mapping(tmp_path) -> None:
     """End-to-end through the real builder, not a hand-built document."""
-    from tests.unit.indexing.test_task05a import _make_features
-
     from mvr.indexing.task05a import build_index_documents
 
-    features_root, mapping_csv = _make_features(tmp_path)
+    features_root, mapping_csv = _make_image_path_fixture(tmp_path)
     result = build_index_documents(
         mapping_csv=mapping_csv,
         features_root=features_root,
