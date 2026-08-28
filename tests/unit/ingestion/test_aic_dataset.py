@@ -302,3 +302,77 @@ def test_a_root_with_neither_layout_resolves_nothing_rather_than_raising(tmp_pat
     assert registry.video_path("L21_V001") is None
     with pytest.raises(MissingFrameMappingError):
         registry.resolve_frame("L21_V001", "3")
+
+
+# -- per-keyframe object detections -------------------------------------------
+#
+# `run_qna_pipeline.py` built this path itself, hardcoded as
+# `<root>/objects/<video_id>/<NNN>.json`, so on the real download it resolved
+# nothing and every Q&A candidate reached the reasoner with no detections --
+# silently, because a missing objects file is a legitimate answer for the 814
+# of 873 videos whose detections were never downloaded.
+
+
+def test_finds_object_detections_in_the_raw_download_layout(tmp_path: Path) -> None:
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    directory = tmp_path / "objects-aic25-b1" / "objects" / "L22_V020"
+    directory.mkdir(parents=True)
+    (directory / "003.json").write_text("{}", encoding="utf-8")
+
+    found = AicDatasetRegistry(tmp_path).objects_path("L22_V020", "003")
+
+    assert found == directory / "003.json"
+
+
+def test_finds_object_detections_in_the_normalized_layout(tmp_path: Path) -> None:
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    directory = tmp_path / "objects" / "L22_V020"
+    directory.mkdir(parents=True)
+    (directory / "003.json").write_text("{}", encoding="utf-8")
+
+    found = AicDatasetRegistry(tmp_path).objects_path("L22_V020", "003")
+
+    assert found == directory / "003.json"
+
+
+def test_object_detections_are_matched_by_number_not_padding_width(tmp_path: Path) -> None:
+    """Same rule keyframe_path follows: the index stores "003", a caller may
+    hold "3", and the padding width is not promised anywhere."""
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    directory = tmp_path / "objects-aic25-b1" / "objects" / "L22_V020"
+    directory.mkdir(parents=True)
+    (directory / "003.json").write_text("{}", encoding="utf-8")
+
+    assert AicDatasetRegistry(tmp_path).objects_path("L22_V020", "3") is not None
+
+
+def test_a_video_whose_detections_were_never_downloaded_is_none(tmp_path: Path) -> None:
+    """59 of 873 videos have objects on disk. The other 814 must come back
+    None -- Q&A treats that as "no detections", which is the truth."""
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    (tmp_path / "objects-aic25-b1" / "objects" / "L22_V020").mkdir(parents=True)
+
+    assert AicDatasetRegistry(tmp_path).objects_path("L21_V003", "003") is None
+
+
+def test_a_shot_scoped_id_finds_no_file_instead_of_raising(tmp_path: Path) -> None:
+    """This repo's own ingestion produces ids like `L01_V001_S0002_K01`,
+    which no organizer asset is named after. These lookups already answer
+    "not here" with None, so a non-numeric reference is one more not-here --
+    raising would take down a whole Q&A run over one candidate.
+
+    `resolve_frame` still raises: inventing a frame_idx is dangerous in a
+    way that failing to find a JPEG is not.
+    """
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry, MissingFrameMappingError
+
+    registry = AicDatasetRegistry(tmp_path)
+
+    assert registry.keyframe_path("L01_V001", "L01_V001_S0002_K01") is None
+    assert registry.objects_path("L01_V001", "L01_V001_S0002_K01") is None
+    with pytest.raises(MissingFrameMappingError):
+        registry.resolve_frame("L01_V001", "L01_V001_S0002_K01")
