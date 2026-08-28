@@ -1307,6 +1307,25 @@ Verification:
 
 Final details: `docs/reviews/OCR_PRODUCTION_CHECKPOINT_REPLACEMENT_REPORT.md`.
 
+# INGEST-KF02 — keyframe-selection strategy pilot
+
+Status: COMPLETE; VERDICT `NEEDS_MORE_EVALUATION`
+
+- Froze one 342-shot PySceneDetect manifest for `L21_V001` and evaluated all
+  selectors against 32 manual visual temporal segments (30 high, 2 medium).
+- Midpoint, 12s/8s, 15s/5s, PE/MetaCLIP budget-matched diversity, two-second
+  grid sensitivity, and ten novelty variants all achieved 32/32 selection
+  recall. Midpoint used the fewest keyframes (342).
+- Fixed English MetaCLIP-2 retrieval gave 12s/8s the best pilot R@10/MRR
+  (0.84375 / 0.520468), a one-query advantage that is insufficient for a
+  corpus-wide default decision.
+- Real selector embeddings completed for 1,398 shared candidates: PE-Core-L
+  157.37s on CUDA and MetaCLIP-2 469.21s on CPU. No production semantics or
+  defaults changed; generated data remains ignored under
+  `artifacts/verification/ingest_kf02/`.
+- Focused tests: 53 passed. Final report:
+  `docs/reviews/INGEST_KEYFRAME_SELECTION_STRATEGY_EVAL.md`.
+
 If work is interrupted, read:
 
 ```text
@@ -1445,3 +1464,124 @@ Branch: `fix/rfdetr-production-pin` from `a284b00`
 - Full Batch1 and full object extraction were not run.
 
 Report: `docs/reviews/RFDETR_PRODUCTION_PIN_REPORT.md`.
+
+---
+
+# FIX — Resume local object and external OCR extraction safely
+
+Status: COMPLETE; PUSHED; PR OPEN
+
+Branch: `fix/local-sample-extraction-runtime` from `d9b65db` (post-PR #16 main)
+
+Commits:
+
+1. `67ccc98` — `fix: resume local object extraction safely`
+2. `34e7d64` — `fix: resume external OCR extraction safely`
+
+Completed:
+
+- Added `--resume-objects` flag to `scripts/run_feature_extraction.py`. Object
+  extraction now checks for existing identity-valid artifacts (matching
+  `keyframe_id`, `video_id`, `frame_id`, `frame_idx`, and staging detection
+  rows) before re-running RF-DETR inference.
+- Added `--skip-embeddings` flag to run only the object extraction provider.
+- Added `--resume` flag to both DeepSolo and PARSeq Docker workers. Each worker
+  skips processing when a valid, identity-matching output file already exists
+  (checked by `request_id`, `video_id`, `keyframe_id`, `source_frame_idx`,
+  and `image_path` for DeepSolo; equivalent fields for PARSeq).
+- Changed Docker mount strategy: workspace mounted read-only (`:ro`), temp dir
+  mounted separately at `/ocr-runtime` via `--mount type=bind`. Frame path
+  construction simplified to container-relative `/ocr-runtime/frames/...`
+  instead of fragile `workspace_root`-relative paths.
+- Frame extraction now skips already-extracted frames via a `missing_frames`
+  filter, avoiding redundant FFmpeg calls on resume.
+- No model, retrieval, fusion, or scoring behavior was changed.
+
+Verification:
+
+- Focused enrichment + OCR suite: 9 passed.
+- Full regression: **1,090 passed, 19 skipped, 0 failed** in 26.44s.
+- Python compilation (`compileall`): PASS for all 5 changed source files.
+- `git diff --check`: PASS.
+- Only 7 legitimate source/test files changed; no generated artifacts, model
+  weights, data, or secrets staged.
+
+Git:
+
+- Branch: `fix/local-sample-extraction-runtime`
+- Remote: `origin → https://github.com/Tobieeeeee/AIC26.git`
+- Push: COMPLETE
+- PR: CREATED — https://github.com/Tobieeeeee/AIC26/pull/17 (OPEN, not merged)
+
+Blockers:
+
+- None. Real extraction runs using resume are deferred to explicit approval.
+
+---
+
+# R2-GPU-RUNTIME — Cloudflare R2 sync + rented-GPU deployment stack
+
+Status: COMPLETE (code + tests); NOT PUSHED
+
+Branch: `feat/r2-gpu-runtime` (created from `fix/rfdetr-production-pin` HEAD)
+
+Completed:
+
+- Added `.env.example` documenting every environment variable group: R2
+  credentials/layout, local dataset, semantic backend, Milvus, Elasticsearch,
+  embedding provider checkpoints, RF-DETR, ASR, Q&A, HuggingFace offline,
+  and GPU compose settings.
+- Added `src/mvr/operations/r2_sync.py` — higher-level pull/push orchestration
+  reusing the existing `R2Client`, `BoundedCache`, and `r2_layout` modules. It
+  supports: pull videos by ID, pull any prefix, pull the whole corpus, pull the
+  dataset manifest, push staging artifacts, push consolidated metadata Parquet,
+  push provider embeddings, push indexes, and push reports — all under the
+  canonical `data/raw`, `data/corpus`, `data/staging` R2 object-key layout.
+- Added a `python -m mvr.cli r2` command group with `status`, `list`, `pull`,
+  and `push` subcommands, wired into the existing CLI dispatcher.
+- Added standalone runners `scripts/operations/r2_pull.py` and
+  `scripts/operations/r2_push.py` for automation/GPU-host use, both with
+  optional dry-run and local-root configuration.
+- Added `docker-compose.gpu.yml` — full serving stack (Milvus + etcd + MinIO,
+  Elasticsearch, FastAPI API) with health checks, volumes, and `.env` wiring.
+- Added `docker/gpu/Dockerfile` — GPU inference base image (CUDA 12.4) for
+  reproducible OCR/embedding/object extraction.
+- Added `docs/R2_DATA_MANAGEMENT.md` and `docs/GPU_DEPLOYMENT_RUNBOOK.md`
+  covering layout, CLI usage, local and rented-GPU workflows, and
+  troubleshooting.
+- Removed hardcoded local absolute example paths from 8 scripts
+  (`build_keyframe_mapping`, Q&A writers/finders, OCR throughput, Q&A retrieval,
+  Q&A pipeline, ground-truth verify) replacing them with portable
+  `<your-dataset-root>` / `<path-to-query-file>` placeholders.
+- No model weights, data, indexes, or credentials committed. R2/GPU runtime
+  artifacts remain ignored.
+
+Verification:
+
+- `python -m pytest tests/unit/operations/test_r2_sync.py`: 9 passed (new).
+- Focused R2 + API + client suite: 57 passed.
+- Full suite: 1128 passed, 15 skipped, 4 failed.
+- The 4 failures are pre-existing and unrelated to this branch:
+  1. `test_audit_package_cli_ingest_defaults` and
+     `test_audit_run_ingestion_script_defaults` assert the legacy
+     `pyscenedetect` default, but the frozen canonical default is
+     `transnetv2`.
+  2. `test_objects_dispatches_one_detector_call_per_keyframe` asserts a
+     `model_family` attribute that `Detector` exposes as `model_name`.
+  3. `test_the_pipeline_emits_the_image_path_from_the_mapping` fails with
+     `ModuleNotFoundError: No module named tests.unit` (collection-path issue).
+- `python -m mvr.cli r2 --help` and `r2 pull/push --help`: PASS.
+- Python compilation of `cli.py`, `r2_sync.py`, `r2_pull.py`, `r2_push.py`: PASS.
+- No generated artifacts, model weights, or secrets staged.
+
+Git:
+
+- Branch: `feat/r2-gpu-runtime`
+- Commit: `feat: add R2 object-storage sync and GPU deployment stack`
+- Push: NOT YET (pending user approval)
+
+Remaining:
+
+- Full real R2 pull/push against the live bucket (requires credentials).
+- Real GPU extraction run (requires GPU + model weights).
+- Building the four Docker images from the new compose/Dockerfiles.
