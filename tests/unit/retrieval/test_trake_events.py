@@ -6,6 +6,7 @@ from mvr.retrieval.trake_events import (
     TrakeEventQuery,
     TrakeGapConstraint,
     TrakeQuery,
+    parse_organizer_trake_query,
     translate_gap_phrase,
 )
 
@@ -140,3 +141,104 @@ def test_realistic_four_event_high_jump_query_constructs_successfully() -> None:
     assert (query.gaps[0].min_gap_seconds, query.gaps[0].max_gap_seconds) == (0.0, 60.0)
     assert (query.gaps[1].min_gap_seconds, query.gaps[1].max_gap_seconds) == (0.0, 10.0)
     assert (query.gaps[2].min_gap_seconds, query.gaps[2].max_gap_seconds) == DEFAULT_GAP_SECONDS
+
+
+# -- parse_organizer_trake_query ----------------------------------------------
+#
+# The organizer hands out TRAKE as a `.txt` whose events are already numbered
+# E1..Ek; `run_trake_pipeline.py` reads JSON. Nothing in the repo bridged the
+# two, so every TRAKE query had to be retyped by hand mid-competition.
+
+
+REAL_P1_16 = (
+    "Đoạn video bắt đầu bằng ảnh cận đầu một con lân trắng, mũi đỏ, "
+    "bên cạnh lá cờ trắng viền đỏ.\n"
+    "E1 Khoảnh khắc đầu tiên xuất hiện đầy đủ hai con rồng vàng đang xoay vòng.\n"
+    "E2 Khoảnh khắc đầu tiên con lân hoàn tất cú xoay người trên các thanh trụ.\n"
+    "E3 Khoảnh khắc đầu tiên dùi chạm vào kẻng đồng múa lân.\n"
+)
+
+
+def test_parses_each_numbered_event_without_its_marker() -> None:
+    query = parse_organizer_trake_query(REAL_P1_16)
+
+    assert query.events == (
+        "Khoảnh khắc đầu tiên xuất hiện đầy đủ hai con rồng vàng đang xoay vòng.",
+        "Khoảnh khắc đầu tiên con lân hoàn tất cú xoay người trên các thanh trụ.",
+        "Khoảnh khắc đầu tiên dùi chạm vào kẻng đồng múa lân.",
+    )
+
+
+def test_the_scene_setting_before_e1_is_not_an_event() -> None:
+    """It describes the video, not a moment to locate. Scoring an event
+    that has no timestamp would put a wrong frame in the chain."""
+    query = parse_organizer_trake_query(REAL_P1_16)
+
+    assert query.preamble.startswith("Đoạn video bắt đầu bằng")
+    assert all("Đoạn video bắt đầu" not in event for event in query.events)
+
+
+def test_produces_exactly_one_fewer_gap_than_events() -> None:
+    """TrakeQuery rejects any other count, and run_trake_pipeline rejects it
+    again when reading the file."""
+    query = parse_organizer_trake_query(REAL_P1_16)
+
+    assert len(query.gap_phrases) == len(query.events) - 1
+
+
+def test_a_wrapped_event_continues_the_event_it_follows() -> None:
+    """A line with no marker is far more likely to be the previous event
+    running on than a gap clue, and losing half an event's description
+    costs retrieval much more than a default gap window does."""
+    query = parse_organizer_trake_query(
+        "E1 Người đàn ông mở cửa\nvà bước vào phòng.\nE2 Đèn bật sáng.\n"
+    )
+
+    assert query.events[0] == "Người đàn ông mở cửa và bước vào phòng."
+
+
+def test_a_leading_time_phrase_becomes_the_gap_and_leaves_the_event_text() -> None:
+    """`Ngay sau đó` between two events is a timing constraint (0-10s), not
+    part of what the frame looks like."""
+    query = parse_organizer_trake_query(
+        "E1 Con lân xoay trên trụ.\nE2 Ngay sau đó, con lân ngoạm quả bí.\n"
+    )
+
+    assert query.gap_phrases == ("ngay sau đó",)
+    assert query.events[1] == "con lân ngoạm quả bí."
+
+
+def test_a_time_word_inside_a_sentence_is_not_read_as_a_gap() -> None:
+    """`rồi` is an ordinary Vietnamese word. Matching it mid-sentence would
+    silently narrow the gap window to 60s and could drop the true chain."""
+    query = parse_organizer_trake_query(
+        "E1 Người đàn ông mở cửa.\nE2 Con lân nhảy lên rồi tiếp đất trên trụ.\n"
+    )
+
+    assert query.gap_phrases == ("",)
+    assert query.events[1] == "Con lân nhảy lên rồi tiếp đất trên trụ."
+
+
+def test_accepts_the_punctuation_variants_a_marker_may_carry() -> None:
+    query = parse_organizer_trake_query("E1. Cửa mở.\nE2: Đèn sáng.\nE 3) Người bước ra.\n")
+
+    assert query.events == ("Cửa mở.", "Đèn sáng.", "Người bước ra.")
+
+
+def test_refuses_a_query_with_a_single_event() -> None:
+    """One event is plain KIS; TrakeQuery would reject it later, after the
+    operator had already spent the run."""
+    with pytest.raises(ValueError, match="at least 2"):
+        parse_organizer_trake_query("E1 Chỉ có một sự kiện.\n")
+
+
+def test_refuses_events_numbered_out_of_sequence() -> None:
+    """E1, E3 means E2 was lost -- to a typo or to a parse this code got
+    wrong. Chaining the two survivors would answer a different query."""
+    with pytest.raises(ValueError, match="sequential"):
+        parse_organizer_trake_query("E1 Cửa mở.\nE3 Đèn sáng.\n")
+
+
+def test_refuses_a_text_with_no_markers_at_all() -> None:
+    with pytest.raises(ValueError, match="no numbered events"):
+        parse_organizer_trake_query("Một đoạn mô tả không có sự kiện nào được đánh số.")
