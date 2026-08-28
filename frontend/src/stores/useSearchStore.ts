@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { searchApi } from '../api/searchApi';
 import type { KeyframeResult, TaskMode, ModelEngine } from '../types/competition';
 
 const initialMockResults: KeyframeResult[] = [
@@ -95,12 +96,62 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
   selectResult: (id) => set({ selectedResultId: id }),
   setVideoModalOpen: (open) => set({ isVideoModalOpen: open }),
 
-  executeSearch: () => {
+  executeSearch: async () => {
+    const state = get();
+    const query = state.query.trim();
+    if (!query) return;
     set({ isLoading: true });
-    setTimeout(() => {
-      const current = [...get().results];
-      set({ results: current.reverse(), isLoading: false });
-    }, 300);
+    try {
+      const trakeEvents =
+        state.taskMode === 'TRAKE'
+          ? [query, state.scene2Query.trim()].filter(Boolean)
+          : undefined;
+      const requestTaskMode =
+        state.taskMode === 'TRAKE' && (!trakeEvents || trakeEvents.length < 2)
+          ? 'KIS'
+          : state.taskMode;
+      const results = await searchApi.search({
+        task_mode: requestTaskMode,
+        query,
+        model_engine: state.modelEngine,
+        sim_reorder: state.simReorder,
+        spatial_filter: {
+          enabled: state.scene1Spatial.enabled,
+          logic: state.scene1Spatial.logic,
+          objects: state.scene1Spatial.selectedObjects,
+          colors: state.scene1Spatial.selectedColors,
+        },
+        visual_query: state.visualQuery.imageUrl
+          ? { image_url: state.visualQuery.imageUrl }
+          : undefined,
+        trake_events: requestTaskMode === 'TRAKE' ? trakeEvents : undefined,
+        gap_phrases: requestTaskMode === 'TRAKE' && trakeEvents && trakeEvents.length > 1
+          ? Array(trakeEvents.length - 1).fill('')
+          : undefined,
+        top_k: 100,
+      });
+      set({
+        results,
+        selectedResultId: results[0]?.id || '',
+        isLoading: false,
+      });
+    } catch (error) {
+      console.error('Search failed:', error);
+      set({ isLoading: false });
+      const detail =
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof error.response === 'object' &&
+        error.response !== null &&
+        'data' in error.response &&
+        typeof error.response.data === 'object' &&
+        error.response.data !== null &&
+        'detail' in error.response.data
+          ? String(error.response.data.detail)
+          : 'Kiểm tra backend /health và console.';
+      alert(`Không gọi được backend search. ${detail}`);
+    }
   },
 
   runMockSearch: () => {

@@ -16,6 +16,10 @@ interface SearchPayload {
     image_url: string;
   };
   top_k?: number;
+  question?: string;
+  event_description?: string;
+  trake_events?: string[];
+  gap_phrases?: string[];
 }
 
 interface SearchResponse {
@@ -24,12 +28,23 @@ interface SearchResponse {
   results: KeyframeResult[];
 }
 
+const apiOrigin = new URL(apiClient.defaults.baseURL || window.location.origin).origin;
+
+function resolveAssetUrl(value: string): string {
+  if (!value || /^https?:\/\//i.test(value)) return value;
+  return new URL(value, apiOrigin).toString();
+}
+
 export const searchApi = {
   // Gửi request tìm kiếm lên FastAPI backend
   search: async (payload: SearchPayload): Promise<KeyframeResult[]> => {
     try {
       const response = await apiClient.post<SearchResponse>('/search', payload);
-      return response.data.results || [];
+      return (response.data.results || []).map((result) => ({
+        ...result,
+        thumbnail_url: resolveAssetUrl(result.thumbnail_url),
+        video_url: resolveAssetUrl(result.video_url),
+      }));
     } catch (error) {
       console.error('API Search Error, fallback to mock/empty:', error);
       throw error;
