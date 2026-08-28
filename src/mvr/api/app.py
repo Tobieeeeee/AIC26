@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from ..enrichment.qna_answer import AnswerReasoner, AnswerReasonerUnavailable, HuggingFaceCausalLmBackend
@@ -40,6 +41,11 @@ from .schemas import (
     TrakeChainHit,
     TrakeSearchRequest,
     TrakeSearchResponse,
+    UiKeyframeResult,
+    UiSearchRequest,
+    UiSearchResponse,
+    UiSubmitRequest,
+    UiSubmitResponse,
 )
 
 
@@ -570,12 +576,83 @@ def _semantic_status(service: Any | None) -> SemanticRuntimeStatus:
     )
 
 
+def _format_timestamp(seconds: float | None) -> str:
+    if seconds is None:
+        return "00:00:00"
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _frame_asset_urls(
+    *,
+    video_id: str,
+    frame_id: int,
+    keyframe_id: str | None,
+    image_path: str | None,
+    keyframe_dir: Path | None,
+    video_dir: Path | None,
+) -> tuple[str, str]:
+    thumbnail = _servable_keyframe_url(image_path, keyframe_dir)
+    if thumbnail is None and image_path and str(image_path).startswith("/keyframes/"):
+        thumbnail = str(image_path)
+    if thumbnail is None and keyframe_id:
+        keyframe_name = keyframe_id if Path(keyframe_id).suffix else f"{keyframe_id}.jpg"
+        thumbnail = f"/keyframes/{video_id}/{keyframe_name}"
+    if thumbnail is None:
+        thumbnail = f"/keyframes/{video_id}/{frame_id}.jpg"
+
+    video_url = f"/videos/{video_id}.mp4" if video_dir is not None else ""
+    return thumbnail, video_url
+
+
+def _ui_result(
+    *,
+    rank: int,
+    video_id: str,
+    frame_id: int,
+    score: float,
+    timestamp: float | None,
+    keyframe_id: str | None,
+    image_path: str | None,
+    keyframe_dir: Path | None,
+    video_dir: Path | None,
+    answer: str | None = None,
+    objects: list[str] | None = None,
+    frames: list[int | None] | None = None,
+) -> UiKeyframeResult:
+    thumbnail_url, video_url = _frame_asset_urls(
+        video_id=video_id,
+        frame_id=frame_id,
+        keyframe_id=keyframe_id,
+        image_path=image_path,
+        keyframe_dir=keyframe_dir,
+        video_dir=video_dir,
+    )
+    timestamp_sec = float(timestamp if timestamp is not None else 0.0)
+    return UiKeyframeResult(
+        id=f"{video_id}:{frame_id}:{rank}",
+        video_id=video_id,
+        frame_id=frame_id,
+        timestamp=_format_timestamp(timestamp),
+        timestamp_sec=timestamp_sec,
+        thumbnail_url=thumbnail_url,
+        video_url=video_url,
+        score=score,
+        objects=objects or [],
+        answer=answer,
+        frames=frames,
+    )
+
+
 def create_app(
     *,
     semantic_service: Any = _UNSET,
     multimodal_service: Any = _UNSET,
     elasticsearch_configured: bool | None = None,
     keyframe_dir: Path | None | object = _UNSET,
+    video_dir: Path | None | object = _UNSET,
     kis_pipeline_resolver: Any = _UNSET,
     kis_aic_registry: Any = _UNSET,
     qna_answer_reasoner: Any = _UNSET,
@@ -596,6 +673,9 @@ def create_app(
     if keyframe_dir is _UNSET:
         raw_keyframes = os.environ.get("MVR_KEYFRAME_DIR", "").strip()
         keyframe_dir = Path(raw_keyframes).resolve() if raw_keyframes else None
+    if video_dir is _UNSET:
+        raw_videos = os.environ.get("MVR_VIDEO_DIR", "").strip()
+        video_dir = Path(raw_videos).resolve() if raw_videos else None
     if kis_pipeline_resolver is _UNSET:
         kis_pipeline_resolver = _default_kis_pipeline_resolver()
     if kis_aic_registry is _UNSET:
@@ -620,11 +700,27 @@ def create_app(
         description="Serving layer for the reused semantic and multimodal baseline.",
         version="0.1.0",
     )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     if isinstance(keyframe_dir, Path) and keyframe_dir.is_dir():
         application.mount(
             "/keyframes",
             StaticFiles(directory=keyframe_dir),
             name="keyframes",
+        )
+    if isinstance(video_dir, Path) and video_dir.is_dir():
+        application.mount(
+            "/videos",
+            StaticFiles(directory=video_dir),
+            name="videos",
         )
 
     @application.get(
@@ -650,6 +746,161 @@ def create_app(
                 available=es_available,
                 documents=documents,
             ),
+        )
+
+    @application.post("/api/v1/search", response_model=UiSearchResponse)
+    def ui_search(request: UiSearchRequest) -> UiSearchResponse:
+        served_keyframes = keyframe_dir if isinstance(keyframe_dir, Path) else None
+        served_videos = video_dir if isinstance(video_dir, Path) else None
+
+        if request.task_mode == "Q&A":
+            question = (request.question or "").strip() or request.query
+            event_description = (request.event_description or request.query).strip()
+            try:
+                candidates = search_qna(
+                    event_description,
+                    question,
+                    top_k=request.top_k,
+                    semantic_service=semantic_service,
+                    multimodal_service=multimodal_service,
+                    pipeline_resolver=kis_pipeline_resolver,
+                    aic_registry=kis_aic_registry,
+                    answer_reasoner=qna_answer_reasoner,
+                )
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            results = [
+                _ui_result(
+                    rank=candidate.rank,
+                    video_id=candidate.video_id,
+                    frame_id=candidate.frame_id,
+                    score=candidate.score,
+                    timestamp=candidate.timestamp,
+                    keyframe_id=candidate.keyframe_id,
+                    image_path=candidate.image_path,
+                    keyframe_dir=served_keyframes,
+                    video_dir=served_videos,
+                    answer=candidate.answer,
+                )
+                for candidate in candidates
+            ]
+            return UiSearchResponse(total_results=len(results), results=results)
+
+        if request.task_mode == "TRAKE":
+            event_texts = [
+                event.strip()
+                for event in (request.trake_events or [request.query, request.event_description or ""])
+                if event and event.strip()
+            ]
+            if len(event_texts) < 2:
+                event_texts = []
+            else:
+                gap_phrases = request.gap_phrases
+                if gap_phrases is None:
+                    gap_phrases = [""] * (len(event_texts) - 1)
+                if len(gap_phrases) != len(event_texts) - 1:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"expected {len(event_texts) - 1} gap_phrases for "
+                            f"{len(event_texts)} TRAKE events"
+                        ),
+                    )
+                try:
+                    query = TrakeQuery(
+                        events=tuple(
+                            TrakeEventQuery(index, text)
+                            for index, text in enumerate(event_texts, start=1)
+                        ),
+                        gaps=tuple(translate_gap_phrase(phrase) for phrase in gap_phrases),
+                    )
+                    trake_semantic_service = _resolve_trake_semantic_service(semantic_service)
+                    chains = search_trake(
+                        query,
+                        alignment_strategy=_build_trake_alignment_strategy(
+                            TRAKE_DEFAULT_ALIGNMENT_STRATEGY
+                        ),
+                        semantic_service=trake_semantic_service,
+                        aic_registry=kis_aic_registry,
+                        top_k=request.top_k,
+                        pipeline_resolver=kis_pipeline_resolver,
+                        query_translator=trake_query_translator,
+                    )
+                except RuntimeError as exc:
+                    raise HTTPException(status_code=503, detail=str(exc)) from exc
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+                results: list[UiKeyframeResult] = []
+                for rank, chain in enumerate(chains, start=1):
+                    first_frame = next((frame for frame in chain.frames if frame is not None), 0)
+                    results.append(
+                        _ui_result(
+                            rank=rank,
+                            video_id=chain.video_id,
+                            frame_id=int(first_frame or 0),
+                            score=chain.score,
+                            timestamp=None,
+                            keyframe_id=None,
+                            image_path=None,
+                            keyframe_dir=served_keyframes,
+                            video_dir=served_videos,
+                            frames=list(chain.frames),
+                        )
+                    )
+                return UiSearchResponse(total_results=len(results), results=results)
+
+        try:
+            candidates = search_kis(
+                request.query,
+                top_k=request.top_k,
+                semantic_service=semantic_service,
+                multimodal_service=multimodal_service,
+                pipeline_resolver=kis_pipeline_resolver,
+                aic_registry=kis_aic_registry,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        results = [
+            _ui_result(
+                rank=candidate.rank,
+                video_id=candidate.video_id,
+                frame_id=candidate.frame_id,
+                score=candidate.score,
+                timestamp=candidate.timestamp,
+                keyframe_id=candidate.keyframe_id,
+                image_path=None,
+                keyframe_dir=served_keyframes,
+                video_dir=served_videos,
+            )
+            for candidate in candidates
+        ]
+        return UiSearchResponse(total_results=len(results), results=results)
+
+    @application.post("/api/v1/submit", response_model=UiSubmitResponse)
+    def ui_submit(request: UiSubmitRequest) -> UiSubmitResponse:
+        if request.task_mode == "Q&A":
+            lines = [
+                f'{item.video_id},{item.frame_id},"{(item.answer or "").replace(chr(34), chr(34) + chr(34))}"'
+                for item in request.items
+            ]
+        elif request.task_mode == "TRAKE":
+            frames = ",".join(str(item.frame_id) for item in request.items)
+            video_id = request.items[0].video_id if request.items else ""
+            lines = [f"{video_id},{frames}" if frames else video_id]
+        else:
+            lines = [f"{item.video_id},{item.frame_id}" for item in request.items]
+        return UiSubmitResponse(
+            query_id=request.query_id,
+            task_mode=request.task_mode,
+            row_count=len(request.items),
+            csv_preview="\n".join(lines),
         )
 
     @application.post("/search/semantic", response_model=SearchResponse)
