@@ -941,6 +941,20 @@ def _run_r2(values: dict) -> None:
             return
         raise SystemExit("r2 push requires one of --staging/--parquet/--embeddings/--index/--report")
 
+def _add_worker_parser(subparsers: "argparse._SubParsersAction") -> None:
+    """Add the `worker` command group (DATA-03 prefetch orchestration).
+
+    The worker CLI owns its own subcommand parser (run/compare/status), so we
+    capture everything after `worker` and hand it off intact.
+    """
+    parser = subparsers.add_parser(
+        "worker",
+        help="DATA-03 worker prefetch orchestration (run / compare / status)",
+    )
+    parser.add_argument("worker_args", nargs=argparse.REMAINDER)
+    parser.set_defaults(command="worker")
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m mvr.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -961,8 +975,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     _add_milvus_parser(subparsers)
     # R2 sync commands
     _add_r2_parser(subparsers)
+    # DATA-03 worker prefetch commands
+    _add_worker_parser(subparsers)
     values = vars(parser.parse_args(argv))
     command = values.pop("command")
+    if command == "worker":
+        from .worker.cli import main as worker_main
+        raise SystemExit(worker_main(values.pop("worker_args")))
     if command == "ingest":
         values["input_path"] = values.pop("input")
         values["output_root"] = values.pop("output")
