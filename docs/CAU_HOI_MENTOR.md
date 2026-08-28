@@ -65,7 +65,9 @@ Và con số đáng giá nhất: trong 15 câu tìm ra đúng video, **L25_V041 
 
 > Kiến trúc đề xuất của đội có ba tầng: **FAISS** (vector), **Elasticsearch** (BM25), và **R2** làm shared persistent storage, cộng Parquet cho metadata.
 >
-> Bọn em đang vướng đúng vấn đề R2 định giải: index 177.321 vector và file `keyframe_mapping.csv` **chỉ tồn tại trên máy một người**, đồng đội clone repo về là không chạy được gì. Nhưng R2 tốn tiền và tốn công.
+> Bọn em đang vướng đúng vấn đề R2 định giải: index 177.321 vector và file `keyframe_mapping.csv` **chỉ tồn tại trên máy một người**. Nhưng R2 tốn tiền và tốn công.
+>
+> Cập nhật 28/08: bọn em vừa sửa được một nửa vấn đề **mà R2 không giải nổi**. Index cũ nhúng đường dẫn tuyệt đối `E:\AIC26_data\...` vào từng dòng metadata, nên copy nguyên khối sang máy khác thì nó nạp được mà **không mở nổi một tấm ảnh nào** — đường dẫn hỏng nằm *bên trong* file mà R2 sẽ chuyển. Giờ đường dẫn lưu tương đối cộng một gốc cấu hình được, đã dựng lại và kiểm chứng: file FAISS giống bản cũ từng byte, điểm vẫn đúng 0,5083. Nửa còn lại — **đưa 363 MB đó tới máy người khác** — vẫn là việc của R2.
 >
 > Hỏi:
 >
