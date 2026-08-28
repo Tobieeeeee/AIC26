@@ -12,6 +12,7 @@ htmlcov/
 .venv/
 venv/
 env/
+.codex_test_deps/
 
 # IDE / OS
 .vscode/

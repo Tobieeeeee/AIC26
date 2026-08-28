@@ -400,6 +400,98 @@ def test_kis_search_returns_ranked_response_contract() -> None:
     }
 
 
+def test_ui_search_adapts_kis_results_for_frontend_contract(tmp_path) -> None:
+    keyframe_dir = tmp_path / "keyframes"
+    video_dir = tmp_path / "videos"
+    (keyframe_dir / "video-1").mkdir(parents=True)
+    video_dir.mkdir()
+    (keyframe_dir / "video-1" / "frame-high.jpg").write_bytes(b"jpeg")
+    (video_dir / "video-1.mp4").write_bytes(b"mp4")
+
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=FakeMultimodalService(),
+            kis_pipeline_resolver=_resolver({"frame-high": 261, "frame-low": 45}),
+            keyframe_dir=keyframe_dir,
+            video_dir=video_dir,
+        )
+    )
+
+    response = client.post(
+        "/api/v1/search",
+        json={
+            "task_mode": "KIS",
+            "query": "a cyclist",
+            "model_engine": "use all",
+            "sim_reorder": True,
+            "top_k": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["total_results"] == 1
+    assert body["results"][0] == {
+        "id": "video-1:261:1",
+        "video_id": "video-1",
+        "frame_id": 261,
+        "timestamp": "00:00:01",
+        "timestamp_sec": 1.25,
+        "thumbnail_url": "/keyframes/video-1/frame-high.jpg",
+        "video_url": "/videos/video-1.mp4",
+        "score": 0.0325,
+        "objects": [],
+        "answer": None,
+        "frames": None,
+    }
+    assert client.get("/keyframes/video-1/frame-high.jpg").status_code == 200
+    assert client.get("/videos/video-1.mp4").status_code == 200
+
+
+def test_ui_submit_previews_official_submission_rows() -> None:
+    client = _client(multimodal=False)
+
+    kis = client.post(
+        "/api/v1/submit",
+        json={
+            "query_id": "query-1-kis",
+            "task_mode": "KIS",
+            "items": [{"video_id": "L01_V028", "frame_id": 25300}],
+        },
+    )
+    qna = client.post(
+        "/api/v1/submit",
+        json={
+            "query_id": "query-2-qa",
+            "task_mode": "Q&A",
+            "items": [
+                {"video_id": "L01_V028", "frame_id": 3450, "answer": 'Năm "người"'}
+            ],
+        },
+    )
+    trake = client.post(
+        "/api/v1/submit",
+        json={
+            "query_id": "query-3-trake",
+            "task_mode": "TRAKE",
+            "items": [
+                {"video_id": "L10_V001", "frame_id": 1200},
+                {"video_id": "L10_V001", "frame_id": 1850},
+                {"video_id": "L10_V001", "frame_id": 2100},
+            ],
+        },
+    )
+
+    assert kis.status_code == 200
+    assert kis.json()["csv_preview"] == "L01_V028,25300"
+    assert qna.status_code == 200
+    assert qna.json()["csv_preview"] == 'L01_V028,3450,"Năm ""người"""'
+    assert trake.status_code == 200
+    assert trake.json()["csv_preview"] == "L10_V001,1200,1850,2100"
+
+
 def test_kis_search_rejects_blank_query_and_invalid_top_k() -> None:
     resolver = _resolver({"frame-high": 261})
     client = TestClient(
