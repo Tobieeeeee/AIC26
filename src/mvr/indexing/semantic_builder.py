@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .faiss_index import FaissIndex
+from .faiss_index import FaissIndex, mapping_fingerprint, relative_image_path
 
 
 def build_semantic_index(
@@ -32,12 +32,15 @@ def build_semantic_index(
         encoder.encode_images(image_paths, batch_size=batch_size),
         dtype=np.float32,
     )
+    # Stored relative to the ingestion root, which the manifest carries, so
+    # the index still resolves its images on a machine that mounts the
+    # corpus somewhere else. Absolutising here pinned it to one disk.
     metadata = [
         {
             "frame_id": row["keyframe_id"],
             "video_id": row["video_id"],
             "timestamp": float(row["timestamp"]),
-            "image_path": str(image_path.resolve()),
+            "image_path": relative_image_path(image_path, ingestion_root),
         }
         for row, image_path in zip(rows, image_paths)
     ]
@@ -47,6 +50,10 @@ def build_semantic_index(
         manifest={
             "embedding_model": encoder.model_name,
             "pretrained": encoder.pretrained,
+            "image_root": ingestion_root,
+            # The index holds frame_id, never the competition frame_idx, so
+            # every submission row is resolved back through this CSV.
+            **mapping_fingerprint(mapping_path),
         },
     )
     output_root.mkdir(parents=True, exist_ok=True)

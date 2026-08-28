@@ -159,3 +159,59 @@ def test_elasticsearch_semantic_validates_candidate_and_vector_contracts() -> No
 
     with pytest.raises(ValueError, match="L2-normalized"):
         ElasticsearchSemanticRetriever(UnnormalizedEncoder(), Client()).search("query")
+
+
+def _portable_index(image_root: str):
+    """An index built the portable way: paths relative, root in manifest."""
+    from mvr.indexing.faiss_index import FaissIndex
+
+    return FaissIndex.build(
+        np.array([[1.0, 0.0]], dtype=np.float32),
+        [
+            {
+                "frame_id": "001",
+                "video_id": "L21_V001",
+                "timestamp": 0.4,
+                "image_path": "Keyframes_L21/keyframes/L21_V001/001.jpg",
+            }
+        ],
+        manifest={"image_root": image_root},
+    )
+
+
+def test_a_relative_hit_path_is_joined_to_the_root_the_index_recorded() -> None:
+    """Every consumer reaches image_path through this class, so resolving
+    it anywhere else would mean fixing the same thing three times."""
+    from pathlib import Path
+
+    from mvr.retrieval.semantic import SemanticRetriever
+
+    pytest.importorskip("faiss")
+
+    result = SemanticRetriever(
+        StubTextEncoder(), _portable_index("E:/AIC26_data")
+    ).search("motorcycle", top_k=1)[0]
+
+    assert Path(result.image_path) == Path(
+        "E:/AIC26_data/Keyframes_L21/keyframes/L21_V001/001.jpg"
+    )
+
+
+def test_an_image_root_override_reaches_every_result() -> None:
+    """The point of the whole exercise: one index, read on a machine that
+    mounts the corpus somewhere else."""
+    from pathlib import Path
+
+    from mvr.retrieval.semantic import SemanticRetriever
+
+    pytest.importorskip("faiss")
+
+    result = SemanticRetriever(
+        StubTextEncoder(),
+        _portable_index("E:/AIC26_data"),
+        image_root="/kaggle/input/aic26",
+    ).search("motorcycle", top_k=1)[0]
+
+    assert Path(result.image_path) == Path(
+        "/kaggle/input/aic26/Keyframes_L21/keyframes/L21_V001/001.jpg"
+    )
