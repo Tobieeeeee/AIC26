@@ -84,6 +84,12 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
              "default is a single video-level key (worker uses keyframe-level reuse only when this is provided)",
     )
     p.add_argument(
+        "--video-key-template", default=None,
+        help="Template for the video key, with {vid} placeholder. "
+             "e.g. 'Videos_L21_a/video/{vid}.mp4'. "
+             "If omitted, uses the canonical data/raw layout.",
+    )
+    p.add_argument(
         "--run-mode", choices=["prefetch", "sequential"], default="prefetch"
     )
     p.add_argument("--prefetch", type=_positive_int, default=DEFAULT_PREFETCH_AHEAD,
@@ -111,6 +117,11 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
         "--output", type=Path, default=None,
         help="Optional path to write the run JSON",
     )
+    p.add_argument(
+        "--per-stage-sleep", type=float, default=0.05,
+        help="Seconds the dry-run stages spend simulating work (default 0.05). "
+             "Increase to make overlap visible; set 0 for transfer-only timing.",
+    )
     p.set_defaults(command="run")
 
 
@@ -124,6 +135,12 @@ def _add_compare_parser(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--collection", required=True)
     p.add_argument(
         "--keyframe-keys-file", type=Path, default=None,
+    )
+    p.add_argument(
+        "--video-key-template", default=None,
+        help="Template for the video key, with {vid} placeholder. "
+             "e.g. 'Videos_L21_a/video/{vid}.mp4'. "
+             "If omitted, uses the canonical data/raw layout.",
     )
     p.add_argument("--prefetch", type=_positive_int, default=DEFAULT_PREFETCH_AHEAD)
     p.add_argument("--local-root", default=".")
@@ -223,6 +240,7 @@ def _build_items(
     batch: str,
     collection: str,
     keyframe_keys_file: Path | None,
+    video_key_template: str | None,
 ) -> list[WorkItem]:
     kf_map: dict[str, list[str]] = {}
     if keyframe_keys_file is not None and keyframe_keys_file.is_file():
@@ -230,7 +248,10 @@ def _build_items(
         kf_map = {str(k): list(v) for k, v in payload.items()}
     items: list[WorkItem] = []
     for vid in video_ids:
-        video_key = r2_layout.raw_video_key(batch, collection, vid)
+        if video_key_template:
+            video_key = video_key_template.format(vid=vid)
+        else:
+            video_key = r2_layout.raw_video_key(batch, collection, vid)
         kf_keys = kf_map.get(vid, [])
         keys = [video_key, *kf_keys]
         items.append(
@@ -325,19 +346,25 @@ async def _do_run(args: argparse.Namespace) -> RunResult:
     video_ids = [v.strip() for v in args.videos.split(",") if v.strip()]
     if not video_ids:
         raise SystemExit("--videos must list at least one video id")
-    items = _build_items(video_ids, args.batch, args.collection,
-                          args.keyframe_keys_file)
+    items = _build_items(
+        video_ids, args.batch, args.collection,
+        args.keyframe_keys_file, args.video_key_template,
+    )
     working_set = WorkingSet(
         max_bytes=(args.working_set_mb or None) or None
     )
     fetcher, cache = _build_fetcher(
         Path(args.local_root), args.cache_dir, args.cache_max_gb,
     )
+    # Read per-stage sleep so real canary can run with realistic per-stage cost
+    # without invoking the model code (the orchestrator proves transfer overlap
+    # either way; the dry-run stages in the canary add a tunable CPU cost).
+    per_stage_sleep = float(getattr(args, "per_stage_sleep", 0.05) or 0.0)
     stages = [
-        StageFactory("ingest", "video", sleep_seconds=0.05).make(),
-        StageFactory("ocr", "video", sleep_seconds=0.05).make(),
-        StageFactory("asr", "video", sleep_seconds=0.05).make(),
-        StageFactory("objects", "keyframe", sleep_seconds=0.05).make(),
+        StageFactory("ingest", "video", sleep_seconds=per_stage_sleep).make(),
+        StageFactory("ocr", "video", sleep_seconds=per_stage_sleep).make(),
+        StageFactory("asr", "video", sleep_seconds=per_stage_sleep).make(),
+        StageFactory("objects", "keyframe", sleep_seconds=per_stage_sleep).make(),
     ]
     resume = _read_resume(args.resume_completed_file)
     if args.run_mode == "prefetch":
@@ -369,8 +396,10 @@ def _read_resume(path: Path | None) -> set[str]:
 
 async def _do_compare(args: argparse.Namespace) -> dict[str, Any]:
     video_ids = [v.strip() for v in args.videos.split(",") if v.strip()]
-    items = _build_items(video_ids, args.batch, args.collection,
-                          args.keyframe_keys_file)
+    items = _build_items(
+        video_ids, args.batch, args.collection,
+        args.keyframe_keys_file, getattr(args, "video_key_template", None),
+    )
     ws_budget = (args.working_set_mb or None) or None
 
     def _make_stages() -> list[Stage]:
