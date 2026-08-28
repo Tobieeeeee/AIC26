@@ -202,11 +202,13 @@ def main() -> None:
         print("[retrieval] semantic only (pass --elasticsearch-url to add BM25)")
 
     aic_registry = AicDatasetRegistry(args.dataset_root)
-    objects_root = args.dataset_root / "objects"
-
-    def objects_path_resolver(video_id: str, keyframe_id: str) -> Path | None:
-        path = objects_root / video_id / f"{keyframe_id}.json"
-        return path if path.is_file() else None
+    # Through the registry rather than joining `<root>/objects/` here: the
+    # organizer ships this as `<root>/objects-aic25-b1/objects/`, so the
+    # hardcoded join resolved nothing on a real download and every candidate
+    # reached the reasoner with no detections -- silently, because a missing
+    # objects file is legitimate for the 814 of 873 videos whose detections
+    # were never downloaded.
+    objects_path_resolver = aic_registry.objects_path
 
     # Temporally-expanded neighbours are not retrieval hits, so the index
     # supplied no image for them. Without this the neighbour reaches the
