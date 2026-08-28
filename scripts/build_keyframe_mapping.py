@@ -29,7 +29,7 @@ both layouts are searched:
 Example:
 
     python scripts/build_keyframe_mapping.py \\
-        --dataset-root D:/AIC26_data \\
+        --dataset-root <your-dataset-root> \\
         --output artifacts/keyframe_mapping.csv
 
 Takes about 10 seconds for the full corpus. The result is verified by

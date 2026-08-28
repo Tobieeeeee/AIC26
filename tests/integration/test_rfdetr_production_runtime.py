@@ -13,7 +13,9 @@ import time
 from pathlib import Path
 
 import pytest
-import torch
+
+pl = pytest.importorskip("polars")
+torch = pytest.importorskip("torch")
 
 from mvr.enrichment.feature_extraction import (
     extract_objects,

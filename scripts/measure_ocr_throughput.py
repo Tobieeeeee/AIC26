@@ -24,7 +24,7 @@ image cannot move it.
 
 Example::
 
-    python scripts/measure_ocr_throughput.py --dataset-root D:/AIC26_data
+    python scripts/measure_ocr_throughput.py --dataset-root <your-dataset-root>
 
 Reads only; writes nothing except an optional JSON report.
 """

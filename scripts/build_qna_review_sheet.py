@@ -26,7 +26,7 @@ Example:
     python scripts/build_qna_review_sheet.py \\
         --query-dir "D:\\AIC_query" \\
         --index "artifacts\\indexes\\qna_organizer_all" \\
-        --dataset-root "D:\\AIC26_data" \\
+        --dataset-root "<your-dataset-root>" \\
         --registry-root "D:\\AIC26_test_root" \\
         --expected artifacts/qna/expected_videos.json \\
         --translate --allow-translation-download \\

@@ -776,6 +776,185 @@ def _run_milvus(values: dict) -> None:
 
 
 
+
+
+
+def _add_r2_parser(subparsers: "argparse._SubParsersAction") -> None:
+    """Add the `r2` command group (status / list / pull / push)."""
+    parser = subparsers.add_parser(
+        "r2",
+        help="Cloudflare R2 object storage sync operations",
+    )
+    r2_subs = parser.add_subparsers(dest="r2_command", required=True)
+
+    # r2 status
+    p = r2_subs.add_parser("status", help="Check R2 connectivity and credential config")
+    p.add_argument("--prefix", default=None, help="Prefix to probe (default: data/raw)")
+    p.set_defaults(command="r2", r2_command="status")
+
+    # r2 list
+    p = r2_subs.add_parser("list", help="List objects under a prefix")
+    p.add_argument("prefix", help="R2 object key prefix, e.g. data/corpus/keyframes")
+    p.add_argument("--max-keys", type=int, default=100, help="Maximum objects to list (default 100; -1 for all)")
+    p.set_defaults(command="r2", r2_command="list")
+
+    # r2 pull
+    p = r2_subs.add_parser("pull", help="Pull objects from R2 into the local tree")
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--prefix", default=None, help="Pull every object under this prefix")
+    group.add_argument("--videos", default=None, help="Comma-separated video IDs (requires --batch and --collection)")
+    group.add_argument("--corpus", action="store_true", help="Pull the whole canonical corpus tree")
+    group.add_argument("--manifest", action="store_true", help="Pull only the dataset manifest")
+    p.add_argument("--batch", default=None, help="Batch id for raw videos, e.g. 1")
+    p.add_argument("--collection", default=None, help="Collection id for raw videos, e.g. L21")
+    p.add_argument("--local-root", default=".", help="Local root directory (default: current dir)")
+    p.add_argument("--force", action="store_true", help="Re-download even if a local file exists")
+    p.set_defaults(command="r2", r2_command="pull")
+
+    # r2 push
+    p = r2_subs.add_parser("push", help="Push local artifacts to R2")
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--staging", default=None, help="Push directory of files under data/staging/<feature>/<run_id>")
+    mode.add_argument("--parquet", default=None, help="Push a canonical metadata parquet to data/corpus/metadata")
+    mode.add_argument("--embeddings", default=None, help="Push a provider embedding file to data/corpus/features")
+    mode.add_argument("--index", default=None, help="Push an index artifact to data/corpus/indexes")
+    mode.add_argument("--report", default=None, help="Push a report JSON to data/corpus/reports")
+    p.add_argument("--feature", default=None, help="Staging feature name (ocr/asr/objects/embeddings)")
+    p.add_argument("--run-id", default=None, help="Staging run id")
+    p.add_argument("--provider", default=None, help="Provider id for --embeddings (beit3/metaclip2/perception_encoder)")
+    p.add_argument("--batch", default=None, help="Batch id for parquet metadata")
+    p.add_argument("--collection", default=None, help="Collection id for parquet metadata")
+    p.add_argument("--name", default=None, help="Artifact name/parts for indexes/reports (comma-separated path parts)")
+    p.set_defaults(command="r2", r2_command="push")
+
+
+def _run_r2(values: dict) -> None:
+    r2_command = values.pop("r2_command")
+
+    from .operations import cache as cache_mod
+    from .operations.r2_client import R2Client
+    from .operations.r2_sync import R2Sync
+
+    local_root = values.pop("local_root", None) or "."
+    cache_dir = values.pop("cache_dir", None) or cache_mod.DEFAULT_CACHE_DIR
+    max_gb = values.pop("cache_max_gb", None) or cache_mod.DEFAULT_MAX_SIZE_GB
+
+    client = R2Client()
+    cache = cache_mod.BoundedCache(cache_dir, max_size_gb=max_gb)
+    sync = R2Sync(client=client, local_root=local_root, cache=cache)
+
+    if r2_command == "status":
+        prefix = values.pop("prefix", None) or sync.raw_prefix
+        print(json.dumps({
+            "status": "checking",
+            "prefix": prefix,
+            "warning": "use r2 list to confirm access",
+        }, indent=2, ensure_ascii=False))
+        return
+
+    if r2_command == "list":
+        prefix = values.pop("prefix")
+        max_keys = values.pop("max_keys")
+        objects = sync.list_remote(prefix)
+        if max_keys is not None and max_keys >= 0:
+            objects = objects[:max_keys]
+        print(json.dumps({
+            "prefix": prefix,
+            "count": len(objects),
+            "objects": [
+                {"key": o.get("Key"), "size": o.get("Size")} for o in objects
+            ],
+        }, indent=2, ensure_ascii=False))
+        return
+
+    if r2_command == "pull":
+        force = values.pop("force", False)
+        if values.pop("manifest", False):
+            path = sync.pull_dataset_manifest(force=force)
+            print(json.dumps({
+                "mode": "manifest",
+                "local_path": str(path) if path else None,
+            }, indent=2, ensure_ascii=False))
+            return
+        if values.pop("corpus", False):
+            stats = sync.pull_corpus(force=force)
+            print(json.dumps({"mode": "corpus", **stats.to_dict()}, indent=2, ensure_ascii=False))
+            return
+        prefix = values.pop("prefix", None)
+        if prefix:
+            stats = sync.pull_prefix(prefix, force=force)
+            print(json.dumps({"mode": "prefix", "prefix": prefix, **stats.to_dict()}, indent=2, ensure_ascii=False))
+            return
+        videos = values.pop("videos", None)
+        if videos:
+            batch = values.pop("batch", None)
+            collection = values.pop("collection", None)
+            if not batch or not collection:
+                raise SystemExit("--videos requires --batch and --collection")
+            video_ids = [v.strip() for v in videos.split(",") if v.strip()]
+            stats = sync.pull_videos(batch, collection, video_ids, force=force)
+            print(json.dumps({"mode": "videos", "batch": batch, "collection": collection, **stats.to_dict()}, indent=2, ensure_ascii=False))
+            return
+        raise SystemExit("r2 pull requires one of --prefix/--videos/--corpus/--manifest")
+
+    if r2_command == "push":
+        from pathlib import Path as _Path
+        staging = values.pop("staging", None)
+        parquet = values.pop("parquet", None)
+        embeddings = values.pop("embeddings", None)
+        index = values.pop("index", None)
+        report = values.pop("report", None)
+        feature = values.pop("feature", None)
+        run_id = values.pop("run_id", None)
+        provider = values.pop("provider", None)
+        batch = values.pop("batch", None)
+        collection = values.pop("collection", None)
+        name = values.pop("name", None)
+        parts = [p.strip() for p in name.split(",") if p.strip()] if name else []
+
+        if staging:
+            if not feature or not run_id:
+                raise SystemExit("--staging requires --feature and --run-id")
+            files = sorted(_Path(staging).iterdir()) if _Path(staging).is_dir() else [_Path(staging)]
+            stats = sync.push_staging(feature, run_id, files)
+            print(json.dumps({"mode": "staging", "feature": feature, "run_id": run_id, **stats.to_dict()}, indent=2, ensure_ascii=False))
+            return
+        if parquet:
+            if not feature or not batch or not collection:
+                raise SystemExit("--parquet requires --feature, --batch, --collection")
+            stats = sync.push_corpus_metadata(feature, batch, collection, _Path(parquet))
+            print(json.dumps({"mode": "parquet", "feature": feature, **stats.to_dict()}, indent=2, ensure_ascii=False))
+            return
+        if embeddings:
+            if not provider:
+                raise SystemExit("--embeddings requires --provider")
+            stats = sync.push_corpus_embeddings(provider, _Path(embeddings))
+            print(json.dumps({"mode": "embeddings", "provider": provider, **stats.to_dict()}, indent=2, ensure_ascii=False))
+            return
+        if index:
+            stats = sync.push_corpus_index(_Path(index), *parts) if parts else sync.push_corpus_index(_Path(index))
+            print(json.dumps({"mode": "index", "parts": parts, **stats.to_dict()}, indent=2, ensure_ascii=False))
+            return
+        if report:
+            stats = sync.push_corpus_report(_Path(report), *parts) if parts else sync.push_corpus_report(_Path(report))
+            print(json.dumps({"mode": "report", "parts": parts, **stats.to_dict()}, indent=2, ensure_ascii=False))
+            return
+        raise SystemExit("r2 push requires one of --staging/--parquet/--embeddings/--index/--report")
+
+def _add_worker_parser(subparsers: "argparse._SubParsersAction") -> None:
+    """Add the `worker` command group (DATA-03 prefetch orchestration).
+
+    The worker CLI owns its own subcommand parser (run/compare/status), so we
+    capture everything after `worker` and hand it off intact.
+    """
+    parser = subparsers.add_parser(
+        "worker",
+        help="DATA-03 worker prefetch orchestration (run / compare / status)",
+    )
+    parser.add_argument("worker_args", nargs=argparse.REMAINDER)
+    parser.set_defaults(command="worker")
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m mvr.cli")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -794,8 +973,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     _add_promote_parser(subparsers)
     # Task05-Milvus commands
     _add_milvus_parser(subparsers)
+    # R2 sync commands
+    _add_r2_parser(subparsers)
+    # DATA-03 worker prefetch commands
+    _add_worker_parser(subparsers)
     values = vars(parser.parse_args(argv))
     command = values.pop("command")
+    if command == "worker":
+        from .worker.cli import main as worker_main
+        raise SystemExit(worker_main(values.pop("worker_args")))
     if command == "ingest":
         values["input_path"] = values.pop("input")
         values["output_root"] = values.pop("output")
@@ -883,6 +1069,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     if command == "milvus":
         _run_milvus(values)
         return
+    if command == "r2":
+        _run_r2(values)
+        return
 
     index = FaissIndex.load(values.pop("index"))
     encoder = OpenClipEncoder(
@@ -903,5 +1092,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
 
+if __name__ == "__main__":
+    main()
 if __name__ == "__main__":
     main()
