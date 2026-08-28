@@ -1,9 +1,14 @@
 """Exact inner-product FAISS index adapted from Lab 4."""
 from __future__ import annotations
 
+import csv
+import hashlib
 import json
+import re
+import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any
 
 import numpy as np
@@ -19,6 +24,116 @@ CORE_MANIFEST_KEYS = {
     "vector_count",
     "normalization",
 }
+
+
+class IndexMappingMismatch(RuntimeError):
+    """The keyframe mapping is not the one this index was built from."""
+
+
+# `E:\...`, `E:/...` or a `\\server\share` UNC root. Matched by pattern
+# rather than by `Path.is_absolute()` because the deciding machine is
+# usually not the one that wrote the path: an index built on Windows is
+# read on Linux, where `Path(r"E:\a\b")` is one relative filename.
+_WINDOWS_ROOT = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def _pure(value: Any) -> PurePath:
+    """The stored text read in the flavour it was written in."""
+    text = str(value)
+    return PureWindowsPath(text) if _WINDOWS_ROOT.match(text) else PurePosixPath(text)
+
+
+def _is_absolute(value: Any) -> bool:
+    return _pure(value).is_absolute()
+
+
+def relative_image_path(image_path: Any, image_root: Any) -> str:
+    """`image_path` as text relative to `image_root`, forward-slashed.
+
+    Refuses a path outside the root instead of falling back to the
+    absolute one: a single unresolvable row in an otherwise portable
+    index would only surface later, on someone else's machine.
+    """
+    relative_to_root = _pure(image_path)
+    root = _pure(image_root)
+    try:
+        return relative_to_root.relative_to(root).as_posix()
+    except ValueError as exc:
+        raise ValueError(
+            f"{relative_to_root} is outside the image root {root}"
+        ) from exc
+
+
+def resolve_image_path(
+    row: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    *,
+    image_root: Any | None = None,
+) -> Path:
+    """Where this row's keyframe image lives on the machine reading it.
+
+    `image_root` overrides the root recorded at build time, which is what
+    lets one index serve a corpus mounted somewhere else entirely.
+
+    A stored path that is already absolute is handed back untouched --
+    that is every index built before the root was recorded, and joining a
+    root onto it would invent a path that never existed.
+    """
+    stored = row["image_path"]
+    if _is_absolute(stored):
+        return Path(str(stored))
+    root = image_root if image_root is not None else manifest.get("image_root")
+    return Path(str(root)) / str(stored) if root is not None else Path(str(stored))
+
+
+def mapping_fingerprint(mapping_csv: Any) -> dict[str, Any]:
+    """Identity of the keyframe mapping an index is built from.
+
+    The checksum decides; the row count is what makes a mismatch
+    actionable to a person reading the error.
+    """
+    path = Path(mapping_csv)
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        row_count = sum(1 for _ in csv.DictReader(handle))
+    return {"mapping_sha256": digest.hexdigest(), "mapping_row_count": row_count}
+
+
+def verify_mapping_binding(manifest: Mapping[str, Any], mapping_csv: Any) -> None:
+    """Raise unless this mapping is the one the index was built from.
+
+    An index stores `frame_id`, never the competition `frame_idx`, so
+    every submission row is resolved through this CSV. Pairing an index
+    with a different one does not fail loudly today: the resolver finds
+    nothing for the changed rows and drops them, so the run succeeds and
+    the submission is silently short.
+
+    A manifest with no recorded mapping only warns. Every index built so
+    far lacks the binding, and raising would strand all of them.
+    """
+    path = Path(mapping_csv)
+    if not path.is_file():
+        raise FileNotFoundError(f"keyframe mapping not found: {path}")
+    recorded = manifest.get("mapping_sha256")
+    if not recorded:
+        warnings.warn(
+            f"index is not bound to a keyframe mapping, so {path.name} cannot be "
+            "checked against the file it was built from",
+            UserWarning,
+            stacklevel=2,
+        )
+        return
+    actual = mapping_fingerprint(path)
+    if actual["mapping_sha256"] == recorded:
+        return
+    raise IndexMappingMismatch(
+        f"{path} is not the keyframe mapping this index was built from "
+        f"(built over {manifest.get('mapping_row_count', 'an unrecorded number of')} "
+        f"rows, this file has {actual['mapping_row_count']})"
+    )
 
 
 def _faiss():
@@ -86,6 +201,11 @@ class FaissIndex:
         }
         if manifest:
             details.update(manifest)
+        if details.get("image_root") is not None:
+            # Builders hand this over as a Path, which json.dumps refuses --
+            # and it would refuse it in save(), long after the expensive
+            # encoding work was done.
+            details["image_root"] = _pure(details["image_root"]).as_posix()
         return cls(index, list(metadata), details)
 
     def search(self, query: np.ndarray, top_k: int = 5) -> list[FaissHit]:
@@ -120,7 +240,14 @@ class FaissIndex:
         )
 
     @classmethod
-    def load(cls, input_root: Path) -> "FaissIndex":
+    def load(cls, input_root: Path, *, mapping_csv: Any | None = None) -> "FaissIndex":
+        """Read a persisted index.
+
+        Naming ``mapping_csv`` also checks that it is the mapping this
+        index was built from. Callers that never resolve a competition
+        frame -- the API, score_verified_set -- leave it out and are not
+        warned about a file they do not use.
+        """
         input_root = Path(input_root)
         faiss = _faiss()
         index = faiss.read_index(str(input_root / INDEX_FILENAME))
@@ -153,4 +280,6 @@ class FaissIndex:
         required_metadata = {"frame_id", "video_id", "timestamp", "image_path"}
         if any(not required_metadata.issubset(row) for row in metadata):
             raise ValueError("persisted metadata rows are missing required fields")
+        if mapping_csv is not None:
+            verify_mapping_binding(manifest, mapping_csv)
         return cls(index, metadata, manifest)

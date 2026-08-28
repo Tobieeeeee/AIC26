@@ -166,7 +166,10 @@ class Searcher:
         from mvr.retrieval.semantic import SemanticRetriever
 
         start = time.perf_counter()
-        index = FaissIndex.load(index_dir)
+        # Naming the mapping here binds the two files: the index stores
+        # frame_id, never the competition frame_idx, so a mismatched pair
+        # resolves nothing and writes a short submission with no error.
+        index = FaissIndex.load(index_dir, mapping_csv=mapping_csv)
         print(
             f"Index  : {index.manifest.get('vector_count')} vector, "
             f"{index.manifest.get('embedding_model')}/"

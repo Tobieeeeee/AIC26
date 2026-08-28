@@ -37,6 +37,8 @@ from pathlib import Path
 
 import numpy as np
 
+from mvr.indexing.faiss_index import relative_image_path
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -93,12 +95,19 @@ def discover_videos(dataset_root: Path) -> list[VideoAssets]:
     return assets
 
 
-def load_video(assets: VideoAssets) -> tuple[np.ndarray, list[dict]]:
+def load_video(
+    assets: VideoAssets, *, image_root: Path
+) -> tuple[np.ndarray, list[dict]]:
     """Load one video's vectors plus aligned per-keyframe metadata.
 
     Raises when the three sources disagree on length rather than truncating
     to the shortest -- a silent misalignment would attach every vector to
     the wrong frame.
+
+    `image_root` is required, not optional. Paths were absolutised here
+    until portability was added, which pinned the built index to one disk:
+    the review sheet an operator opens by eye reads image_path, so nobody
+    else could use the index. A default would quietly restore that.
     """
     features = np.load(assets.features_path)
     keyframes = sorted(assets.keyframe_dir.glob("*.jpg"))
@@ -116,7 +125,7 @@ def load_video(assets: VideoAssets) -> tuple[np.ndarray, list[dict]]:
             "frame_id": keyframe.stem,
             "video_id": assets.video_id,
             "timestamp": float(row["pts_time"]),
-            "image_path": str(keyframe.resolve()),
+            "image_path": relative_image_path(keyframe, image_root),
         }
         for keyframe, row in zip(keyframes, rows, strict=True)
     ]
@@ -144,12 +153,19 @@ def main() -> None:
     parser.add_argument("--dataset-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
+        "--mapping-csv", type=Path, default=None,
+        help=(
+            "keyframe_mapping.csv this index will be queried with; recorded "
+            "so a mismatched pairing is caught instead of silently dropping rows"
+        ),
+    )
+    parser.add_argument(
         "--videos", nargs="*", default=None,
         help="Limit to these video ids (default: every video with complete assets)",
     )
     args = parser.parse_args()
 
-    from mvr.indexing.faiss_index import FaissIndex
+    from mvr.indexing.faiss_index import FaissIndex, mapping_fingerprint
 
     assets = discover_videos(args.dataset_root)
     if args.videos:
@@ -168,7 +184,7 @@ def main() -> None:
     skipped: list[str] = []
     for position, video in enumerate(assets, start=1):
         try:
-            features, metadata = load_video(video)
+            features, metadata = load_video(video, image_root=args.dataset_root)
         except ValueError as exc:
             skipped.append(str(exc))
             continue
@@ -193,6 +209,11 @@ def main() -> None:
             "embedding_model": ORGANIZER_MODEL_NAME,
             "pretrained": ORGANIZER_PRETRAINED,
             "source": "organizer_precomputed_clip_features",
+            "image_root": args.dataset_root,
+            # The index holds frame_id, never the competition frame_idx, so
+            # every submission row resolves back through this CSV. Binding
+            # them here turns a silently short submission into an error.
+            **(mapping_fingerprint(args.mapping_csv) if args.mapping_csv else {}),
         },
     )
     args.output.mkdir(parents=True, exist_ok=True)
