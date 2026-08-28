@@ -180,3 +180,125 @@ def test_registry_with_no_dataset_root_never_guesses(tmp_path: Path) -> None:
     assert registry.media_info("L21_V001") is None
     with pytest.raises(FileNotFoundError):
         registry.video_info("L21_V001")
+
+
+# -- the raw organizer download layout ----------------------------------------
+#
+# The registry only ever read the normalized tree (`<root>/map_keyframes/`,
+# `<root>/keyframes/`). What the organizer actually ships is one folder per
+# asset kind, each with a batch suffix and an inner directory whose name uses
+# hyphens where the normalized tree uses underscores:
+#
+#     <root>/map-keyframes-aic25-b1/map-keyframes/L21_V001.csv
+#     <root>/Keyframes_L26_a/keyframes/L26_V001/003.jpg
+#     <root>/media-info-aic25-b1/media-info/L21_V001.json
+#     <root>/Videos_L21_a/video/L21_V001.mp4
+#
+# Measured consequence on the real 873-video corpus: every TRAKE run returned
+# "(no candidate chains found)", because resolve_frame() found no mapping for
+# any video. `build_keyframe_mapping.py` has read both layouts all along,
+# which is why KIS worked and TRAKE did not.
+
+
+def _write_raw_map_keyframes_csv(
+    root: Path, video_id: str, rows: list[tuple[str, str, str, str]]
+) -> None:
+    csv_dir = root / "map-keyframes-aic25-b1" / "map-keyframes"
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    lines = ["n,pts_time,fps,frame_idx"]
+    lines.extend(",".join(row) for row in rows)
+    (csv_dir / f"{video_id}.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_resolves_a_frame_from_the_raw_download_layout(tmp_path: Path) -> None:
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    _write_raw_map_keyframes_csv(tmp_path, "L21_V001", [("3", "8.7", "30.0", "261")])
+
+    resolved = AicDatasetRegistry(tmp_path).resolve_frame("L21_V001", "003.jpg")
+
+    assert resolved.frame_idx == 261
+
+
+def test_finds_a_keyframe_image_inside_its_collection_folder(tmp_path: Path) -> None:
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    directory = tmp_path / "Keyframes_L26_a" / "keyframes" / "L26_V001"
+    directory.mkdir(parents=True)
+    (directory / "003.jpg").write_bytes(b"")
+
+    found = AicDatasetRegistry(tmp_path).keyframe_path("L26_V001", "3")
+
+    assert found == directory / "003.jpg"
+
+
+def test_reads_media_info_from_the_raw_download_layout(tmp_path: Path) -> None:
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    directory = tmp_path / "media-info-aic25-b1" / "media-info"
+    directory.mkdir(parents=True)
+    (directory / "L21_V001.json").write_text(
+        json.dumps({"title": "một video"}), encoding="utf-8"
+    )
+
+    assert AicDatasetRegistry(tmp_path).media_info("L21_V001") == {"title": "một video"}
+
+
+def test_finds_a_video_in_the_raw_download_layout(tmp_path: Path) -> None:
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    directory = tmp_path / "Videos_L21_a" / "video"
+    directory.mkdir(parents=True)
+    (directory / "L21_V001.mp4").write_bytes(b"")
+
+    assert AicDatasetRegistry(tmp_path).video_path("L21_V001") == directory / "L21_V001.mp4"
+
+
+def test_the_normalized_layout_is_preferred_when_both_are_present(tmp_path: Path) -> None:
+    """A normalized tree is something a person built deliberately, on purpose,
+    from the raw one. Letting the raw copy win would silently discard that."""
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    _write_map_keyframes_csv(tmp_path, "L21_V001", [("3", "8.7", "30.0", "111")])
+    _write_raw_map_keyframes_csv(tmp_path, "L21_V001", [("3", "8.7", "30.0", "999")])
+
+    assert AicDatasetRegistry(tmp_path).resolve_frame("L21_V001", "3").frame_idx == 111
+
+
+def test_a_keyframe_absent_from_every_collection_folder_is_still_none(tmp_path: Path) -> None:
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    (tmp_path / "Keyframes_L21" / "keyframes" / "L21_V001").mkdir(parents=True)
+    (tmp_path / "Keyframes_L26_a" / "keyframes" / "L26_V001").mkdir(parents=True)
+
+    assert AicDatasetRegistry(tmp_path).keyframe_path("L21_V001", "3") is None
+
+
+def test_one_collection_folder_does_not_answer_for_another(tmp_path: Path) -> None:
+    """Keyframes_L26_a and Keyframes_L26_b split ONE collection across two
+    folders, so every folder has to be searched -- but a hit must still be
+    the requested video, not whichever folder was globbed first."""
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    wanted = tmp_path / "Keyframes_L26_b" / "keyframes" / "L26_V300"
+    wanted.mkdir(parents=True)
+    (wanted / "007.jpg").write_bytes(b"")
+    decoy = tmp_path / "Keyframes_L26_a" / "keyframes" / "L26_V001"
+    decoy.mkdir(parents=True)
+    (decoy / "007.jpg").write_bytes(b"")
+
+    found = AicDatasetRegistry(tmp_path).keyframe_path("L26_V300", "7")
+
+    assert found == wanted / "007.jpg"
+
+
+def test_a_root_with_neither_layout_resolves_nothing_rather_than_raising(tmp_path: Path) -> None:
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry, MissingFrameMappingError
+
+    registry = AicDatasetRegistry(tmp_path)
+
+    assert registry.keyframe_path("L21_V001", "3") is None
+    assert registry.media_info("L21_V001") is None
+    assert registry.video_path("L21_V001") is None
+    with pytest.raises(MissingFrameMappingError):
+        registry.resolve_frame("L21_V001", "3")
