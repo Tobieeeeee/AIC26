@@ -15,7 +15,7 @@ states directly whether a query is reachable within the 100-answer budget.
 
 Example:
     python scripts/measure_qna_retrieval.py \\
-        --query-dir "D:\\AIC_query" \\
+        --query-dir "<path-to-query-dir>" \\
         --index "artifacts\\indexes\\qna_organizer_all" \\
         --expected artifacts/qna/expected_videos.json \\
         --translate

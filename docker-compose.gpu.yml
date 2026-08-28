@@ -1,0 +1,166 @@
+# AIC26 MVR — GPU Production Stack
+# =================================
+# Full stack for running on a rented GPU machine.
+#
+# Provides:
+#   - Milvus vector database (production semantic backend)
+#   - Elasticsearch (lexical/BM25/object/hybrid)
+#   - FastAPI serving layer (API + UI)
+#   - R2 access (credentials from .env file)
+#
+# GPU-dependent services (OCR, embeddings, objects) run on the HOST
+# directly via the CLI commands listed in docs/GPU_DEPLOYMENT_RUNBOOK.md.
+# They require local GPU access and are not Dockerised here to avoid
+# multi-stage NVIDIA driver complexity.
+#
+# Usage:
+#   cp .env.example .env   # fill in real values
+#   docker compose -f docker-compose.gpu.yml up -d
+#   docker compose -f docker-compose.gpu.yml down
+#
+# Minimum host requirements:
+#   - 16 GB RAM (Milvus + Elasticsearch + API)
+#   - 50 GB free disk (R2 cache, extraction output, indexes)
+#   - GPU for OCR/embedding/object extraction (NVIDIA CUDA 12+)
+#
+# Network: aic26-gpu-net
+
+services:
+  # -------------------------------------------------------
+  # Milvus — production vector index (schema + insert + search)
+  # -------------------------------------------------------
+  milvus-etcd:
+    container_name: aic26-milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: 1000
+      ETCD_QUOTA_BACKEND_BYTES: 4294967296
+      ETCD_SNAPSHOT_COUNT: 50000
+    volumes:
+      - milvus-etcd-data:/etcd
+    command: >
+      etcd
+        --advertise-client-urls=http://etcd:2379
+        --listen-client-urls=http://0.0.0.0:2379
+        --data-dir=/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  milvus-minio:
+    container_name: aic26-milvus-minio
+    image: minio/minio:RELEASE.2023-03-13T19-46-17Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - milvus-minio-data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  milvus:
+    container_name: aic26-milvus
+    image: milvusdb/milvus:v2.4.13
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+    volumes:
+      - milvus-data:/var/lib/milvus
+    ports:
+      - "${MILVUS_PORT:-19530}:19530"
+      - "9091:9091"
+    depends_on:
+      milvus-etcd:
+        condition: service_healthy
+      milvus-minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # -------------------------------------------------------
+  # Elasticsearch — lexical / BM25 / object / hybrid search
+  # -------------------------------------------------------
+  elasticsearch:
+    container_name: aic26-elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.4
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms1g -Xmx1g"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "${ES_PORT:-9200}:9200"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # -------------------------------------------------------
+  # FastAPI — serving layer (search, health, UI)
+  # -------------------------------------------------------
+  api:
+    container_name: aic26-api
+    build:
+      context: .
+      dockerfile: docker/gpu/Dockerfile
+    env_file:
+      - .env
+    environment:
+      MVR_SEMANTIC_BACKEND: milvus
+      MILVUS_HOST: milvus
+      MILVUS_PORT: "19530"
+      MVR_ES_URL: http://elasticsearch:9200
+      MVR_ES_INDEX: keyframes
+      MVR_DEVICE: auto
+    ports:
+      - "${API_PORT:-8015}:8015"
+    volumes:
+      - ${MVR_SEMANTIC_INDEX:-artifacts/indexes}:/srv/indexes:ro
+      - ${MVR_KEYFRAME_DIR:-artifacts/keyframes}:/srv/keyframes:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8015/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      milvus:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  milvus-etcd-data:
+    driver: local
+  milvus-minio-data:
+    driver: local
+  milvus-data:
+    driver: local
+  elasticsearch-data:
+    driver: local
+
+networks:
+  default:
+    name: aic26-gpu-net

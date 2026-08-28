@@ -8,9 +8,9 @@ the default scope documented in docs/AIC_QNA_IMPLEMENTATION_NOTES.md.
 
 Example:
     python scripts/run_qna_pipeline.py \\
-        --query-file "D:\\AIC_query\\query-p1-groupA\\query-p1-15-qa.txt" \\
+        --query-file "<path-to-query-file>" \\
         --index "artifacts\\indexes\\qna_l21_l22" \\
-        --dataset-root "D:\\AIC26_test_root" \\
+        --dataset-root "<your-dataset-root>" \\
         --allow-model-download
 """
 from __future__ import annotations

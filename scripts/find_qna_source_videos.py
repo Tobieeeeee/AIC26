@@ -13,7 +13,7 @@ not a retrieval component.
 Example:
     python scripts/find_qna_source_videos.py \\
         --query-dir "D:\\AIC_query" \\
-        --media-info "D:\\AIC26_data\\media-info-aic25-b1\\media-info" \\
+        --media-info "<your-dataset-root>\\media-info-aic25-b1\\media-info" \\
         --indexed-dir "D:\\AIC26_test_root\\keyframes"
 """
 from __future__ import annotations

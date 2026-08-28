@@ -24,7 +24,7 @@ the organizer's own notebook documents.
 
 Example:
     python scripts/build_qna_index_from_organizer_features.py \\
-        --dataset-root "D:\\AIC26_data" \\
+        --dataset-root "<your-dataset-root>" \\
         --output "artifacts\\indexes\\qna_organizer_all"
 """
 from __future__ import annotations

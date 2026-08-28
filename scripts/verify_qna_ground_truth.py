@@ -14,9 +14,9 @@ consumes: ``video_id``, inclusive ``start_frame``/``end_frame``, ``answer``.
 
 Example (review one query):
     python scripts/verify_qna_ground_truth.py \\
-        --query-file "D:\\AIC_query\\query-p1-groupA\\query-p1-19-qa.txt" \\
+        --query-file "<path-to-query-file>" \\
         --index "artifacts\\indexes\\qna_organizer_all" \\
-        --dataset-root "D:\\AIC26_data" \\
+        --dataset-root "<your-dataset-root>" \\
         --translate --top-k 8
 """
 from __future__ import annotations
