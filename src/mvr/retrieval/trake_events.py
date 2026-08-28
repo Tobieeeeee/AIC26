@@ -13,6 +13,7 @@ later without touching alignment logic.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 # Order matters: matching is substring-based and first-match-wins, so a more
@@ -101,3 +102,97 @@ def translate_gap_phrase(text_between_events: str) -> TrakeGapConstraint:
             return TrakeGapConstraint(min_gap_seconds=min_gap, max_gap_seconds=max_gap)
     default_min, default_max = DEFAULT_GAP_SECONDS
     return TrakeGapConstraint(min_gap_seconds=default_min, max_gap_seconds=default_max)
+
+
+# `E1 ...`, `E1. ...`, `E2: ...`, `E 3) ...` -- the organizer numbers the
+# events but not the punctuation around the number.
+_EVENT_MARKER = re.compile(r"^E\s*(\d+)\s*[.:)\-]?\s+(\S.*)$")
+
+
+@dataclass(frozen=True)
+class OrganizerTrakeQuery:
+    """One organizer TRAKE `.txt` read into the shape the pipeline wants.
+
+    `preamble` is the scene-setting sentence before E1. It is carried for
+    the operator to read, never scored: it describes the video rather than
+    a moment, so there is no frame it could point at.
+    """
+
+    preamble: str
+    events: tuple[str, ...]
+    gap_phrases: tuple[str, ...]
+
+
+def _split_leading_gap_phrase(event_text: str) -> tuple[str, str]:
+    """Peel a timing phrase off the FRONT of an event, if there is one.
+
+    Only the front. `translate_gap_phrase` matches by substring, and
+    `rồi`/`liền` are ordinary Vietnamese words: "nhảy lên rồi tiếp đất"
+    would otherwise be read as a 60-second gap and could exclude the true
+    chain. A phrase leading the sentence is the one carrying the timing.
+    """
+    lowered = event_text.lower()
+    for phrase in GAP_PHRASE_TABLE:
+        if lowered.startswith(phrase):
+            remainder = event_text[len(phrase):].lstrip(" ,;:-")
+            if remainder:
+                return phrase, remainder
+    return "", event_text
+
+
+def parse_organizer_trake_query(text: str) -> OrganizerTrakeQuery:
+    """Read the organizer's numbered-event `.txt` into events and gaps.
+
+    The competition hands out TRAKE as prose with the events already
+    numbered E1..Ek; every consumer in this repo wants the decomposed
+    lists. Retyping them by hand mid-run is where a query gets lost.
+
+    A line carrying no marker continues the event above it rather than
+    becoming a gap clue: an event wrapped across two lines is the common
+    case, and half an event's description costs retrieval far more than
+    the default gap window does.
+    """
+    preamble_lines: list[str] = []
+    numbers: list[int] = []
+    events: list[list[str]] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        marker = _EVENT_MARKER.match(line)
+        if marker:
+            numbers.append(int(marker.group(1)))
+            events.append([marker.group(2).strip()])
+        elif events:
+            events[-1].append(line)
+        else:
+            preamble_lines.append(line)
+
+    if not events:
+        raise ValueError(
+            "found no numbered events (E1, E2, ...) in the query text; "
+            "TRAKE queries arrive with their events already numbered"
+        )
+    if len(events) < 2:
+        raise ValueError(
+            f"a TRAKE query must have at least 2 events (got {len(events)}); "
+            "a single-event chain is plain KIS -- use search_kis() directly"
+        )
+    if numbers != list(range(1, len(numbers) + 1)):
+        raise ValueError(
+            f"events must be numbered sequentially from 1, got {numbers}; "
+            "a gap in the numbering means an event was lost, and chaining "
+            "the survivors would answer a different query"
+        )
+
+    texts = [" ".join(parts) for parts in events]
+    gap_phrases: list[str] = []
+    for position in range(1, len(texts)):
+        phrase, remainder = _split_leading_gap_phrase(texts[position])
+        gap_phrases.append(phrase)
+        texts[position] = remainder
+    return OrganizerTrakeQuery(
+        preamble=" ".join(preamble_lines),
+        events=tuple(texts),
+        gap_phrases=tuple(gap_phrases),
+    )
