@@ -39,6 +39,21 @@ SUBMISSION_NAME = re.compile(r"^query-(.+)-(kis|qa|trake)\.csv$")
 _HEADER_TOKENS = ("video_id", "frame_id", "frame_idx", "rank", "answer", "format")
 
 
+def _duplicate_key(row: list[str], kind: str | None) -> tuple[str, ...]:
+    """What makes two submission rows the same prediction.
+
+    KIS and Q&A predict one frame, so ``(video_id, frame_idx)`` decides:
+    a second row naming that frame can never score where the first did not.
+
+    A TRAKE row is a whole chain -- ``video_id`` plus one frame per event --
+    and two chains sharing a video and a first frame are different answers.
+    Keying them on the first two columns reported most of a real submission
+    as duplicates and let ``--fix`` delete 60 of its 100 chains.
+    """
+    stripped = tuple(value.strip() for value in row)
+    return stripped if kind == "trake" else stripped[:2]
+
+
 def kind_from_name(name: str) -> str | None:
     """`query-3-qa.csv` -> `qa`. None when the name says nothing."""
     match = SUBMISSION_NAME.match(Path(name).name)
@@ -135,9 +150,9 @@ def lint_file(path: Path | str, *, kind: str | None = None) -> list[str]:
         # turned fixing them into whack-a-mole: three files were cleaned,
         # relinted, and each surfaced a different duplicate pair that had
         # been there the whole time.
-        key = tuple(value.strip() for value in row[:2])
+        key = _duplicate_key(row, kind)
         if key in seen:
-            duplicates.append(f"dòng {number} (giống dòng {seen[key]}): {key[0]},{key[1]}")
+            duplicates.append(f"dòng {number} (giống dòng {seen[key]}): {','.join(key)}")
         else:
             seen[key] = number
 
@@ -201,16 +216,18 @@ def repair_file(path: Path | str) -> list[str]:
     The first occurrence stays and the order is preserved, because rank is
     what the file is for: R@1 is one fifth of the score.
 
-    Rows are keyed on ``(video_id, frame_idx)`` only. Two Q&A rows naming
-    one frame are the same prediction even when the answers differ -- the
-    frame is what the interval test reads, so the second can never score
-    where the first did not.
+    KIS and Q&A rows are keyed on ``(video_id, frame_idx)`` only. Two Q&A
+    rows naming one frame are the same prediction even when the answers
+    differ -- the frame is what the interval test reads, so the second can
+    never score where the first did not. A TRAKE row is keyed on the whole
+    chain; see ``_duplicate_key``.
 
     Everything else the linter reports needs a person: a wrong column count
     could be a missing field or an extra one, and guessing is worse than
     reporting.
     """
     path = Path(path)
+    kind = kind_from_name(path.name)
     raw = path.read_bytes()
     text = raw.decode("utf-8-sig")
     if not text.strip():
@@ -221,7 +238,7 @@ def repair_file(path: Path | str) -> list[str]:
     seen: set[tuple[str, ...]] = set()
     for row in rows:
         stripped = [value.strip() for value in row]
-        key = tuple(stripped[:2])
+        key = _duplicate_key(row, kind)
         if key in seen:
             continue
         seen.add(key)

@@ -293,3 +293,54 @@ def test_repair_leaves_a_correct_file_byte_identical(tmp_path) -> None:
     repair_file(path)
 
     assert path.read_bytes() == before
+
+
+# -- TRAKE rows are chains, not frames ----------------------------------------
+#
+# Found in a dress rehearsal: linting a real TRAKE submission reported 60 of
+# its 100 rows as duplicates, and `--fix` deleted them. Every one was a
+# distinct four-frame chain that merely shared a video and a first frame with
+# a row above it. The report tells the operator to run `--fix`, so the path
+# from "looks broken" to "60% of the answers are gone" was one command.
+
+
+TRAKE_CHAINS = (
+    "L26_V272,5325,5760,5888,5933\n"
+    "L26_V272,5325,5760,5866,5888\n"
+    "L26_V272,5325,5562,5760,5866\n"
+)
+
+
+def test_trake_chains_sharing_a_first_frame_are_not_duplicates(tmp_path) -> None:
+    path = tmp_path / "query-4-trake.csv"
+    path.write_text(TRAKE_CHAINS, encoding="utf-8")
+
+    assert not [problem for problem in lint_file(path) if "trùng" in problem]
+
+
+def test_repairing_a_trake_file_keeps_every_distinct_chain(tmp_path) -> None:
+    path = tmp_path / "query-4-trake.csv"
+    path.write_text(TRAKE_CHAINS, encoding="utf-8")
+
+    repair_file(path)
+
+    assert path.read_text(encoding="utf-8").strip().splitlines() == TRAKE_CHAINS.strip().splitlines()
+
+
+def test_a_genuinely_repeated_trake_chain_is_still_a_duplicate(tmp_path) -> None:
+    """The whole chain repeated is still one wasted slot out of 100."""
+    path = tmp_path / "query-4-trake.csv"
+    path.write_text(
+        "L26_V272,5325,5760,5888,5933\nL26_V272,5325,5760,5888,5933\n", encoding="utf-8"
+    )
+
+    assert [problem for problem in lint_file(path) if "trùng" in problem]
+
+
+def test_a_kis_frame_repeated_is_still_a_duplicate(tmp_path) -> None:
+    """The rule that made TRAKE wrong is the right rule for KIS: the
+    prediction is one frame, so a second row naming it adds nothing."""
+    path = tmp_path / "query-4-kis.csv"
+    path.write_text("L26_V272,5325\nL26_V272,5325\n", encoding="utf-8")
+
+    assert [problem for problem in lint_file(path) if "trùng" in problem]
