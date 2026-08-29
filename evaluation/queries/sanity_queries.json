@@ -1,0 +1,148 @@
+[
+  {
+    "query_id": "q001_vi_vehicle_action",
+    "text": "một người đàn ông đi xe máy trên đường",
+    "language": "vi",
+    "tags": ["person", "action", "vehicle"]
+  },
+  {
+    "query_id": "q002_en_indoor_person",
+    "text": "a woman standing in a kitchen",
+    "language": "en",
+    "tags": ["indoor", "person"]
+  },
+  {
+    "query_id": "q003_vi_ocr_news",
+    "text": "TIN CHÍNH",
+    "language": "vi",
+    "tags": ["ocr-like", "short"]
+  },
+  {
+    "query_id": "q004_en_ocr_sign",
+    "text": "EXIT 24 HOURS",
+    "language": "en",
+    "tags": ["ocr-like", "punctuation"]
+  },
+  {
+    "query_id": "q005_vi_asr_weather",
+    "text": "dự báo thời tiết hôm nay có mưa lớn",
+    "language": "vi",
+    "tags": ["asr-like", "weather"]
+  },
+  {
+    "query_id": "q006_en_asr_quote",
+    "text": "the speaker says welcome to the evening news",
+    "language": "en",
+    "tags": ["asr-like", "speech"]
+  },
+  {
+    "query_id": "q007_en_short",
+    "text": "red car",
+    "language": "en",
+    "tags": ["short", "vehicle"]
+  },
+  {
+    "query_id": "q008_vi_short",
+    "text": "con mèo",
+    "language": "vi",
+    "tags": ["short", "animal"]
+  },
+  {
+    "query_id": "q009_en_object_heavy",
+    "text": "table laptop coffee cup phone notebook and glasses",
+    "language": "en",
+    "tags": ["object-heavy", "indoor"]
+  },
+  {
+    "query_id": "q010_vi_object_heavy",
+    "text": "xe buýt ô tô xe máy và nhiều người tại ngã tư",
+    "language": "vi",
+    "tags": ["object-heavy", "outdoor", "vehicle"]
+  },
+  {
+    "query_id": "q011_en_outdoor",
+    "text": "people walking through a city park in daylight",
+    "language": "en",
+    "tags": ["outdoor", "person"]
+  },
+  {
+    "query_id": "q012_vi_indoor",
+    "text": "một gia đình đang ăn tối trong phòng khách",
+    "language": "vi",
+    "tags": ["indoor", "person"]
+  },
+  {
+    "query_id": "q013_en_rare",
+    "text": "a bioluminescent jellyfish in a dark aquarium",
+    "language": "en",
+    "tags": ["rare-concept", "animal"]
+  },
+  {
+    "query_id": "q014_vi_rare",
+    "text": "khinh khí cầu bay trên ruộng bậc thang",
+    "language": "vi",
+    "tags": ["rare-concept", "outdoor"]
+  },
+  {
+    "query_id": "q015_en_ambiguous",
+    "text": "bank",
+    "language": "en",
+    "tags": ["ambiguous", "short"]
+  },
+  {
+    "query_id": "q016_vi_ambiguous",
+    "text": "đường",
+    "language": "vi",
+    "tags": ["ambiguous", "short"]
+  },
+  {
+    "query_id": "q017_unicode_punctuation",
+    "text": "Café — biển hiệu “MỞ CỬA” ✓",
+    "language": "vi",
+    "tags": ["unicode", "punctuation", "ocr-like"]
+  },
+  {
+    "query_id": "q018_numeric",
+    "text": "00:00:00.480 12",
+    "language": null,
+    "tags": ["numeric", "ocr-like"]
+  },
+  {
+    "query_id": "q019_en_long",
+    "text": "a crowded outdoor market where vendors arrange colorful fruit while customers carry bags and motorcycles pass behind them",
+    "language": "en",
+    "tags": ["long", "outdoor", "object-heavy"]
+  },
+  {
+    "query_id": "q020_vi_long",
+    "text": "một nhóm học sinh mặc đồng phục đang bước qua cổng trường vào buổi sáng trong khi xe đạp được dựng dọc theo vỉa hè",
+    "language": "vi",
+    "tags": ["long", "person", "outdoor"]
+  },
+  {
+    "query_id": "q021_symbols",
+    "text": "#AIC26 @video_search 100%",
+    "language": null,
+    "tags": ["punctuation", "unicode"]
+  },
+  {
+    "query_id": "q022_mixed_language",
+    "text": "người dẫn chương trình nói breaking news",
+    "language": "mixed",
+    "tags": ["mixed-language", "asr-like"]
+  },
+  {
+    "query_id": "q_invalid_empty",
+    "text": "",
+    "language": null,
+    "tags": ["negative", "empty"],
+    "expect_error": true
+  },
+  {
+    "query_id": "q_invalid_whitespace",
+    "text": "   \t  ",
+    "language": null,
+    "tags": ["negative", "whitespace-only"],
+    "expect_error": true
+  }
+]
