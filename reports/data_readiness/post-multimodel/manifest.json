@@ -1,0 +1,54 @@
+{
+  "audit_version": "1.0",
+  "canonical_mapping": {
+    "columns": [
+      "frame_idx",
+      "image_path",
+      "keyframe_id",
+      "ordinal",
+      "shot_id",
+      "timestamp",
+      "video_id"
+    ],
+    "exists": true,
+    "path": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\ingest\\keyframe_mapping.csv",
+    "records": 5,
+    "sha256": "fb3148fe1f1f6d98a879d4d26146615caffe04e0939f456c434524bad4691c51",
+    "status": "READY",
+    "unique_keyframe_ids": 5,
+    "unique_output_pairs": 5
+  },
+  "created_at": "2026-08-20T23:52:54.234156Z",
+  "git": {
+    "branch": "integration/post-multimodel",
+    "commit": "cc50d240781856f03517c8c4b9685e71e1b56b1b",
+    "dirty": true
+  },
+  "paths": {
+    "artifacts_root": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest",
+    "asr": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\features\\asr",
+    "dataset_root": null,
+    "embeddings": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\features",
+    "indexes": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\indexes",
+    "keyframes": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\ingest",
+    "mapping": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\ingest\\keyframe_mapping.csv",
+    "media_info": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\ingest",
+    "objects": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\features\\objects",
+    "ocr": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\features\\text",
+    "output_dir": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\reports\\data_readiness\\post-multimodel",
+    "processed": "D:\\project\\STUDY\\NAM_2\\SELF_PRJ\\AIC26\\SkillPixel\\mvr-competition-starter\\artifacts\\fasttest\\processed",
+    "videos": null
+  },
+  "providers": [
+    "beit3",
+    "clip",
+    "metaclip2",
+    "perception_encoder"
+  ],
+  "required_providers": [
+    "beit3",
+    "metaclip2",
+    "perception_encoder"
+  ],
+  "run_id": "post-multimodel"
+}

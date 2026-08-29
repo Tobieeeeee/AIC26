@@ -1,0 +1,6 @@
+keyframe_id,video_id,keyframe,ocr,asr,objects,task05_document,beit3,clip,metaclip2,perception_encoder
+L21_V010_S0007_K01,L21_V010,missing,present,present,present,present,missing,present,missing,missing
+L21_V010_S0014_K01,L21_V010,missing,present,present,present,present,missing,present,missing,missing
+L21_V010_S0034_K01,L21_V010,missing,present,present,present,present,missing,present,missing,missing
+L21_V025_S0011_K01,L21_V025,missing,present,present,present,present,missing,present,missing,missing
+L21_V025_S0187_K01,L21_V025,missing,present,present,present,present,missing,present,missing,missing

@@ -1,0 +1,112 @@
+{
+  "run_mode": "prefetch",
+  "metrics": {
+    "run_mode": "prefetch",
+    "items_total": 3,
+    "items_completed": 3,
+    "items_failed": 0,
+    "items_skipped_resume": 0,
+    "stages_run": 12,
+    "wall_seconds": 111.5747,
+    "visible_transfer_wait_seconds": 141.6536,
+    "prefetch_overlap_seconds": 2.0468,
+    "processing_seconds": 47.4198,
+    "overlap_ratio": 0.0432,
+    "get_requests": 3,
+    "head_requests": 0,
+    "bytes_transferred": 369668577,
+    "cache_hits": 0,
+    "cache_misses": 6,
+    "cache_hit_rate": 0.0,
+    "evictions": 0,
+    "evicted_bytes": 0,
+    "peak_resident_keys": 3,
+    "peak_resident_bytes": 369668577
+  },
+  "stages": [
+    {
+      "stage": "ingest",
+      "item_id": "L21_V001",
+      "success": true,
+      "seconds": 0.502,
+      "error": null
+    },
+    {
+      "stage": "ocr",
+      "item_id": "L21_V001",
+      "success": true,
+      "seconds": 0.5149,
+      "error": null
+    },
+    {
+      "stage": "asr",
+      "item_id": "L21_V001",
+      "success": true,
+      "seconds": 0.502,
+      "error": null
+    },
+    {
+      "stage": "objects",
+      "item_id": "L21_V001",
+      "success": true,
+      "seconds": 0.5108,
+      "error": null
+    },
+    {
+      "stage": "ingest",
+      "item_id": "L21_V002",
+      "success": true,
+      "seconds": 0.5136,
+      "error": null
+    },
+    {
+      "stage": "ocr",
+      "item_id": "L21_V002",
+      "success": true,
+      "seconds": 0.5103,
+      "error": null
+    },
+    {
+      "stage": "asr",
+      "item_id": "L21_V002",
+      "success": true,
+      "seconds": 0.513,
+      "error": null
+    },
+    {
+      "stage": "objects",
+      "item_id": "L21_V002",
+      "success": true,
+      "seconds": 0.51,
+      "error": null
+    },
+    {
+      "stage": "ingest",
+      "item_id": "L21_V003",
+      "success": true,
+      "seconds": 0.515,
+      "error": null
+    },
+    {
+      "stage": "ocr",
+      "item_id": "L21_V003",
+      "success": true,
+      "seconds": 0.5123,
+      "error": null
+    },
+    {
+      "stage": "asr",
+      "item_id": "L21_V003",
+      "success": true,
+      "seconds": 0.5152,
+      "error": null
+    },
+    {
+      "stage": "objects",
+      "item_id": "L21_V003",
+      "success": true,
+      "seconds": 0.5009,
+      "error": null
+    }
+  ]
+}

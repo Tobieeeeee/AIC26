@@ -106,3 +106,23 @@ requirements-dev.txt
 
 # Generated retrieval sanity/regression runs
 reports/retrieval_sanity/
+
+# Local model weights & runtime caches — large; teammates fetch from R2/HF,
+# never from git. Keep the artifacts/ tree for small authored helpers only.
+artifacts/_asr_models/
+artifacts/_embedding_models/
+artifacts/_ocr_runtime/
+artifacts/aic26_faster_rcnn/
+artifacts/kis_p1/
+artifacts/reviews/
+artifacts/fasttest.rar
+artifacts/scratch_lab6.ipynb
+artifacts/scratch_lab6_code.py
+artifacts/subset_mapping.csv
+
+# Frontend build output & installed deps — source lives on feat/frontend-ui.
+frontend/node_modules/
+frontend/dist/
+
+# Editor / backup files
+*.bak
