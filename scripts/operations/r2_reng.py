@@ -105,11 +105,8 @@ def apply_plan(plan: dict, client: R2Client) -> None:
             print(f"[{i}/{len(plan['moves'])}] dedupe (drop old): {src}  (kept {dst})", flush=True)
             continue
         print(f"[{i}/{len(plan['moves'])}] copy: {src} -> {dst}  ({size/1e6:.1f} MB)", flush=True)
-        with tempfile.TemporaryDirectory() as td:
-            local = Path(td) / Path(dst).name
-            client.download_file(src, local)
-            sha256_file(local)
-            client.upload_file(local, dst, content_type="video/mp4")
+        # Server-side copy: no local download, much faster.
+        client.copy_object(src, dst)
         # verify
         head = client.head_object(dst)
         if int(head.get("ContentLength", 0)) != size:

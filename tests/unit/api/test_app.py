@@ -70,7 +70,7 @@ class FakeMultimodalService:
             _hit("frame-high", score=1.0, objects={"person": 2})
         )
 
-    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int):
+    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int, lexical_query: str | None = None):
         return [
             {
                 **_public_hit("frame-high", score=0.0325),
@@ -93,7 +93,7 @@ class UnavailableSemanticService(FakeSemanticService):
 
 
 class FailingHybridService(FakeMultimodalService):
-    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int):
+    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int, lexical_query: str | None = None):
         raise ConnectionError("Elasticsearch connection failed")
 
 
@@ -459,7 +459,7 @@ class _CallCountingMultimodalService(FakeMultimodalService):
     def __init__(self) -> None:
         self.calls: list[tuple[str, int, int]] = []
 
-    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int):
+    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int, lexical_query: str | None = None):
         self.calls.append((query, top_k, rrf_k))
         return super().search_hybrid(query, top_k=top_k, rrf_k=rrf_k)
 
@@ -563,8 +563,8 @@ def test_qna_search_exposes_servable_image_url_when_keyframes_are_mounted(tmp_pa
     image.write_bytes(b"jpeg")
 
     class _AbsolutePathService(FakeMultimodalService):
-        def search_hybrid(self, query: str, *, top_k: int, rrf_k: int):
-            hits = super().search_hybrid(query, top_k=top_k, rrf_k=rrf_k)
+        def search_hybrid(self, query: str, *, top_k: int, rrf_k: int, lexical_query: str | None = None):
+            hits = super().search_hybrid(query, top_k=top_k, rrf_k=rrf_k, lexical_query=lexical_query)
             hits[0] = {**hits[0], "image_path": str(image)}
             return hits
 

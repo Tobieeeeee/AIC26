@@ -252,7 +252,7 @@ def _run_search(hits, **kwargs):
             return json.dumps({"answer": "x", "source": "context-grounded"})
 
     class _Service:
-        def search_hybrid(self, query, *, top_k, rrf_k):
+        def search_hybrid(self, query, *, top_k, rrf_k, lexical_query=None):
             return hits[:top_k]
 
     return search_qna(

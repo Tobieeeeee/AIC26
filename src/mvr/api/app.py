@@ -319,9 +319,10 @@ class ElasticsearchMultimodalService:
         *,
         top_k: int,
         rrf_k: int,
+        lexical_query: str | None = None,
     ) -> list[dict[str, Any]]:
         lexical = self.search_text(
-            query,
+            lexical_query if lexical_query is not None else query,
             top_k=TOP_N_EACH,
             person_min=0,
             car_min=0,
@@ -579,6 +580,7 @@ def create_app(
     kis_aic_registry: Any = _UNSET,
     qna_answer_reasoner: Any = _UNSET,
     trake_query_translator: Any = _UNSET,
+    query_preprocessing: Any = _UNSET,
 ) -> FastAPI:
     """Build an app with injectable services for lightweight contract tests."""
     if semantic_service is _UNSET:
@@ -602,6 +604,16 @@ def create_app(
         qna_answer_reasoner = _default_qna_answer_reasoner()
     if trake_query_translator is _UNSET:
         trake_query_translator = _default_trake_query_translator()
+    if query_preprocessing is _UNSET:
+        from ..retrieval.query_preprocessing import QueryPreprocessingService
+
+        query_preprocessing = QueryPreprocessingService(
+            translator_factory=(
+                (lambda: trake_query_translator)
+                if trake_query_translator is not None
+                else None
+            )
+        )
 
     application = FastAPI(
         title="MVR Competition Search API",
@@ -661,13 +673,15 @@ def create_app(
     @application.post("/search/kis", response_model=KisSearchResponse)
     def search_kis_route(request: KisSearchRequest) -> KisSearchResponse:
         try:
+            prepared = query_preprocessing.prepare(request.query)
             candidates = search_kis(
-                request.query,
+                prepared.dense,
                 top_k=request.top_k,
                 semantic_service=semantic_service,
                 multimodal_service=multimodal_service,
                 pipeline_resolver=kis_pipeline_resolver,
                 aic_registry=kis_aic_registry,
+                lexical_query=prepared.lexical,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -705,13 +719,17 @@ def create_app(
         if semantic_service is None:
             raise HTTPException(status_code=503, detail="trake semantic index is unavailable")
         try:
+            prepared_events = [query_preprocessing.prepare(event.text) for event in request.events]
             query = TrakeQuery(
                 events=tuple(
-                    TrakeEventQuery(index, event.text)
-                    for index, event in enumerate(request.events, start=1)
+                    TrakeEventQuery(index, prepared.dense)
+                    for index, (event, prepared) in enumerate(
+                        zip(request.events, prepared_events), start=1
+                    )
                 ),
                 gaps=tuple(translate_gap_phrase(phrase) for phrase in request.gap_phrases),
             )
+            lexical_queries = tuple(p.lexical for p in prepared_events)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -727,7 +745,7 @@ def create_app(
                 aic_registry=kis_aic_registry,
                 top_k=request.top_k,
                 pipeline_resolver=kis_pipeline_resolver,
-                query_translator=trake_query_translator,
+                lexical_queries=lexical_queries,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -750,8 +768,9 @@ def create_app(
     @application.post("/search/qna", response_model=QnaSearchResponse)
     def search_qna_route(request: QnaSearchRequest) -> QnaSearchResponse:
         try:
+            prepared = query_preprocessing.prepare(request.event_description)
             candidates = search_qna(
-                request.event_description,
+                prepared.dense,
                 request.question,
                 top_k=request.top_k,
                 semantic_service=semantic_service,
@@ -759,6 +778,7 @@ def create_app(
                 pipeline_resolver=kis_pipeline_resolver,
                 aic_registry=kis_aic_registry,
                 answer_reasoner=qna_answer_reasoner,
+                lexical_query=prepared.lexical,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc

@@ -153,7 +153,7 @@ def _search(**kwargs):
         def __init__(self, hits):
             self._hits = hits
 
-        def search_hybrid(self, query, *, top_k, rrf_k):
+        def search_hybrid(self, query, *, top_k, rrf_k, lexical_query=None):
             return self._hits[:top_k]
 
     hits = [

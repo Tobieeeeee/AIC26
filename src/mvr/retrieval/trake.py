@@ -22,9 +22,8 @@ one candidate's refinement failing, and needs to be inspectable (e.g. via
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Sequence
 
-from ..enrichment.qna_translation import QueryTranslator, translate_for_retrieval
 from .kis import KeyframeFrameIndexResolver, search_kis
 from .trake_align import TrakeAlignmentStrategy
 from .trake_events import TrakeQuery
@@ -46,7 +45,7 @@ def search_trake(
     shortlist_top_k: int = 500,
     pipeline_resolver: KeyframeFrameIndexResolver | None = None,
     multimodal_service: Any | None = None,
-    query_translator: QueryTranslator | None = None,
+    lexical_queries: Sequence[str | None] | None = None,
 ) -> "list[TrakeChainPrediction]":
     """Run one TRAKE query end to end: encode -> shortlist -> dense score ->
     align -> merge, entirely in pure Python (no HTTP surface).
@@ -57,31 +56,27 @@ def search_trake(
     (``refine_top_candidates()``). Returns an empty list (not an exception)
     if every event fails to shortlist.
 
-    ``query_translator`` translates each event's text for retrieval only
-    (both shortlisting and dense scoring use the SAME translated text, so
-    the two stay comparable), mirroring ``search_qna()``'s
-    ``translate_for_retrieval`` usage -- see ``mvr.enrichment.qna_translation``
-    for why: the index's encoder is English-trained (measured: a Vietnamese
+    ``query.events`` text is the already-translated (dense) English form. The
+    dense/semantic scoring and shortlisting use that, and share one string so
+    the two stay comparable (see ``search_qna()``'s ``translate_for_retrieval``
+    usage -- the index's encoder is English-trained; measured: a Vietnamese
     query ranked the correct frame 192/268 vs. #1/268 in English on the same
-    data, see docs/AIC_TRAKE_BENCHMARK_RESULTS.md). ``None`` (the default)
-    keeps every event's text unchanged, identical to all prior behavior.
+    data, see docs/AIC_TRAKE_BENCHMARK_RESULTS.md).
 
-    The shortlisting call also passes the event's ORIGINAL (untranslated)
-    text as ``search_kis()``'s ``lexical_query`` -- same split ``search_kis``
-    itself documents: dense/semantic wants English, lexical/BM25 indexes
-    OCR/ASR text that is predominantly Vietnamese, so it wants the original.
-    Only takes effect if ``multimodal_service`` is configured; otherwise
-    ``search_kis()`` ignores it, matching TRAKE's documented semantic-only
-    default.
+    ``lexical_queries``, when given, carries each event's ORIGINAL
+    (untranslated) text -- the lexical/BM25 branch indexes OCR/ASR text that
+    is predominantly Vietnamese, so it wants the original. Pass ``None`` to
+    send the translated event text to both, as before.
     """
-    retrieval_texts = [
-        translate_for_retrieval(event.text, query_translator) for event in query.events
-    ]
+    retrieval_texts = [event.text for event in query.events]
     event_text_vectors = semantic_service.text_encoder.encode_text(retrieval_texts)
 
     video_ids: set[str] = set()
     any_event_succeeded = False
-    for event, retrieval_text in zip(query.events, retrieval_texts):
+    for index, (event, retrieval_text) in enumerate(zip(query.events, retrieval_texts)):
+        lexical_query = (
+            lexical_queries[index] if lexical_queries else None
+        )
         try:
             candidates = search_kis(
                 retrieval_text,
@@ -91,13 +86,13 @@ def search_trake(
                 pipeline_resolver=pipeline_resolver,
                 aic_registry=aic_registry,
                 # Same split as search_kis()'s own docstring: the dense
-                # branch wants English (retrieval_text, possibly
-                # translated); the lexical/BM25 branch indexes OCR/ASR text,
-                # which is predominantly Vietnamese, so it wants the
-                # ORIGINAL event text -- never the translated one. Only
-                # takes effect when multimodal_service is configured;
-                # search_kis() ignores it otherwise.
-                lexical_query=event.text,
+                # branch wants English (retrieval_text, already translated);
+                # the lexical/BM25 branch indexes OCR/ASR text, which is
+                # predominantly Vietnamese, so it wants the ORIGINAL event
+                # text -- never the translated one. Only takes effect when
+                # multimodal_service is configured; search_kis() ignores it
+                # otherwise.
+                lexical_query=lexical_query,
             )
         except Exception:
             logger.exception(

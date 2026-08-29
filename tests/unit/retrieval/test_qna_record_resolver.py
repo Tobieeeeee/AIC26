@@ -44,7 +44,7 @@ class _Service:
     def __init__(self, hits: list[dict]) -> None:
         self._hits = hits
 
-    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int):
+    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int, lexical_query=None):
         return self._hits[:top_k]
 
 

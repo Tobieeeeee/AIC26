@@ -49,9 +49,11 @@ class _FakeMultimodalService:
     def __init__(self, hits: list[dict]) -> None:
         self._hits = hits
         self.calls: list[tuple[str, int, int]] = []
+        self.seen_lexical: list[str | None] = []
 
-    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int):
+    def search_hybrid(self, query: str, *, top_k: int, rrf_k: int, lexical_query: str | None = None):
         self.calls.append((query, top_k, rrf_k))
+        self.seen_lexical.append(lexical_query)
         return self._hits[:top_k]
 
 
@@ -251,14 +253,10 @@ class _RecordingSemanticService:
 
 def test_search_qna_translates_only_the_retrieval_query() -> None:
     """CLIP's text tower is English-trained, so the event description is
-    translated before retrieval -- but the question must reach the answer
-    reasoner untranslated, or the very detail being asked about can be
-    corrupted in transit."""
+    translated before retrieval (in the query-preprocessing layer) -- but the
+    question must reach the answer reasoner untranslated, or the very detail
+    being asked about can be corrupted in transit."""
     from mvr.enrichment.qna_answer import AnswerReasoner
-
-    class _Translator:
-        def translate(self, text: str) -> str:
-            return "TRANSLATED: " + text
 
     resolver = _resolver({"kf-1": 261})
     service = _FakeMultimodalService([_hit("L21_V001", "kf-1", score=0.9)])
@@ -274,13 +272,15 @@ def test_search_qna_translates_only_the_retrieval_query() -> None:
     backend = _CapturingBackend()
 
     search_qna(
-        "một đoạn mô tả", "câu hỏi gốc", top_k=5,
+        "TRANSLATED: một đoạn mô tả", "câu hỏi gốc", top_k=5,
         semantic_service=None, multimodal_service=service,
         pipeline_resolver=resolver, answer_reasoner=AnswerReasoner(backend),
-        query_translator=_Translator(),
+        lexical_query="một đoạn mô tả",
     )
 
+    # Dense branch receives the translated query; lexical branch the original.
     assert service.calls[0][0] == "TRANSLATED: một đoạn mô tả"
+    assert service.seen_lexical == ["một đoạn mô tả"]
     assert "câu hỏi gốc" in backend.prompts[0]
     assert "TRANSLATED: câu hỏi gốc" not in backend.prompts[0]
 
@@ -298,20 +298,19 @@ def test_search_qna_without_translator_sends_the_original_query() -> None:
 
 
 def test_search_qna_falls_back_to_original_when_translation_fails() -> None:
-    class _Broken:
-        def translate(self, text: str) -> str:
-            raise RuntimeError("down")
-
-    service = _RecordingSemanticService()
+    # When the preprocessing layer's translator fails, it falls back to the
+    # original text; search_qna then receives the original for both branches.
+    service = _FakeMultimodalService([_hit("L21_V001", "kf-1", score=0.9)])
 
     search_qna(
         "một đoạn mô tả", "câu hỏi", top_k=5,
-        semantic_service=service, multimodal_service=None,
+        semantic_service=None, multimodal_service=service,
         answer_reasoner=_reasoner("1", "context-grounded"),
-        query_translator=_Broken(),
+        lexical_query="một đoạn mô tả",
     )
 
-    assert service.queries == ["một đoạn mô tả"]
+    assert service.calls[0][0] == "một đoạn mô tả"
+    assert service.seen_lexical == ["một đoạn mô tả"]
 
 
 def test_search_qna_drops_unresolvable_candidates_without_guessing() -> None:

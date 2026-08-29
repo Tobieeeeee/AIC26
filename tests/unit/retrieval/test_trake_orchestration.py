@@ -306,8 +306,15 @@ def test_no_translator_keeps_event_text_unchanged(monkeypatch) -> None:
 def test_translator_translates_each_event_before_shortlisting_and_encoding(monkeypatch) -> None:
     """Both the shortlist calls AND the encoded vectors must use the SAME
     translated text -- otherwise shortlisting and dense scoring would be
-    comparing two different queries."""
-    query = _query(k=2)
+    comparing two different queries. Translation lives in the
+    query-preprocessing layer (the caller), so here the caller pre-translates
+    the query and passes the original as lexical_queries."""
+    mapping = {"event 1": "a red car", "event 2": "a person enters a building"}
+    translator = _FakeTranslator(mapping)
+    translated_events = tuple(
+        TrakeEventQuery(i, translator.translate(f"event {i}")) for i in range(1, 3)
+    )
+    query = TrakeQuery(events=translated_events, gaps=tuple(TrakeGapConstraint(0.0, 60.0) for _ in range(1)))
     semantic_service = _FakeSemanticService(np.zeros((2, 4)))
     search_kis_calls: list[str] = []
     monkeypatch.setattr(
@@ -317,17 +324,15 @@ def test_translator_translates_each_event_before_shortlisting_and_encoding(monke
     )
     monkeypatch.setattr(trake_module, "build_video_score_matrix", _stub_matrix)
     strategy = _FakeAlignmentStrategy({})
-    translator = _FakeTranslator({"event 1": "a red car", "event 2": "a person enters a building"})
 
     search_trake(
         query,
         alignment_strategy=strategy,
         semantic_service=semantic_service,
         aic_registry=None,
-        query_translator=translator,
+        lexical_queries=["event 1", "event 2"],
     )
 
-    assert translator.calls == ["event 1", "event 2"]
     assert search_kis_calls == ["a red car", "a person enters a building"]
     assert semantic_service.text_encoder.calls[0] == ["a red car", "a person enters a building"]
 
@@ -340,7 +345,12 @@ def test_search_kis_receives_original_text_as_lexical_query_not_the_translation(
     ORIGINAL text, because OCR/ASR indexed text is predominantly Vietnamese
     and translating it away would only help the dense branch while hurting
     the lexical one -- same split search_kis() itself documents."""
-    query = _query(k=2)
+    mapping = {"event 1": "a red car", "event 2": "a person enters a building"}
+    translator = _FakeTranslator(mapping)
+    translated_events = tuple(
+        TrakeEventQuery(i, translator.translate(f"event {i}")) for i in range(1, 3)
+    )
+    query = TrakeQuery(events=translated_events, gaps=tuple(TrakeGapConstraint(0.0, 60.0) for _ in range(1)))
     semantic_service = _FakeSemanticService(np.zeros((2, 4)))
     seen_kwargs: list[dict] = []
 
@@ -351,14 +361,13 @@ def test_search_kis_receives_original_text_as_lexical_query_not_the_translation(
     monkeypatch.setattr(trake_module, "search_kis", recording_search_kis)
     monkeypatch.setattr(trake_module, "build_video_score_matrix", _stub_matrix)
     strategy = _FakeAlignmentStrategy({})
-    translator = _FakeTranslator({"event 1": "a red car", "event 2": "a person enters a building"})
 
     search_trake(
         query,
         alignment_strategy=strategy,
         semantic_service=semantic_service,
         aic_registry=None,
-        query_translator=translator,
+        lexical_queries=["event 1", "event 2"],
     )
 
     assert [call["query"] for call in seen_kwargs] == ["a red car", "a person enters a building"]
@@ -367,8 +376,8 @@ def test_search_kis_receives_original_text_as_lexical_query_not_the_translation(
 
 def test_translator_failure_falls_back_to_original_text_not_a_crash(monkeypatch) -> None:
     """A broken/uncached translator must degrade to untranslated retrieval
-    (mvr.enrichment.qna_translation.translate_for_retrieval's own contract),
-    never abort the whole query."""
+    (mvr.enrichment.qna_translation.translate_for_retrieval's own contract,
+    handled in the query-preprocessing layer) -- never abort the whole query."""
     query = _query(k=2)
     semantic_service = _FakeSemanticService(np.zeros((2, 4)))
     search_kis_calls: list[str] = []
@@ -379,14 +388,26 @@ def test_translator_failure_falls_back_to_original_text_not_a_crash(monkeypatch)
     )
     monkeypatch.setattr(trake_module, "build_video_score_matrix", _stub_matrix)
     strategy = _FakeAlignmentStrategy({"V1": [TrakeChainPrediction("V1", (1, 2), score=1.0)]})
-    translator = _FakeTranslator(raises=True)
+
+    # Preprocessing layer degrades on failure: both branches see the original.
+    from mvr.retrieval.query_preprocessing import QueryPreprocessingService
+
+    broken = _FakeTranslator(raises=True)
+    service = QueryPreprocessingService(translator_factory=lambda: broken)
+    lexical_queries = []
+    translated_events = []
+    for i in range(1, 3):
+        p = service.prepare(f"event {i}")
+        translated_events.append(TrakeEventQuery(i, p.dense))
+        lexical_queries.append(p.lexical)
+    q = TrakeQuery(events=tuple(translated_events), gaps=tuple(TrakeGapConstraint(0.0, 60.0) for _ in range(1)))
 
     result = search_trake(
-        query,
+        q,
         alignment_strategy=strategy,
         semantic_service=semantic_service,
         aic_registry=None,
-        query_translator=translator,
+        lexical_queries=lexical_queries,
     )
 
     assert search_kis_calls == ["event 1", "event 2"]  # fell back to the original text

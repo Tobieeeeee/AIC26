@@ -247,6 +247,16 @@ class R2Client:
             )
         return {"key": key, "size": file_size, "sha256": _sha256_file(local_path)}
 
+    def copy_object(self, src_key: str, dst_key: str) -> None:
+        """Server-side copy from one key to another (no local download)."""
+        client = self._get_client()
+        self._retry(
+            f"CopyObject({src_key} -> {dst_key})",
+            client.copy_object,
+            Bucket=self.bucket, Key=dst_key,
+            CopySource={"Bucket": self.bucket, "Key": src_key},
+        )
+
     def delete_object(self, key: str) -> None:
         """Delete a single object."""
         client = self._get_client()

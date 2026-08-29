@@ -272,13 +272,16 @@ def test_trake_search_uses_an_injected_query_translator(monkeypatch) -> None:
 
     monkeypatch.setattr(trake_module, "search_kis", recording_search_kis)
     monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    from mvr.retrieval.query_preprocessing import QueryPreprocessingService
     client = TestClient(
         create_app(
             semantic_service=FakeTrakeSemanticService(),
             multimodal_service=None,
             kis_pipeline_resolver=None,
             kis_aic_registry=None,
-            trake_query_translator=_FakeTranslator(),
+            query_preprocessing=QueryPreprocessingService(
+                translator_factory=lambda: _FakeTranslator()
+            ),
         )
     )
 

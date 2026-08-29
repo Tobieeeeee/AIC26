@@ -295,7 +295,7 @@ def search_qna(
     keyframe_path_resolver: KeyframePathResolver | None = None,
     record_resolver: RecordResolver | None = None,
     min_object_confidence: float = 0.0,
-    query_translator: QueryTranslator | None = None,
+    lexical_query: str | None = None,
     temporal_radius: int = 0,
     neighbour_cost: float = 1.0,
     neighbour_index: KeyframeNeighbourIndex | None = None,
@@ -342,13 +342,16 @@ def search_qna(
 
     fetch_count = overfetch if overfetch is not None else max(top_k * 3, 30)
 
-    # Only the retrieval query is translated. The question keeps its original
-    # language for the answer reasoner -- see mvr.enrichment.qna_translation.
-    retrieval_query = translate_for_retrieval(event_description.strip(), query_translator)
+    # `event_description` arrives already translated (dense). The question keeps
+    # its original language for the answer reasoner -- see
+    # mvr.enrichment.qna_translation. `lexical_query` is the original
+    # Vietnamese, which the OCR/ASR-indexed BM25 branch wants.
+    retrieval_query = event_description.strip()
 
     if multimodal_service is not None:
         raw_hits: Sequence[Mapping[str, Any]] = multimodal_service.search_hybrid(
-            retrieval_query, top_k=fetch_count, rrf_k=60
+            retrieval_query, top_k=fetch_count, rrf_k=60,
+            lexical_query=lexical_query,
         )
     else:
         raw_hits = [
