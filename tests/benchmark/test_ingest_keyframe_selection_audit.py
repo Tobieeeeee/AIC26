@@ -167,8 +167,8 @@ def test_audit_package_cli_ingest_defaults(monkeypatch: pytest.MonkeyPatch, tmp_
     monkeypatch.setattr(cli, "run_pipeline", lambda **values: calls.append(values))
     cli.main(["ingest", str(tmp_path / "input.mp4"), "--output", str(tmp_path / "out")])
 
-    assert calls[0]["methods"] == ["pyscenedetect"]
-    assert calls[0]["primary"] == "pyscenedetect"
+    assert calls[0]["methods"] == ["transnetv2"]
+    assert calls[0]["primary"] == "transnetv2"
     assert calls[0]["long_shot_seconds"] == 12.0
     assert calls[0]["sample_every_seconds"] == 8.0
     assert calls[0]["device"] == "auto"
@@ -190,8 +190,8 @@ def test_audit_run_ingestion_script_defaults(monkeypatch: pytest.MonkeyPatch, tm
     )
     module.main()
 
-    assert calls[0]["methods"] == ["pyscenedetect"]
-    assert calls[0]["primary"] == "pyscenedetect"
-    assert calls[0]["long_shot_seconds"] == 15.0
-    assert calls[0]["sample_every_seconds"] == 5.0
-    assert calls[0]["device"] == "cpu"
+    assert calls[0]["methods"] == ["transnetv2"]
+    assert calls[0]["primary"] == "transnetv2"
+    assert calls[0]["long_shot_seconds"] == 12.0
+    assert calls[0]["sample_every_seconds"] == 8.0
+    assert calls[0]["device"] == "auto"

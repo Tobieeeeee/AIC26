@@ -184,8 +184,12 @@ def test_real_visual_adapters_open_the_same_image_independently(
 def test_objects_dispatches_one_detector_call_per_keyframe(tmp_path: Path) -> None:
     class Detector:
         model_name = "audit-detector"
+        model_family = "audit-detector"
         score_threshold = 0.5
         nms_threshold = 0.5
+        nms_enabled = True
+        nms_mode = "standard"
+        nms_implementation = "torchvision"
 
         def __init__(self) -> None:
             self.paths: list[Path] = []

@@ -828,7 +828,23 @@ def _add_r2_parser(subparsers: "argparse._SubParsersAction") -> None:
     p.set_defaults(command="r2", r2_command="push")
 
 
+def _load_dotenv() -> None:
+    """Load .env into os.environ if present and not already set.
+
+    Lets `python -m mvr.cli r2 ...` work without manually exporting
+    credentials. Existing environment variables always win.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    env_path = Path(".env")
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
+
+
 def _run_r2(values: dict) -> None:
+    _load_dotenv()
     r2_command = values.pop("r2_command")
 
     from .operations import cache as cache_mod
@@ -1092,7 +1108,5 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
 
 
-if __name__ == "__main__":
-    main()
 if __name__ == "__main__":
     main()
