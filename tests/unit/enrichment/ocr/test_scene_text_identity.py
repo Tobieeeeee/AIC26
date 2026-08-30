@@ -195,3 +195,34 @@ def test_the_anchor_lookup_is_keyed_by_video_and_keyframe() -> None:
 
     assert lookup[("L21_V001", "034")]["frame_idx"] == 1745
     assert lookup[("L21_V002", "034")]["frame_idx"] == 900
+
+
+def test_resolve_video_path_finds_the_r2_reorg_layout(tmp_path) -> None:
+    """OCR kept its own copy of the layout rules, so when the R2 reorg moved
+    videos to <batch>/videos/<collection>/ this one was not updated with the
+    registry. The caller only warns on a miss, so a run against a mirrored
+    corpus would report success having read zero frames."""
+    from mvr.enrichment.ocr.scene_text import resolve_video_path
+
+    video = tmp_path / "batch1" / "videos" / "L21" / "L21_V001.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"mp4")
+
+    assert resolve_video_path(tmp_path, "L21_V001") == video
+
+
+def test_resolve_video_path_still_finds_the_flat_and_organizer_shapes(tmp_path) -> None:
+    from mvr.enrichment.ocr.scene_text import resolve_video_path
+
+    flat_root = tmp_path / "flat"
+    flat_root.mkdir()
+    (flat_root / "L21_V001.mp4").write_bytes(b"flat")
+
+    organizer_root = tmp_path / "organizer"
+    nested = organizer_root / "Videos_L21_a" / "video"
+    nested.mkdir(parents=True)
+    (nested / "L21_V001.mp4").write_bytes(b"organizer")
+
+    assert resolve_video_path(flat_root, "L21_V001").read_bytes() == b"flat"
+    assert resolve_video_path(organizer_root, "L21_V001").read_bytes() == b"organizer"
+    assert resolve_video_path(tmp_path / "empty", "L21_V001") is None

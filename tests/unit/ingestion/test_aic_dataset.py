@@ -302,3 +302,66 @@ def test_a_root_with_neither_layout_resolves_nothing_rather_than_raising(tmp_pat
     assert registry.video_path("L21_V001") is None
     with pytest.raises(MissingFrameMappingError):
         registry.resolve_frame("L21_V001", "3")
+
+
+def test_video_resolves_under_the_r2_reorg_layout(tmp_path) -> None:
+    """The R2 reorg (main 712274d) retired the organizer's Videos_*/video/
+    shape inside the bucket and made data/raw/{batch}/videos/{collection}/ the
+    canonical one -- see src/mvr/operations/r2_layout.py raw_video_key(). A
+    root mirrored from R2 after that move has its videos one level deeper and
+    grouped by collection, which the two older shapes cannot express.
+    """
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    video = tmp_path / "batch1" / "videos" / "L21" / "L21_V001.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"mp4")
+
+    registry = AicDatasetRegistry(tmp_path)
+
+    assert registry.video_path("L21_V001") == video
+
+
+def test_video_reorg_layout_keeps_collections_apart(tmp_path) -> None:
+    """Two collections under one batch; asking for one must not answer with
+    the other's file."""
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    for collection, video_id in (("L21", "L21_V001"), ("L30", "L30_V031")):
+        path = tmp_path / "batch1" / "videos" / collection / f"{video_id}.mp4"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(video_id.encode())
+
+    registry = AicDatasetRegistry(tmp_path)
+
+    assert registry.video_path("L21_V001").read_bytes() == b"L21_V001"
+    assert registry.video_path("L30_V031").read_bytes() == b"L30_V031"
+    assert registry.video_path("L99_V999") is None
+
+
+def test_normalized_video_layout_still_wins_over_the_reorg_layout(tmp_path) -> None:
+    """A normalized tree is something a person built deliberately; a mirrored
+    R2 copy alongside it must not take precedence."""
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    normalized = tmp_path / "videos" / "L21_V001.mp4"
+    normalized.parent.mkdir(parents=True)
+    normalized.write_bytes(b"normalized")
+
+    mirrored = tmp_path / "batch1" / "videos" / "L21" / "L21_V001.mp4"
+    mirrored.parent.mkdir(parents=True)
+    mirrored.write_bytes(b"mirrored")
+
+    assert AicDatasetRegistry(tmp_path).video_path("L21_V001").read_bytes() == b"normalized"
+
+
+def test_reorg_layout_does_not_swallow_the_organizer_download(tmp_path) -> None:
+    """The organizer shape must keep resolving: this machine has that one,
+    not a mirrored bucket."""
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
+    organizer = tmp_path / "Videos_L21_a" / "video" / "L21_V001.mp4"
+    organizer.parent.mkdir(parents=True)
+    organizer.write_bytes(b"organizer")
+
+    assert AicDatasetRegistry(tmp_path).video_path("L21_V001").read_bytes() == b"organizer"

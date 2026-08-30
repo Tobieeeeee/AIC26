@@ -93,3 +93,68 @@ def test_a_mounted_keyframe_directory_still_works(tmp_path) -> None:
 
     assert response.status_code == 200, response.text
     assert response.content == JPEG
+
+
+MP4 = b"\x00\x00\x00\x18ftypmp42"
+
+
+def _corpus_with_videos(tmp_path: Path) -> Path:
+    """Both shipped video layouts under one root: the organizer's, and the one
+    the R2 reorg replaced it with."""
+    root = tmp_path / "videos-corpus"
+    _write(root / "Videos_L21_a" / "video" / "L21_V001.mp4", MP4)
+    _write(root / "batch1" / "videos" / "L30" / "L30_V031.mp4", MP4)
+    return root
+
+
+def test_videos_serve_from_the_organizer_and_the_r2_reorg_layouts(tmp_path) -> None:
+    client = _client(_corpus_with_videos(tmp_path))
+
+    organizer = client.get("/videos/L21_V001.mp4")
+    mirrored = client.get("/videos/L30_V031.mp4")
+
+    assert organizer.status_code == 200, organizer.text
+    assert organizer.content == MP4
+    assert mirrored.status_code == 200, mirrored.text
+    assert mirrored.content == MP4
+
+
+def test_unknown_video_is_404_not_500(tmp_path) -> None:
+    client = _client(_corpus_with_videos(tmp_path))
+
+    assert client.get("/videos/L99_V999.mp4").status_code == 404
+
+
+def test_video_route_refuses_to_walk_out_of_the_corpus(tmp_path) -> None:
+    root = _corpus_with_videos(tmp_path)
+    _write(tmp_path / "secret.txt", b"not a video")
+
+    client = _client(root)
+
+    for attempt in ("/videos/..%2F..%2Fsecret.txt", "/videos/%2E%2E%2Fsecret.txt"):
+        response = client.get(attempt)
+        assert response.status_code in (400, 404), f"{attempt} -> {response.status_code}"
+        assert b"not a video" not in response.content
+
+
+def test_a_mounted_video_directory_still_works(tmp_path) -> None:
+    video_dir = tmp_path / "flat-videos"
+    _write(video_dir / "video-1.mp4", MP4)
+
+    client = TestClient(
+        create_app(
+            semantic_service=None,
+            multimodal_service=None,
+            kis_pipeline_resolver=None,
+            kis_aic_registry=AicDatasetRegistry(_corpus_with_videos(tmp_path)),
+            keyframe_dir=None,
+            video_dir=video_dir,
+            qna_answer_reasoner=None,
+            trake_query_translator=None,
+        )
+    )
+
+    response = client.get("/videos/video-1.mp4")
+
+    assert response.status_code == 200, response.text
+    assert response.content == MP4

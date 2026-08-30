@@ -1,6 +1,6 @@
 # Backend UI API Report
 
-Version: 3.0
+Version: 4.0
 Branch: `docs/backend-ui-api-report`, rebased onto `origin/main` @ `712274d`
 Reviews: `6e7f1a3` — "feat: add frontend API adapter for retrieval UI",
 Golden <24521777@gm.uit.edu.vn>
@@ -12,6 +12,7 @@ BACKEND_UI_API_RUN_END_TO_END_ON_REAL_DATA
 MERGE_DEFECT_FOUND_AND_FIXED
 LAUNCH_SCRIPT_REWRITTEN_AND_EXERCISED
 UI_ADAPTER_TRAKE_MEDIA_FIELDS_FIXED
+R2_REORG_VIDEO_LAYOUT_DIVERGENCE_FIXED_BUT_UNPROVEN_ON_REAL_VIDEO
 BORROWS_ONE_UNMERGED_COMMIT_FROM_feat/official-submission-format
 ```
 
@@ -256,16 +257,99 @@ KIS was re-checked for regression and is unchanged: `L23_V019` frame 98 at
 pytest tests/unit/   ->  1110 passed, 3 skipped in 47.64s
 ```
 
-## 7. Still open
+## 7. The R2 reorg moved the videos and nothing on the reading side was told
 
-- Video serving has the same shape of problem as (c): the organizer nests
-  videos under `Videos_*/video/`. It is untested here because no `Videos_*`
-  folder exists on this machine, so the claim is unverified either way.
+Section 6c blamed the organizer's fourteen keyframe roots for the media
+problem. That was half the story. Chasing why no `Videos_*` folder exists on
+this machine turned up a second, unrelated divergence.
+
+`main` `712274d` ("finish R2 reorg") rewrote object keys **inside the bucket**:
+
+```text
+Videos_L21_a/video/L21_V001.mp4  ->  data/raw/batch1/videos/L21/L21_V001.mp4
+```
+
+`src/mvr/operations/r2_layout.py` declares that canonical
+(`raw_video_key(batch, collection, video_id)`), and
+`scripts/operations/r2_reng.py` applies it. Its `build_plan()` calls only
+`plan_videos_to_canonical()`, so **videos moved and nothing else did** —
+keyframes, objects and map-keyframes keep the organizer's shape.
+
+Nobody taught the reading side. `AicDatasetRegistry` — the module all three
+tracks use to find assets — knew two layouts and not the new one. Probed with
+all three built in a temp tree:
+
+```text
+organizer  Videos_*/video/          -> found
+R2 mirror  <batch>/videos/<coll>/   -> NOT FOUND
+normalized videos/                  -> found
+```
+
+`mvr/enrichment/ocr/scene_text.py` carried its **own second copy** of the same
+rules and had the same gap — and its caller only warns on a miss, so an OCR
+run against a mirrored corpus would report success having read zero frames.
+
+This is not why `E:\AIC26_data` has no videos: that download never included
+them, and this machine has no `.env`, so nothing was ever pulled from R2. The
+divergence is real but latent — it fires the first time anyone mirrors the
+bucket.
+
+### Fixed
+
+- `AicDatasetRegistry.RAW_LAYOUT` is now a list of directory globs per asset
+  kind rather than a single `(outer, inner)` pair, and videos gained
+  `*/videos/*`. Normalized still wins, then the organizer shape, then the
+  mirror.
+- `resolve_video_path()` in `scene_text.py` keeps only its own flat
+  convention and delegates everything else to the registry. The duplicate copy
+  of the layout rules is gone, which is what let the two drift apart.
+- `GET /videos/{filename}` is now a route ahead of the static mount, mirroring
+  the keyframe one: mounted directory first, then the registry.
+- `_frame_asset_urls` took a `video_dir` it never used as a directory, only as
+  a "can anything serve this?" flag, and withheld the URL whenever
+  `MVR_VIDEO_DIR` was unset. It now takes `video_available`, true when either
+  the mount or the registry can answer, so a link that would resolve is no
+  longer hidden.
+
+## 8. Verification
+
+```text
+pytest tests/unit/   ->  1121 passed, 3 skipped in 47.94s
+```
+
+Live, same server and corpus, after every change in this report:
+
+```text
+TRAKE  L27_V015 frame=5674 ts=00:03:46 thumb=/keyframes/L27_V015/140.jpg
+KIS    L23_V019 frame=98   ts=00:00:03 thumb=/keyframes/L23_V019/002.jpg
+
+/keyframes/L27_V015/140.jpg  200  163623 bytes   Keyframes_L27
+/keyframes/L21_V001/001.jpg  200  135232 bytes   Keyframes_L21
+/keyframes/L30_V031/010.jpg  200  260761 bytes   Keyframes_L30
+/videos/L27_V015.mp4         404
+```
+
+Both tracks return exactly what they returned before the refactor, so renaming
+the parameter through the KIS, Q&A and TRAKE result paths changed no output.
+
+That `404` is the correct answer, not a failure: there is no video file
+anywhere on this machine. **The video route and the two new video layouts are
+proven by tests only.** No real `.mp4` has been served, and this report does
+not claim otherwise.
+
+## 9. Still open
+
 - `/search/semantic` still resolves images through `_servable_keyframe_url`
-  against the single mounted directory. The new route fixes what the UI asks
+  against the single mounted directory. The new routes cover what the UI asks
   for; that older endpoint was not touched.
+- `RAW_LAYOUT` on this branch has no `objects` entry. That fix is commit
+  `70d117f` on `feat/official-submission-format`, not cherry-picked here, so
+  Q&A object detections still resolve only under the normalized layout on this
+  branch.
+- Whether the R2 bucket has actually been reorganized is unverified: no
+  credentials exist on this machine, and none were sought.
 
-## 8. Branch state
+## 10. Branch state
 
 - `feat/backend-ui-api` is not merged into `main` and was 6 commits behind it.
 - This branch rebases it onto `712274d`, adds the fixes above, and borrows

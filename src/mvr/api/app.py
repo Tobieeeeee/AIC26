@@ -593,7 +593,7 @@ def _frame_asset_urls(
     keyframe_id: str | None,
     image_path: str | None,
     keyframe_dir: Path | None,
-    video_dir: Path | None,
+    video_available: bool,
 ) -> tuple[str, str]:
     thumbnail = _servable_keyframe_url(image_path, keyframe_dir)
     if thumbnail is None and image_path and str(image_path).startswith("/keyframes/"):
@@ -604,8 +604,13 @@ def _frame_asset_urls(
     if thumbnail is None:
         thumbnail = f"/keyframes/{video_id}/{frame_id}.jpg"
 
-    video_url = f"/videos/{video_id}.mp4" if video_dir is not None else ""
+    video_url = f"/videos/{video_id}.mp4" if video_available else ""
     return thumbnail, video_url
+
+
+def _is_safe_path_component(value: str) -> bool:
+    """One path segment that cannot climb out of the directory it names."""
+    return bool(value) and value not in (".", "..") and "/" not in value and "\\" not in value
 
 
 def _trake_frame_details(
@@ -667,7 +672,7 @@ def _ui_result(
     keyframe_id: str | None,
     image_path: str | None,
     keyframe_dir: Path | None,
-    video_dir: Path | None,
+    video_available: bool,
     answer: str | None = None,
     objects: list[str] | None = None,
     frames: list[int | None] | None = None,
@@ -678,7 +683,7 @@ def _ui_result(
         keyframe_id=keyframe_id,
         image_path=image_path,
         keyframe_dir=keyframe_dir,
-        video_dir=video_dir,
+        video_available=video_available,
     )
     timestamp_sec = float(timestamp if timestamp is not None else 0.0)
     return UiKeyframeResult(
@@ -773,9 +778,8 @@ def create_app(
         single mount can express, so the dataset registry -- which already
         globs those batch folders -- is asked second.
         """
-        for part in (video_id, filename):
-            if not part or part in (".", "..") or "/" in part or "\\" in part:
-                raise HTTPException(status_code=404, detail="keyframe not found")
+        if not all(_is_safe_path_component(part) for part in (video_id, filename)):
+            raise HTTPException(status_code=404, detail="keyframe not found")
 
         if isinstance(keyframe_dir, Path):
             direct = keyframe_dir / video_id / filename
@@ -799,6 +803,34 @@ def create_app(
             StaticFiles(directory=keyframe_dir),
             name="keyframes",
         )
+    @application.get("/videos/{filename}", include_in_schema=False)
+    def video_file(filename: str) -> FileResponse:
+        """Serve one video, whatever layout the corpus is in.
+
+        Same shape of problem the keyframes had, one level worse: besides the
+        organizer's ``Videos_*/video/``, the R2 reorg introduced
+        ``<batch>/videos/<collection>/``. The registry knows both, so ask it
+        rather than keeping a third copy of the rules here.
+        """
+        if not _is_safe_path_component(filename):
+            raise HTTPException(status_code=404, detail="video not found")
+
+        if isinstance(video_dir, Path):
+            direct = video_dir / filename
+            if direct.is_file():
+                return FileResponse(direct)
+
+        if kis_aic_registry is not None:
+            try:
+                resolved = kis_aic_registry.video_path(Path(filename).stem)
+            except Exception:
+                logger.exception("video_path failed for %s", filename)
+                resolved = None
+            if resolved is not None and Path(resolved).is_file():
+                return FileResponse(resolved)
+
+        raise HTTPException(status_code=404, detail="video not found")
+
     if isinstance(video_dir, Path) and video_dir.is_dir():
         application.mount(
             "/videos",
@@ -835,6 +867,9 @@ def create_app(
     def ui_search(request: UiSearchRequest) -> UiSearchResponse:
         served_keyframes = keyframe_dir if isinstance(keyframe_dir, Path) else None
         served_videos = video_dir if isinstance(video_dir, Path) else None
+        # The /videos route falls back to the dataset registry, so a link is
+        # worth emitting whenever either the mount or the registry can answer.
+        videos_servable = served_videos is not None or kis_aic_registry is not None
 
         if request.task_mode == "Q&A":
             question = (request.question or "").strip() or request.query
@@ -865,7 +900,7 @@ def create_app(
                     keyframe_id=candidate.keyframe_id,
                     image_path=candidate.image_path,
                     keyframe_dir=served_keyframes,
-                    video_dir=served_videos,
+                    video_available=videos_servable,
                     answer=candidate.answer,
                 )
                 for candidate in candidates
@@ -941,7 +976,7 @@ def create_app(
                             keyframe_id=chain_keyframe_id,
                             image_path=None,
                             keyframe_dir=served_keyframes,
-                            video_dir=served_videos,
+                            video_available=videos_servable,
                             frames=list(chain.frames),
                         )
                     )
@@ -971,7 +1006,7 @@ def create_app(
                 keyframe_id=candidate.keyframe_id,
                 image_path=None,
                 keyframe_dir=served_keyframes,
-                video_dir=served_videos,
+                video_available=videos_servable,
             )
             for candidate in candidates
         ]

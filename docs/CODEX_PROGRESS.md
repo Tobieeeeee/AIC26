@@ -1672,14 +1672,62 @@ one process. KIS re-checked for regression and unchanged.
 
 `pytest tests/unit/` -> 1110 passed, 3 skipped in 47.64s.
 
+Then a second, unrelated divergence, found while asking why no `Videos_*`
+folder exists on this machine:
+
+`main` `712274d` ("finish R2 reorg") rewrote object keys inside the bucket,
+`Videos_L21_a/video/L21_V001.mp4` -> `data/raw/batch1/videos/L21/...`, and
+declared that canonical in `mvr/operations/r2_layout.py`. `build_plan()` in
+`scripts/operations/r2_reng.py` moves videos and nothing else. Nobody taught
+the reading side. Probed with all three layouts in a temp tree:
+
+```text
+organizer  Videos_*/video/          -> found
+R2 mirror  <batch>/videos/<coll>/   -> NOT FOUND
+normalized videos/                  -> found
+```
+
+`scene_text.py` carried its own second copy of those rules and had the same
+gap, and its caller only warns on a miss — so an OCR run against a mirrored
+corpus would report success having read zero frames. This is not why
+`E:\AIC26_data` has no videos: that download never had them, and this machine
+has no `.env`, so nothing was ever pulled.
+
+Fixed:
+
+- `AicDatasetRegistry.RAW_LAYOUT` is now directory globs per asset kind
+  instead of one `(outer, inner)` pair; videos gained `*/videos/*`. Normalized
+  still wins, then organizer, then mirror.
+- `resolve_video_path()` keeps only its own flat convention and delegates the
+  rest to the registry, deleting the duplicate rules that let the two drift.
+- `GET /videos/{filename}` is a route ahead of the static mount, mirroring the
+  keyframe one.
+- `_frame_asset_urls` took a `video_dir` it used only as a boolean and
+  withheld the URL whenever `MVR_VIDEO_DIR` was unset; it now takes
+  `video_available`, true when either the mount or the registry can answer.
+
+Verification:
+
+- `pytest tests/unit/` -> 1121 passed, 3 skipped in 47.94s.
+- Live, after every change: TRAKE `L27_V015` frame 5674 at `00:03:46`, KIS
+  `L23_V019` frame 98 at `00:00:03` — byte-identical to before the refactor,
+  so renaming the parameter through all three result paths changed no output.
+  Keyframes served 200 from `Keyframes_L21`, `Keyframes_L27` and
+  `Keyframes_L30` in one process.
+- `/videos/L27_V015.mp4` returned 404, which is correct: there is no video
+  file anywhere on this machine. The video route and the two new video
+  layouts are covered by tests only; no real `.mp4` has been served.
+
 Still open:
 
-- Video serving has the same shape of problem; unverified here because no
-  `Videos_*` folder exists on this machine.
 - `/search/semantic` still resolves images against the single mounted
-  directory and was not touched.
+  directory; not touched.
+- `RAW_LAYOUT` here has no `objects` entry — that is `70d117f` on
+  `feat/official-submission-format`, not cherry-picked.
+- Whether the R2 bucket was actually reorganized is unverified; no credentials
+  exist on this machine and none were sought.
 
 Git:
 
-- Branch: `docs/backend-ui-api-report`, rebased onto `origin/main` `712274d`
-- Pushed: yes, `1e03a4a`; the UI fixes above are a later commit
+- Branch: `docs/backend-ui-api-report`, rebased onto `origin/main` `712274d`,
+  borrowing `1e9a8d4` from `feat/official-submission-format`.

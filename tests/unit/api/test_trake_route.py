@@ -471,3 +471,14 @@ def test_ui_search_trake_drops_a_timestamp_from_a_disagreeing_mapping(monkeypatc
     # The thumbnail still resolves: the id itself is not in dispute, only
     # which frame it sits at.
     assert result["thumbnail_url"] == "/keyframes/L21_V018/007.jpg"
+
+
+def test_ui_search_emits_a_video_url_when_only_the_registry_can_serve(monkeypatch) -> None:
+    """/videos is no longer a bare static mount -- it falls back to the dataset
+    registry -- so withholding the URL whenever MVR_VIDEO_DIR happens to be
+    unset hides a link that would in fact resolve."""
+    monkeypatch.delenv("MVR_VIDEO_DIR", raising=False)
+    response = _client_with_mapping(monkeypatch).post("/api/v1/search", json=_UI_TRAKE_REQUEST)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["results"][0]["video_url"] == "/videos/L21_V018.mp4"

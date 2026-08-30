@@ -167,24 +167,27 @@ def group_candidates(
 
 
 def resolve_video_path(video_root: Path, video_id: str) -> Path | None:
-    """The video's file under either layout, or None.
+    """The video's file under any known layout, or None.
 
-    A normalized root holds `<root>/<video_id>.mp4`. The raw organizer
-    download nests them two levels and splits them across 14 directories:
-    `<root>/Videos_L21_a/video/L21_V001.mp4`. Only the flat shape was
-    searched, so pointing this at the real download matched nothing --
-    and the caller merely warned and continued, so the run reported
-    success having processed zero frames.
+    A flat root holds `<root>/<video_id>.mp4` and is checked here because it
+    is this function's own convention -- callers pass a videos directory, not
+    a dataset root.
+
+    Everything else is `AicDatasetRegistry`'s job: the organizer's
+    `Videos_L21_a/video/` shape, and the `<batch>/videos/<collection>/` one
+    the R2 reorg replaced it with. This module used to carry its own copy of
+    those rules, which is exactly how it missed the reorg -- the registry
+    learned the new shape and this did not. The caller only warns on a miss,
+    so an OCR run against a mirrored corpus reported success having read zero
+    frames.
     """
+    from mvr.ingestion.aic_dataset import AicDatasetRegistry
+
     video_root = Path(video_root)
     direct = video_root / f"{video_id}.mp4"
     if direct.is_file():
         return direct
-    for nested in sorted(video_root.glob("Videos_*")):
-        candidate = nested / "video" / f"{video_id}.mp4"
-        if candidate.is_file():
-            return candidate
-    return None
+    return AicDatasetRegistry(video_root).video_path(video_id)
 
 
 def get_shot_boundaries(shots_json_path: Path) -> dict[tuple[str, int], tuple[int, int]]:
