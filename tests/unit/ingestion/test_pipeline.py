@@ -170,9 +170,12 @@ def test_hybrid_mode_propagates_metaclip_unavailability_without_fallback(
         )
 
 
-def test_library_defaults_use_transnet_periodic_without_content_encoder(
+def test_library_defaults_use_transnet_hybrid_with_content_encoder(
     monkeypatch, tmp_path: Path
 ) -> None:
+    """The canonical library default is hybrid_temporal_content, which always
+    needs MetaCLIP-2 to score candidate novelty -- unlike the retired
+    periodic default, a bare run_pipeline() call is expected to load it."""
     from mvr.enrichment.embeddings import metaclip2
     from mvr.ingestion import pipeline
 
@@ -192,12 +195,44 @@ def test_library_defaults_use_transnet_periodic_without_content_encoder(
         return Detector()
 
     monkeypatch.setattr(pipeline, "create_detector", make_detector)
-    monkeypatch.setattr(
-        metaclip2,
-        "MetaClip2ImageEncoder",
-        lambda **kwargs: pytest.fail("periodic default initialized MetaCLIP-2"),
+
+    encoder_calls: list[dict] = []
+
+    class FakeEncoder:
+        pass
+
+    def fake_encoder(**kwargs):
+        encoder_calls.append(kwargs)
+        return FakeEncoder()
+
+    monkeypatch.setattr(metaclip2, "MetaClip2ImageEncoder", fake_encoder)
+
+    keyframe = Keyframe(
+        "video_S0001_K01",
+        "video",
+        1,
+        1,
+        12,
+        0.48,
+        "keyframes/video/video_S0001_K01.jpg",
     )
-    monkeypatch.setattr(pipeline, "extract_keyframes", lambda *args: None)
+
+    def fake_run_hybrid_selector(
+        *, video, shots, output_root, config, spec, encoder, embedding_batch_size
+    ):
+        manifest = {
+            "video_id": video.video_id,
+            "candidate_count": 1,
+            "candidate_extraction_seconds": 0.0,
+            "candidate_embedding_seconds": 0.0,
+            "selector_only_seconds": 0.0,
+            "content_event_selection_count": 0,
+            "temporal_repair_selection_count": 0,
+            "max_observed_temporal_gap_sec": 0.0,
+        }
+        return [keyframe], manifest
+
+    monkeypatch.setattr(pipeline, "run_hybrid_selector", fake_run_hybrid_selector)
     monkeypatch.setattr(pipeline, "write_metadata", lambda *args: None)
     monkeypatch.setattr(pipeline, "write_benchmark", lambda *args: None)
 
@@ -205,12 +240,10 @@ def test_library_defaults_use_transnet_periodic_without_content_encoder(
     pipeline.run_pipeline(video_path, output)
 
     assert detector_calls == [("transnetv2", 0.5, "auto")]
+    assert len(encoder_calls) == 1
     manifest = json.loads((output / "selector_manifest.json").read_text())
-    assert manifest == {
-        "schema_version": "1.0",
-        "selector_mode": "periodic",
-        "periodic": {"long_threshold_sec": 12.0, "interval_sec": 8.0},
-    }
+    assert manifest["selector_mode"] == "hybrid_temporal_content"
+    assert manifest["selected_keyframe_count"] == 1
 
 
 def test_default_transnet_initialization_failure_never_falls_back(

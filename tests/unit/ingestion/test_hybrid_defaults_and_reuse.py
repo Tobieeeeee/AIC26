@@ -31,7 +31,7 @@ def test_all_runnable_ingestion_defaults_match_canonical_profile() -> None:
     expected = {
         "primary": "transnetv2",
         "transnet_threshold": 0.5,
-        "selector_mode": "periodic",
+        "selector_mode": "hybrid_temporal_content",
         "long_shot_seconds": 12.0,
         "sample_every_seconds": 8.0,
     }
@@ -50,7 +50,7 @@ def test_default_yaml_matches_canonical_profile() -> None:
     ingestion = text.split("\nenrichment:", maxsplit=1)[0]
     assert "shot_detector: transnetv2" in ingestion
     assert "transnet_threshold: 0.5" in ingestion
-    assert "mode: periodic" in ingestion
+    assert "mode: hybrid_temporal_content" in ingestion
     assert "long_threshold_sec: 12.0" in ingestion
     assert "interval_sec: 8.0" in ingestion
 

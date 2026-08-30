@@ -11,14 +11,15 @@ from .keyframes import make_keyframes
 from .hybrid_selector import HYBRID_SELECTOR_MODE, HybridSelectorConfig
 from .metadata import write_benchmark, write_metadata
 from .probe import probe_video
-from .selector_cache import run_hybrid_selector
+from .selector_cache import run_hybrid_selector, run_semantic_dedup_selector
+from .semantic_dedup import SEMANTIC_DEDUP_MODE, SemanticDedupConfig
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 
 CANONICAL_DETECTOR = "transnetv2"
 CANONICAL_TRANSNET_THRESHOLD = 0.5
-CANONICAL_SELECTOR_MODE = "periodic"
+CANONICAL_SELECTOR_MODE = HYBRID_SELECTOR_MODE
 CANONICAL_LONG_SHOT_SECONDS = 12.0
 CANONICAL_SAMPLE_EVERY_SECONDS = 8.0
 
@@ -53,6 +54,10 @@ def run_pipeline(
     edge_change_mad_multiplier: float = 3.0,
     edge_change_min_score: float = 0.08,
     midpoint_mandatory: bool = True,
+    semantic_dedup_candidate_fps: float = 2.0,
+    semantic_dedup_similarity_threshold: float = 0.85,
+    semantic_dedup_max_gap_seconds: float = 8.0,
+    semantic_dedup_force_first_frame_per_shot: bool = True,
     provider_specs_path: Path = Path("configs/embedding_providers.json"),
     metaclip2_model: str | Path | None = None,
     allow_model_downloads: bool = False,
@@ -190,14 +195,72 @@ def run_pipeline(
             ),
             "videos": video_manifests,
         }
+    elif selector_mode == SEMANTIC_DEDUP_MODE:
+        from mvr.enrichment.embeddings.metaclip2 import MetaClip2ImageEncoder
+        from mvr.enrichment.embeddings.provider_specs import load_provider_specs
+
+        config = SemanticDedupConfig(
+            candidate_fps=semantic_dedup_candidate_fps,
+            similarity_threshold=semantic_dedup_similarity_threshold,
+            max_gap_seconds=semantic_dedup_max_gap_seconds,
+            force_first_frame_per_shot=semantic_dedup_force_first_frame_per_shot,
+        )
+        spec = load_provider_specs(provider_specs_path).get("metaclip2")
+        encoder = MetaClip2ImageEncoder(
+            spec=spec,
+            model_location=metaclip2_model,
+            device=device,
+            allow_download=allow_model_downloads,
+        )
+        keyframes = []
+        video_manifests = []
+        shots_by_video: dict[str, list] = defaultdict(list)
+        for shot in primary_shots:
+            shots_by_video[shot.video_id].append(shot)
+        for video in videos:
+            selected, manifest = run_semantic_dedup_selector(
+                video=video,
+                shots=shots_by_video[video.video_id],
+                output_root=output_root,
+                config=config,
+                spec=spec,
+                encoder=encoder,
+                embedding_batch_size=embedding_batch_size,
+            )
+            keyframes.extend(selected)
+            video_manifests.append(manifest)
+        selector_manifest = {
+            "schema_version": "1.0",
+            "selector_mode": SEMANTIC_DEDUP_MODE,
+            "config": config.to_dict(),
+            "embedding_model": spec.checkpoint_or_pretrained,
+            "embedding_revision": spec.model_revision,
+            "candidate_count": sum(row["candidate_count"] for row in video_manifests),
+            "selected_keyframe_count": len(keyframes),
+            "candidate_extraction_seconds": sum(
+                row["candidate_extraction_seconds"] for row in video_manifests
+            ),
+            "candidate_embedding_seconds": sum(
+                row["candidate_embedding_seconds"] for row in video_manifests
+            ),
+            "selector_only_seconds": sum(
+                row["selector_only_seconds"] for row in video_manifests
+            ),
+            "dropped_count": sum(row["dropped_count"] for row in video_manifests),
+            "forced_gap_keep_count": sum(
+                row["forced_gap_keep_count"] for row in video_manifests
+            ),
+            "videos": video_manifests,
+        }
     else:
         raise ValueError(
-            "selector_mode must be midpoint, periodic, or hybrid_temporal_content"
+            "selector_mode must be midpoint, periodic, hybrid_temporal_content, "
+            "or semantic_dedup"
         )
     by_video = defaultdict(list)
     for frame in keyframes:
         by_video[frame.video_id].append(frame)
-    if selector_mode != HYBRID_SELECTOR_MODE:
+    if selector_mode not in (HYBRID_SELECTOR_MODE, SEMANTIC_DEDUP_MODE):
         with tqdm(
             videos,
             desc="Extract keyframes",

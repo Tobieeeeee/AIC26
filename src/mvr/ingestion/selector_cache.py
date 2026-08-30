@@ -9,7 +9,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
@@ -34,6 +34,14 @@ from .hybrid_selector import (
 )
 from .keyframes import make_keyframes_from_indices
 from .models import Keyframe, Shot, VideoInfo
+from .semantic_dedup import (
+    SEMANTIC_DEDUP_MODE,
+    SEMANTIC_DEDUP_VERSION,
+    DedupCandidate,
+    SemanticDedupConfig,
+    select_semantic_dedup_frame_indices,
+)
+from .semantic_dedup import candidate_frame_indices as semantic_dedup_candidate_frame_indices
 
 
 CACHE_SCHEMA_VERSION = "1.0"
@@ -79,13 +87,20 @@ def _shot_fingerprint(shots: Sequence[Shot]) -> str:
 
 
 def _candidate_keyframes(
-    shots: Sequence[Shot], output_root: Path, config: HybridSelectorConfig
+    shots: Sequence[Shot],
+    output_root: Path,
+    candidate_indices_fn: Callable[[Shot], list[int]],
 ) -> list[Keyframe]:
+    """Build the candidate grid using the caller's own frame-index generator.
+
+    ``hybrid_selector.candidate_frame_indices`` (mandatory midpoint, offset
+    start) and ``semantic_dedup.candidate_frame_indices`` (plain uniform
+    grid from ``shot.start_frame``) are genuinely different grids -- this
+    function must not assume either shape.
+    """
     candidates: list[Keyframe] = []
     for shot in shots:
-        for ordinal, frame_idx in enumerate(
-            candidate_frame_indices(shot, config.candidate_step_sec), start=1
-        ):
+        for ordinal, frame_idx in enumerate(candidate_indices_fn(shot), start=1):
             candidate_id = (
                 f"{shot.video_id}_S{shot.shot_id:04d}_C{ordinal:04d}"
             )
@@ -210,14 +225,14 @@ def _encode_in_batches(encoder: Any, paths: list[Path], batch_size: int) -> np.n
 def _expected_identity(
     video: VideoInfo,
     shots: Sequence[Shot],
-    config: HybridSelectorConfig,
+    candidate_step_sec: float,
     spec: ProviderSpec,
 ) -> dict[str, object]:
     return {
         "video_id": video.video_id,
         "source_fingerprint": _source_fingerprint(video.path),
         "shot_manifest_sha256": _shot_fingerprint(shots),
-        "candidate_step_sec": config.candidate_step_sec,
+        "candidate_step_sec": candidate_step_sec,
         "metaclip": {
             "model_id": spec.model_id,
             "checkpoint_or_pretrained": spec.checkpoint_or_pretrained,
@@ -252,12 +267,23 @@ def load_or_build_selector_cache(
     video: VideoInfo,
     shots: Sequence[Shot],
     output_root: Path,
-    config: HybridSelectorConfig,
+    config: Any,
+    candidate_step_sec: float,
+    candidate_indices_fn: Callable[[Shot], list[int]],
     spec: ProviderSpec,
     encoder: Any,
     embedding_batch_size: int,
 ) -> tuple[list[Keyframe], np.ndarray, np.ndarray, dict[str, Any]]:
-    """Reuse a fully validated cache or build it once; never silently fallback."""
+    """Reuse a fully validated cache or build it once; never silently fallback.
+
+    ``config`` is duck-typed (only ``.validate()`` is required) so both
+    ``HybridSelectorConfig`` and ``SemanticDedupConfig`` can share this cache.
+    ``candidate_step_sec`` is a plain float used only for the cache-identity
+    fingerprint (so changing the sampling rate invalidates the cache);
+    ``candidate_indices_fn`` is the actual grid generator, since the two
+    selectors' candidate grids are genuinely different shapes (see
+    ``_candidate_keyframes``), not just different step sizes.
+    """
     config.validate()
     output_root = Path(output_root)
     cache_root = output_root / "selector_cache" / video.video_id
@@ -265,7 +291,7 @@ def load_or_build_selector_cache(
     mapping_path = cache_root / "candidate_mapping.csv"
     vectors_path = cache_root / "candidate_embeddings.npy"
     edge_path = cache_root / "edge_change_scores.npy"
-    expected = _expected_identity(video, shots, config, spec)
+    expected = _expected_identity(video, shots, candidate_step_sec, spec)
 
     if manifest_path.exists():
         try:
@@ -274,7 +300,7 @@ def load_or_build_selector_cache(
             raise SelectorCacheError(f"invalid selector cache manifest: {manifest_path}") from exc
         validate_selector_cache_manifest(payload, expected)
         candidates = _load_candidate_mapping(mapping_path)
-        expected_candidates = _candidate_keyframes(shots, output_root, config)
+        expected_candidates = _candidate_keyframes(shots, output_root, candidate_indices_fn)
         if [item.to_dict() for item in candidates] != [
             item.to_dict() for item in expected_candidates
         ]:
@@ -308,7 +334,7 @@ def load_or_build_selector_cache(
             f"incomplete selector cache without manifest: {cache_root}; use a fresh output"
         )
     cache_root.mkdir(parents=True, exist_ok=True)
-    candidates = _candidate_keyframes(shots, output_root, config)
+    candidates = _candidate_keyframes(shots, output_root, candidate_indices_fn)
     _write_candidate_mapping(mapping_path, candidates)
 
     extraction_start = time.perf_counter()
@@ -496,6 +522,10 @@ def run_hybrid_selector(
         shots=shots,
         output_root=output_root,
         config=config,
+        candidate_step_sec=config.candidate_step_sec,
+        candidate_indices_fn=lambda shot: candidate_frame_indices(
+            shot, config.candidate_step_sec
+        ),
         spec=spec,
         encoder=encoder,
         embedding_batch_size=embedding_batch_size,
@@ -567,6 +597,104 @@ def run_hybrid_selector(
         "content_event_selection_count": sum(len(row["content_event_frame_indices"]) for row in decisions),
         "temporal_repair_selection_count": sum(len(row["temporal_repair_frame_indices"]) for row in decisions),
         "max_observed_temporal_gap_sec": max(row["max_observed_gap_sec"] for row in decisions),
+        "candidate_cache_manifest": str(
+            Path("selector_cache") / video.video_id / "manifest.json"
+        ),
+        "selected_embedding_artifact": artifact.relative_to(output_root).as_posix(),
+        "candidate_cache_reused": bool(cache_manifest.get("cache_reused")),
+        "shots": decisions,
+    }
+    return keyframes, manifest
+
+
+def run_semantic_dedup_selector(
+    *,
+    video: VideoInfo,
+    shots: Sequence[Shot],
+    output_root: Path,
+    config: SemanticDedupConfig,
+    spec: ProviderSpec,
+    encoder: Any,
+    embedding_batch_size: int = 16,
+) -> tuple[list[Keyframe], dict[str, Any]]:
+    """Run the semantic_dedup selector for one video and publish reuse artifacts.
+
+    Shares candidate extraction, embedding, and caching with
+    ``run_hybrid_selector`` via ``load_or_build_selector_cache``; only the
+    selection decision (last-kept comparison instead of KNN-window novelty)
+    differs. ``edge_scores`` are still computed by the shared cache but are
+    not used by this selector's decision.
+    """
+    candidate_step_sec = 1.0 / config.candidate_fps
+    candidates, vectors, _edge_scores, cache_manifest = load_or_build_selector_cache(
+        video=video,
+        shots=shots,
+        output_root=output_root,
+        config=config,
+        candidate_step_sec=candidate_step_sec,
+        candidate_indices_fn=lambda shot: semantic_dedup_candidate_frame_indices(
+            shot, config.candidate_fps
+        ),
+        spec=spec,
+        encoder=encoder,
+        embedding_batch_size=embedding_batch_size,
+    )
+    positions_by_shot: dict[int, list[int]] = defaultdict(list)
+    for position, candidate in enumerate(candidates):
+        positions_by_shot[candidate.shot_id].append(position)
+    selected_by_shot: dict[tuple[str, int], list[int]] = {}
+    decisions = []
+    selection_start = time.perf_counter()
+    for shot in shots:
+        positions = positions_by_shot[shot.shot_id]
+        dedup_candidates = [
+            DedupCandidate(candidates[position].frame_idx, vectors[position])
+            for position in positions
+        ]
+        result = select_semantic_dedup_frame_indices(shot, dedup_candidates, config)
+        selected_by_shot[(shot.video_id, shot.shot_id)] = list(result.selected_indices)
+        decisions.append(
+            {
+                "video_id": shot.video_id,
+                "shot_id": shot.shot_id,
+                "selected_frame_indices": list(result.selected_indices),
+                "dropped_frame_indices": list(result.dropped_indices),
+                "forced_gap_keep_frame_indices": list(result.forced_gap_keeps),
+            }
+        )
+    selection_seconds = time.perf_counter() - selection_start
+    keyframes = make_keyframes_from_indices(list(shots), selected_by_shot)
+    candidate_by_identity = {
+        (item.video_id, item.shot_id, item.frame_idx): (item, vectors[position])
+        for position, item in enumerate(candidates)
+    }
+    vectors_by_identity: dict[tuple[str, int, int], np.ndarray] = {}
+    for frame in keyframes:
+        source, vector = candidate_by_identity[(frame.video_id, frame.shot_id, frame.frame_idx)]
+        destination = output_root / frame.image_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(output_root / source.image_path, destination)
+        vectors_by_identity[(frame.video_id, frame.shot_id, frame.frame_idx)] = vector
+    artifact = _write_selected_embedding_artifact(
+        output_root=output_root,
+        keyframes=keyframes,
+        vectors_by_identity=vectors_by_identity,
+        spec=spec,
+    )
+    manifest = {
+        "schema_version": "1.0",
+        "selector_mode": SEMANTIC_DEDUP_MODE,
+        "selector_version": SEMANTIC_DEDUP_VERSION,
+        "config": config.to_dict(),
+        "embedding_model": spec.checkpoint_or_pretrained,
+        "embedding_revision": spec.model_revision,
+        "candidate_count": len(candidates),
+        "selected_keyframe_count": len(keyframes),
+        "candidate_extraction_seconds": cache_manifest["timing"]["candidate_extraction_seconds"],
+        "candidate_embedding_seconds": cache_manifest["timing"]["candidate_embedding_seconds"],
+        "selector_only_seconds": selection_seconds,
+        "dropped_count": sum(len(row["dropped_frame_indices"]) for row in decisions),
+        "forced_gap_keep_count": sum(len(row["forced_gap_keep_frame_indices"]) for row in decisions),
         "candidate_cache_manifest": str(
             Path("selector_cache") / video.video_id / "manifest.json"
         ),

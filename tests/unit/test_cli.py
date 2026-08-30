@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 
-def test_ingest_command_uses_canonical_periodic_defaults(monkeypatch, tmp_path: Path) -> None:
+def test_ingest_command_uses_canonical_hybrid_defaults(monkeypatch, tmp_path: Path) -> None:
     from mvr import cli
 
     calls: list[dict] = []
@@ -21,7 +21,7 @@ def test_ingest_command_uses_canonical_periodic_defaults(monkeypatch, tmp_path: 
             "pyscene_threshold": 27.0,
             "transnet_threshold": 0.5,
             "device": "auto",
-            "selector_mode": "periodic",
+            "selector_mode": "hybrid_temporal_content",
             "long_shot_seconds": 12.0,
             "sample_every_seconds": 8.0,
             "candidate_step_sec": 1.0,
@@ -34,6 +34,10 @@ def test_ingest_command_uses_canonical_periodic_defaults(monkeypatch, tmp_path: 
             "edge_change_mad_multiplier": 3.0,
             "edge_change_min_score": 0.08,
             "midpoint_mandatory": True,
+            "semantic_dedup_candidate_fps": 2.0,
+            "semantic_dedup_similarity_threshold": 0.85,
+            "semantic_dedup_max_gap_seconds": 8.0,
+            "semantic_dedup_force_first_frame_per_shot": True,
             "provider_specs_path": Path("configs/embedding_providers.json"),
             "metaclip2_model": None,
             "allow_model_downloads": False,

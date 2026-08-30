@@ -6,15 +6,17 @@ import numpy as np
 import pytest
 
 from mvr.enrichment.embeddings.provider_specs import load_provider_specs
-from mvr.ingestion.hybrid_selector import HybridSelectorConfig
+from mvr.ingestion.hybrid_selector import HybridSelectorConfig, candidate_frame_indices
 from mvr.ingestion.models import Shot, VideoInfo
 from mvr.ingestion.selector_cache import (
     SelectorCacheError,
     compute_edge_change_scores,
     load_or_build_selector_cache,
     run_hybrid_selector,
+    run_semantic_dedup_selector,
     validate_selector_cache_manifest,
 )
+from mvr.ingestion.semantic_dedup import SemanticDedupConfig
 
 
 def _spec():
@@ -71,6 +73,10 @@ def test_candidate_extraction_and_embedding_cache_are_reused(
         shots=shots,
         output_root=tmp_path / "output",
         config=HybridSelectorConfig(),
+        candidate_step_sec=HybridSelectorConfig().candidate_step_sec,
+        candidate_indices_fn=lambda shot: candidate_frame_indices(
+            shot, HybridSelectorConfig().candidate_step_sec
+        ),
         spec=_spec(),
         encoder=encoder,
         embedding_batch_size=32,
@@ -135,5 +141,52 @@ def test_hybrid_integration_preserves_canonical_mapping_and_is_resumable(
     assert (tmp_path / "output/selector_embeddings/metaclip2/manifest.json").is_file()
 
     repeated, repeated_manifest = run_hybrid_selector(**kwargs)
+    assert repeated == keyframes
+    assert repeated_manifest["candidate_cache_reused"] is True
+
+
+def test_semantic_dedup_integration_preserves_canonical_mapping_and_is_resumable(
+    monkeypatch, tmp_path: Path
+) -> None:
+    video_path = tmp_path / "V.mp4"
+    video_path.write_bytes(b"video")
+    video = VideoInfo("V", video_path, 1.0, 21, 21.0)
+    shots = [Shot("V", "test", 7, 0, 20, 1.0)]
+
+    def fake_extract(_video, candidates, output_root):
+        for candidate in candidates:
+            path = output_root / candidate.image_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            assert cv2.imwrite(str(path), np.zeros((8, 8, 3), dtype=np.uint8))
+
+    monkeypatch.setattr("mvr.ingestion.selector_cache.extract_keyframes", fake_extract)
+    kwargs = dict(
+        video=video,
+        shots=shots,
+        output_root=tmp_path / "output",
+        config=SemanticDedupConfig(),
+        spec=_spec(),
+        encoder=FakeEncoder(),
+        embedding_batch_size=32,
+    )
+    keyframes, manifest = run_semantic_dedup_selector(**kwargs)
+    assert [item.keyframe_id for item in keyframes] == [
+        f"V_S0007_K{ordinal:02d}" for ordinal in range(1, len(keyframes) + 1)
+    ]
+    assert all((tmp_path / "output" / item.image_path).is_file() for item in keyframes)
+    assert (tmp_path / "output/selector_embeddings/metaclip2/manifest.json").is_file()
+
+    # FakeEncoder returns identical vectors for every candidate, so every
+    # candidate after the shot's first is a "duplicate" (similarity 1.0 > the
+    # 0.85 threshold) and only survives via the forced 8-second gap keep.
+    max_gap_frames = manifest["config"]["max_gap_seconds"] * shots[0].fps
+    frame_indices = [item.frame_idx for item in keyframes]
+    assert frame_indices[0] == 0
+    for left, right in zip(frame_indices, frame_indices[1:]):
+        assert right - left <= max_gap_frames
+    assert manifest["dropped_count"] > 0
+    assert manifest["forced_gap_keep_count"] == len(keyframes) - 1
+
+    repeated, repeated_manifest = run_semantic_dedup_selector(**kwargs)
     assert repeated == keyframes
     assert repeated_manifest["candidate_cache_reused"] is True
