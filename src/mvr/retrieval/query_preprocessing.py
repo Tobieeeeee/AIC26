@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from mvr.enrichment.qna_translation import translate_for_retrieval
+from mvr.indexing.normalization import normalize_lexical_query
 
 DEFAULT_TRANSLATION_MODEL = "Helsinki-NLP/opus-mt-vi-en"
 
@@ -70,7 +71,7 @@ class QueryPreprocessingService:
     def prepare(self, query: str) -> ProcessedQuery:
         """Dense (translated) + lexical (original) query pair."""
         dense = self.translate(query)
-        return ProcessedQuery(dense=dense, lexical=query)
+        return ProcessedQuery(dense=dense, lexical=normalize_lexical_query(query))
 
 
 def _default_translator_factory():
