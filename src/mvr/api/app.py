@@ -810,10 +810,15 @@ def create_app(
                         ),
                     )
                 try:
+                    # Same split /search/trake uses: the dense branch gets the
+                    # translated text, the lexical/BM25 branch the original.
+                    prepared_events = [
+                        query_preprocessing.prepare(text) for text in event_texts
+                    ]
                     query = TrakeQuery(
                         events=tuple(
-                            TrakeEventQuery(index, text)
-                            for index, text in enumerate(event_texts, start=1)
+                            TrakeEventQuery(index, prepared.dense)
+                            for index, prepared in enumerate(prepared_events, start=1)
                         ),
                         gaps=tuple(translate_gap_phrase(phrase) for phrase in gap_phrases),
                     )
@@ -827,7 +832,7 @@ def create_app(
                         aic_registry=kis_aic_registry,
                         top_k=request.top_k,
                         pipeline_resolver=kis_pipeline_resolver,
-                        query_translator=trake_query_translator,
+                        lexical_queries=tuple(p.lexical for p in prepared_events),
                     )
                 except RuntimeError as exc:
                     raise HTTPException(status_code=503, detail=str(exc)) from exc

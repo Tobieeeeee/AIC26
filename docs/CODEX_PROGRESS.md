@@ -1586,55 +1586,63 @@ Remaining:
 - Real GPU extraction run (requires GPU + model weights).
 - Building the four Docker images from the new compose/Dockerfiles.
 
-## Backend UI API — review report for `feat/backend-ui-api`
+## Backend UI API — review and repair of `feat/backend-ui-api`
 
 Reviewed `6e7f1a3` ("feat: add frontend API adapter for retrieval UI", Golden)
-against `origin/main` @ `712274d`. The branch shipped 5 files and 440
-insertions with no documentation, so this closes the deliverable required by
-AGENTS.md §19 step 11 and §20. Full findings in
+against `origin/main` @ `712274d`, then rebased it onto that main and repaired
+what the review found. The branch had shipped 5 files and 440 insertions with
+no documentation, so this also closes the deliverable AGENTS.md section 19
+step 11 and section 20 require. Full findings in
 `docs/reviews/BACKEND_UI_API_REPORT.md`.
 
-What the branch adds: CORS middleware, the `_format_timestamp` /
-`_frame_asset_urls` / `_ui_result` helpers, and the two endpoints the UI calls
-— `POST /api/v1/search` and `POST /api/v1/submit` — plus the Ui* Pydantic
-schemas. Nothing existing was modified or deleted.
+Fixed:
+
+- `POST /api/v1/search` TRAKE branch passed `query_translator=` to
+  `search_trake()`, which `main` `712274d` replaced with `lexical_queries`.
+  `git merge-tree` reported a clean merge (exit 0, tree `b0714903`) because the
+  two sides never touch the same line; the break would have surfaced only as a
+  runtime `TypeError` once the UI issued a TRAKE query. A failing test was
+  written first, then the call site was moved onto `QueryPreprocessingService`
+  exactly as `main`'s own `/search/trake` route does.
+- `scripts/run_backend_full.ps1` rewritten. It hardcoded one machine's
+  `D:\AIC26` layout; its dataset guard was satisfied by a directory containing
+  only a zero-byte `.gitkeep`; it invoked bare `python`, which resolved to the
+  system interpreter with no uvicorn; and it advertised an `aic_smoke`
+  directory that does not exist. Paths are now parameters and the guards throw.
+- The script never set `MVR_KEYFRAME_MAPPING_CSV`, so no
+  `KeyframeFrameIndexResolver` was built and every query answered `200 OK` with
+  zero results. It now takes `-KeyframeMappingCsv` and warns loudly without it.
 
 Verification:
 
-- `pytest tests/unit/api/` on a worktree checked out at `6e7f1a3`: 52 passed
-  in 16.92s. The worktree's own `src/` was confirmed to be the imported one
-  (`mvr resolved to: <worktree>\src\mvr\__init__.py`), not another branch's.
-- `create_app()` constructed for real; route table read back — 7 routes.
-- Static keyword-vs-signature check of every `search_trake()` / `search_qna()`
-  call in `src/mvr/api/app.py`: all four `ok` on this branch in isolation.
+- `pytest tests/unit/` on a worktree checked out on this branch: 1091 passed,
+  3 skipped in 29.23s. The imported source was confirmed to be that worktree's
+  own, not another branch's.
+- Server started from the rewritten script against the real corpus
+  (`E:\AIC26_data`, index `qna_organizer_all`, 177,321 vectors; mapping sha256
+  verified equal to `manifest.mapping_sha256`). `/health` returned
+  `semantic.loaded: true`.
+- `POST /api/v1/search` KIS returned 3 real results in 24.9s
+  (`L23_V019` frame 98, timestamp 00:00:03, thumbnail resolving to a file that
+  exists on disk).
+- `POST /api/v1/search` TRAKE returned 3 chains in 4.8s, top chain
+  `L27_V015 [5674, 5786]` — the same video and frames that
+  `scripts/run_trake_pipeline.py` ranked #3 for those events during the live
+  round. Before the fix this request was an HTTP 500.
 
-Findings:
+Found and deliberately not fixed (outside this branch's scope, reported):
 
-- Merging into current `main` breaks `POST /api/v1/search`. `main` `712274d`
-  replaced `query_translator` with `lexical_queries` / `lexical_query`; this
-  branch adds a new `search_trake()` call still passing `query_translator`.
-  `git merge-tree --write-tree` reports a clean merge (exit 0, tree
-  `b0714903`), and the same static check on the merged file reports
-  `line 821 search_trake() -> BROKEN ['query_translator']`. It would surface
-  only at runtime, after the encoder and index load.
-- `scripts/run_backend_full.ps1` cannot start the server here:
-  `D:\AIC26\data\raw` exists but is empty (0 entries), and neither
-  `artifacts/indexes/aic_full/manifest.json` nor `artifacts/indexes/aic_smoke`
-  exists — so it exits 2, and its fallback message names a directory that is
-  not there. The real corpus is `E:/AIC26_data` with index
-  `artifacts/indexes/qna_organizer_all`.
-- The same script hardcodes `D:\AIC26` in three places, reintroducing the
-  personal-path pattern `637be9d` removed from eight other scripts.
+- TRAKE thumbnail URLs are built from the frame index (`.../5674.jpg`) but
+  keyframes are named by keyframe id (`001.jpg`, `002.jpg`, ...), so they 404.
+  The KIS branch passes the keyframe id and its URLs resolve.
+- TRAKE results always report `timestamp 00:00:00`; the branch passes
+  `timestamp=None`.
+- `MVR_KEYFRAME_DIR` is a single directory, but the organizer download splits
+  keyframes across 14 roots, so no single value covers the corpus and
+  `/search/semantic` answers 503 on media resolution. Needs a design decision,
+  not a flag.
 
 Git:
 
-- Branch: `docs/backend-ui-api-report`, based on `origin/feat/backend-ui-api`
-- Commit: `docs: report what feat/backend-ui-api does, and what it breaks`
+- Branch: `docs/backend-ui-api-report`, rebased onto `origin/main` `712274d`
 - Push: NOT YET — `feat/backend-ui-api` belongs to another author
-
-Remaining:
-
-- Fix the one `search_trake()` call site to the `lexical_queries` contract.
-- Make `run_backend_full.ps1` take the dataset root and index as arguments.
-- Start the server against a real index and issue one request per endpoint.
-  Until then the backend must not be described as working end to end.

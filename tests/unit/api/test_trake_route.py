@@ -317,3 +317,31 @@ def test_trake_search_translation_is_off_by_default(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert seen_queries == ["event one", "event two"]
+
+
+def test_ui_search_trake_mode_reaches_search_trake(monkeypatch) -> None:
+    """`/api/v1/search` is a SECOND call site into search_trake(), separate
+    from `/search/trake`. Nothing else in this suite exercises it, so a
+    signature change on search_trake() reaches the UI unnoticed: the two live
+    in different files, Git reports no conflict, and the break surfaces only
+    once a real request arrives with the encoder and index already loaded."""
+    client = _client(monkeypatch)
+
+    response = client.post(
+        "/api/v1/search",
+        json={
+            "task_mode": "TRAKE",
+            "query": "a diver enters the water",
+            "trake_events": [
+                "a diver stands at the end of the board",
+                "the diver breaks the surface of the water",
+            ],
+            "top_k": 5,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["total_results"] >= 1
+    assert body["results"][0]["video_id"] == "L21_V018"
