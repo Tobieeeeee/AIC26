@@ -453,3 +453,38 @@ def test_a_frame_idx_disagreeing_with_the_resolver_raises() -> None:
             multimodal_service=_Service(),
             pipeline_resolver=KeyframeFrameIndexResolver({("L21_V001", "034"): 3782}),
         )
+
+
+def test_keyframe_id_for_reverses_the_frame_index_lookup() -> None:
+    """TRAKE predicts a frame_idx and nothing else, but keyframe files are
+    named by keyframe id, so serving a thumbnail for a chain needs the
+    mapping read backwards."""
+    resolver = KeyframeFrameIndexResolver(
+        {("L21_V001", "003"): 74, ("L21_V001", "004"): 99, ("L21_V002", "003"): 74}
+    )
+
+    assert resolver.keyframe_id_for("L21_V001", 74) == "003"
+    assert resolver.keyframe_id_for("L21_V001", 99) == "004"
+    # Keyed on the pair in this direction too: frame 74 means something
+    # different in another video.
+    assert resolver.keyframe_id_for("L21_V002", 74) == "003"
+
+
+def test_keyframe_id_for_returns_none_for_an_unmapped_frame() -> None:
+    resolver = KeyframeFrameIndexResolver({("L21_V001", "003"): 74})
+
+    assert resolver.keyframe_id_for("L21_V001", 75) is None
+    assert resolver.keyframe_id_for("L99_V999", 74) is None
+
+
+def test_keyframe_id_for_is_deterministic_when_two_keyframes_share_a_frame() -> None:
+    """Measured on the real 177,321-row mapping: 614 (video_id, frame_idx)
+    pairs carry two keyframes, because adjacent keyframes 0.04s apart round to
+    the same frame index. The reverse direction is genuinely ambiguous, so it
+    resolves to the lowest keyframe id rather than whichever happened to be
+    inserted last."""
+    resolver = KeyframeFrameIndexResolver(
+        {("L24_V003", "173"): 13913, ("L24_V003", "172"): 13913}
+    )
+
+    assert resolver.keyframe_id_for("L24_V003", 13913) == "172"

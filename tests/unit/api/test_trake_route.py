@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 import mvr.retrieval.trake as trake_module
 from mvr.api.app import create_app
-from mvr.retrieval.kis import KisCandidate
+from mvr.retrieval.kis import KeyframeFrameIndexResolver, KisCandidate
 from mvr.retrieval.trake_scoring import TrakeVideoScoreMatrix
 
 
@@ -345,3 +345,129 @@ def test_ui_search_trake_mode_reaches_search_trake(monkeypatch) -> None:
     assert body["status"] == "ok"
     assert body["total_results"] >= 1
     assert body["results"][0]["video_id"] == "L21_V018"
+
+
+class _FakeFrameMapping:
+    def __init__(self, frame_idx: int, timestamp: float) -> None:
+        self.frame_idx = frame_idx
+        self.timestamp = timestamp
+        self.fps = 25.0
+
+
+class _FakeRegistry:
+    """Answers the one question the UI needs to timestamp a chain."""
+
+    def __init__(self, table: dict) -> None:
+        self._table = table
+
+    def resolve_frame(self, video_id: str, keyframe_ref: str):
+        try:
+            return self._table[(video_id, str(keyframe_ref))]
+        except KeyError as exc:
+            raise LookupError(f"no mapping for {video_id!r}/{keyframe_ref!r}") from exc
+
+
+def _client_with_mapping(monkeypatch) -> TestClient:
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    return TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=KeyframeFrameIndexResolver(
+                {("L21_V018", "007"): 100, ("L21_V018", "021"): 300}
+            ),
+            kis_aic_registry=_FakeRegistry(
+                {
+                    ("L21_V018", "007"): _FakeFrameMapping(100, 4.2),
+                    ("L21_V018", "021"): _FakeFrameMapping(300, 12.6),
+                }
+            ),
+        )
+    )
+
+
+_UI_TRAKE_REQUEST = {
+    "task_mode": "TRAKE",
+    "query": "two events",
+    "trake_events": ["the first event", "the second event"],
+    "top_k": 1,
+}
+
+
+def test_ui_search_trake_thumbnail_uses_the_keyframe_id_not_the_frame_index(
+    monkeypatch,
+) -> None:
+    """Keyframe files are named by keyframe id -- 001.jpg, 002.jpg -- so a URL
+    built from the frame index (5674.jpg) names a file that does not exist and
+    404s in the browser. The KIS branch passes the keyframe id and its URLs
+    resolve; TRAKE has to do the same."""
+    response = _client_with_mapping(monkeypatch).post("/api/v1/search", json=_UI_TRAKE_REQUEST)
+
+    assert response.status_code == 200, response.text
+    result = response.json()["results"][0]
+    assert result["frame_id"] == 100
+    assert result["thumbnail_url"] == "/keyframes/L21_V018/007.jpg"
+
+
+def test_ui_search_trake_reports_the_real_timestamp(monkeypatch) -> None:
+    """Every TRAKE chain used to report 00:00:00, because the branch passed
+    timestamp=None. A reviewer scrubbing to that point lands at the start of
+    the video every time."""
+    response = _client_with_mapping(monkeypatch).post("/api/v1/search", json=_UI_TRAKE_REQUEST)
+
+    assert response.status_code == 200, response.text
+    result = response.json()["results"][0]
+    assert result["timestamp_sec"] == 4.2
+    assert result["timestamp"] == "00:00:04"
+
+
+def test_ui_search_trake_survives_a_frame_with_no_mapping(monkeypatch) -> None:
+    """An unmapped frame must degrade to the old behaviour, not raise: TRAKE
+    already tolerates per-event failures rather than aborting the batch."""
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=KeyframeFrameIndexResolver({("L21_V018", "999"): 55555}),
+            kis_aic_registry=_FakeRegistry({}),
+        )
+    )
+
+    response = client.post("/api/v1/search", json=_UI_TRAKE_REQUEST)
+
+    assert response.status_code == 200, response.text
+    result = response.json()["results"][0]
+    assert result["timestamp_sec"] == 0.0
+    assert result["thumbnail_url"] == "/keyframes/L21_V018/100.jpg"
+
+
+def test_ui_search_trake_drops_a_timestamp_from_a_disagreeing_mapping(monkeypatch) -> None:
+    """keyframe_id comes from keyframe_mapping.csv, the timestamp from the
+    organizer's map-keyframes -- two files. When they disagree about which
+    frame an id sits at, the timestamp belongs to a different moment, and a
+    reviewer scrubbing to it sees the wrong shot with no indication anything
+    is wrong. Showing nothing is the honest answer."""
+    monkeypatch.setattr(trake_module, "search_kis", _fake_search_kis)
+    monkeypatch.setattr(trake_module, "build_video_score_matrix", _fake_build_video_score_matrix)
+    client = TestClient(
+        create_app(
+            semantic_service=FakeTrakeSemanticService(),
+            multimodal_service=None,
+            kis_pipeline_resolver=KeyframeFrameIndexResolver({("L21_V018", "007"): 100}),
+            # The registry puts keyframe 007 at frame 999, not 100.
+            kis_aic_registry=_FakeRegistry({("L21_V018", "007"): _FakeFrameMapping(999, 41.5)}),
+        )
+    )
+
+    response = client.post("/api/v1/search", json=_UI_TRAKE_REQUEST)
+
+    assert response.status_code == 200, response.text
+    result = response.json()["results"][0]
+    assert result["timestamp_sec"] == 0.0
+    assert result["timestamp"] == "00:00:00"
+    # The thumbnail still resolves: the id itself is not in dispute, only
+    # which frame it sits at.
+    assert result["thumbnail_url"] == "/keyframes/L21_V018/007.jpg"

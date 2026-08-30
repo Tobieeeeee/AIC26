@@ -1,6 +1,6 @@
 # Backend UI API Report
 
-Version: 2.0
+Version: 3.0
 Branch: `docs/backend-ui-api-report`, rebased onto `origin/main` @ `712274d`
 Reviews: `6e7f1a3` — "feat: add frontend API adapter for retrieval UI",
 Golden <24521777@gm.uit.edu.vn>
@@ -11,16 +11,18 @@ Golden <24521777@gm.uit.edu.vn>
 BACKEND_UI_API_RUN_END_TO_END_ON_REAL_DATA
 MERGE_DEFECT_FOUND_AND_FIXED
 LAUNCH_SCRIPT_REWRITTEN_AND_EXERCISED
-UI_ADAPTER_TRAKE_MEDIA_FIELDS_STILL_WRONG
+UI_ADAPTER_TRAKE_MEDIA_FIELDS_FIXED
+BORROWS_ONE_UNMERGED_COMMIT_FROM_feat/official-submission-format
 ```
 
 Version 1.0 of this report said the backend had never served a real request.
 It has now. The server was started from the rewritten launch script against
 the real 177,321-vector index and the real corpus on `E:`, and answered both a
 KIS and a TRAKE query with correct video ids, frame indices and timestamps.
-Getting there required fixing a merge defect and three separate faults in the
-launch script. Two defects in the UI adapter's TRAKE result mapping remain,
-documented below rather than fixed, being outside the scope of this branch.
+Getting there required fixing a merge defect and three faults in the launch
+script. Running it then exposed three more, in the UI adapter's TRAKE result
+mapping and in how keyframe images are served; those are fixed too, and the
+fixes are shown working against the real corpus rather than only in tests.
 
 ## 1. What `6e7f1a3` delivered
 
@@ -145,7 +147,7 @@ source confirmed to be that worktree's own (`mvr resolved to:
 <worktree>\src\mvr\__init__.py`) rather than another branch's:
 
 ```text
-pytest tests/unit/   ->  1091 passed, 3 skipped in 29.23s
+pytest tests/unit/   ->  1110 passed, 3 skipped in 47.64s
 ```
 
 Live run, server started via the rewritten script against the real corpus:
@@ -183,29 +185,89 @@ That chain is independently corroborated: the same two events run through
 `L27_V015 (5674, 5786, 7741, 13094)` as chain #3. The API and the pipeline
 agree.
 
-## 6. Defects found live and NOT fixed here
+## 6. Three defects found live, and fixed
 
-**a. TRAKE thumbnails 404.** The TRAKE branch passes `keyframe_id=None,
-image_path=None` to `_ui_result`, so the URL is built from the frame index:
-`/keyframes/L27_V015/5674.jpg`. Keyframe files are named by keyframe id — the
-real directory holds `001.jpg`, `002.jpg`, ... and no `5674.jpg`. The KIS
-branch, which passes the keyframe id, produces `/keyframes/L23_V019/002.jpg`,
-and that file exists. Both checked on disk.
+All three were found by running the server, not by reading it. Each was
+reproduced by a failing test before anything was changed.
 
-**b. TRAKE results carry no timestamp.** The branch passes `timestamp=None`,
-so every chain reports `"timestamp":"00:00:00"`, `"timestamp_sec":0.0`. KIS
-results carry real timestamps.
+**a. TRAKE thumbnails 404ed.** The branch passed `keyframe_id=None,
+image_path=None` to `_ui_result`, so the URL fell through to the frame index:
+`/keyframes/L27_V015/5674.jpg`. Keyframe files are named by keyframe id — that
+directory holds `001.jpg` … and no `5674.jpg`.
 
-**c. Media serving assumes the normalized layout.** `MVR_KEYFRAME_DIR` is a
-single directory, but the organizer download splits keyframes across 14 roots
-(`Keyframes_L21/keyframes` through `Keyframes_L30/keyframes`). No single
-`-KeyframeDir` covers the corpus, so `/search/semantic` returns
-`503 "semantic result image is outside the configured keyframe directory"`.
-Retrieval is unaffected; only media URLs are. This needs a decision — a
-multi-root served mount, or a normalization pass — not another script flag.
+A chain carries frame indices and nothing else, so the fix reads the keyframe
+mapping backwards. `KeyframeFrameIndexResolver.keyframe_id_for(video_id,
+frame_idx)` is new, and it does not pretend the reverse is one-to-one:
+measured on the real 177,321-row mapping there are only 176,707 distinct
+`(video_id, frame_idx)` pairs, so 614 carry two keyframes — adjacent keyframes
+about 0.04s apart that round to the same frame (`L24_V003` keyframe `172` at
+556.52s and `173` at 556.56s both land on frame 13913). The lowest keyframe id
+wins, so one frame always yields one thumbnail.
 
-## 7. Branch state
+**b. TRAKE results carried no timestamp.** `timestamp=None` meant every chain
+reported `00:00:00`; a reviewer scrubbing to a hit landed at the start of the
+video every time. The timestamp now comes from the registry via the recovered
+keyframe id.
+
+The id comes from `keyframe_mapping.csv` and the timestamp from the
+organizer's `map-keyframes` — two files. If they disagree about which frame an
+id sits at, the timestamp belongs to a different moment and nothing on screen
+would say so, so the round trip is checked and a disagreeing timestamp is
+withheld rather than shown.
+
+**c. Media serving assumed the normalized layout.** `MVR_KEYFRAME_DIR` names
+one directory; the organizer download splits the corpus across fourteen
+(`Keyframes_L21/keyframes` … `Keyframes_L30/keyframes`). `StaticFiles` mounted
+on one of them 404s everything else.
+
+`GET /keyframes/{video_id}/{filename}` is now a route registered ahead of the
+mount. It tries the mounted directory first, then asks `AicDatasetRegistry`,
+which already globs the batch folders. Path components that are empty, `..`,
+or contain a separator are refused.
+
+That registry behaviour comes from commit `1e9a8d4` ("fix: read the dataset
+layout the organizer actually ships"), which lives on
+`feat/official-submission-format` and is **not yet on `main`**. It is
+cherry-picked here as a prerequisite. Both branches now carry the same patch;
+whichever merges second should be a no-op for those two files.
+
+Live evidence, same server, after the fixes:
+
+```text
+TRAKE  L27_V015  frame=5674  ts=00:03:46 (226.96)  thumb=/keyframes/L27_V015/140.jpg
+                             was: ts=00:00:00 (0.0)  thumb=.../5674.jpg
+
+GET /keyframes/L27_V015/140.jpg   200   163623 bytes   (Keyframes_L27)
+GET /keyframes/L23_V019/002.jpg   200   158180 bytes   (Keyframes_L23)
+GET /keyframes/L21_V001/001.jpg   200   135232 bytes   (Keyframes_L21)
+GET /keyframes/L30_V031/010.jpg   200   260761 bytes   (Keyframes_L30)
+GET /keyframes/L27_V015/..%2F..%2F..%2Fsecret.txt   404
+```
+
+163,623 bytes is the byte-for-byte size of
+`E:\AIC26_data\Keyframes_L27\keyframes\L27_V015\140.jpg` on disk. Four
+different batch roots answered in one process, which is exactly what a single
+mount cannot do.
+
+KIS was re-checked for regression and is unchanged: `L23_V019` frame 98 at
+`00:00:03`, thumbnail `/keyframes/L23_V019/002.jpg` serving 158,180 bytes.
+
+```text
+pytest tests/unit/   ->  1110 passed, 3 skipped in 47.64s
+```
+
+## 7. Still open
+
+- Video serving has the same shape of problem as (c): the organizer nests
+  videos under `Videos_*/video/`. It is untested here because no `Videos_*`
+  folder exists on this machine, so the claim is unverified either way.
+- `/search/semantic` still resolves images through `_servable_keyframe_url`
+  against the single mounted directory. The new route fixes what the UI asks
+  for; that older endpoint was not touched.
+
+## 8. Branch state
 
 - `feat/backend-ui-api` is not merged into `main` and was 6 commits behind it.
-- This branch rebases it onto `712274d` and adds the fixes above.
+- This branch rebases it onto `712274d`, adds the fixes above, and borrows
+  `1e9a8d4` from `feat/official-submission-format`.
 - `feat/backend-ui-api` belongs to another author; nothing was pushed to it.

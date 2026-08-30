@@ -1630,19 +1630,56 @@ Verification:
   `scripts/run_trake_pipeline.py` ranked #3 for those events during the live
   round. Before the fix this request was an HTTP 500.
 
-Found and deliberately not fixed (outside this branch's scope, reported):
+Found by running it, then fixed:
 
-- TRAKE thumbnail URLs are built from the frame index (`.../5674.jpg`) but
-  keyframes are named by keyframe id (`001.jpg`, `002.jpg`, ...), so they 404.
-  The KIS branch passes the keyframe id and its URLs resolve.
-- TRAKE results always report `timestamp 00:00:00`; the branch passes
-  `timestamp=None`.
-- `MVR_KEYFRAME_DIR` is a single directory, but the organizer download splits
-  keyframes across 14 roots, so no single value covers the corpus and
-  `/search/semantic` answers 503 on media resolution. Needs a design decision,
-  not a flag.
+- TRAKE thumbnails 404ed: the URL was built from the frame index
+  (`/keyframes/L27_V015/5674.jpg`) while keyframe files are named by keyframe
+  id. `KeyframeFrameIndexResolver.keyframe_id_for()` now reads the mapping
+  backwards. That direction is not one-to-one — measured on the real
+  177,321-row mapping, 614 `(video_id, frame_idx)` pairs carry two keyframes
+  about 0.04s apart — so the lowest keyframe id wins deterministically rather
+  than whichever was inserted last.
+- TRAKE results reported `00:00:00` for every chain. The timestamp now comes
+  from the registry via the recovered keyframe id, and is withheld when
+  `keyframe_mapping.csv` and the organizer's `map-keyframes` disagree about
+  which frame that id sits at, rather than showing a time from another moment.
+- Keyframe images could only be served from one mounted directory, but the
+  organizer splits the corpus across fourteen roots. `GET
+  /keyframes/{video_id}/{filename}` is now a route ahead of the static mount:
+  mounted directory first, then `AicDatasetRegistry`, with `..` and separators
+  refused.
+
+That last one needs `1e9a8d4` ("fix: read the dataset layout the organizer
+actually ships"), which is on `feat/official-submission-format` and not yet on
+`main`. It is cherry-picked onto this branch as a prerequisite; both branches
+now carry the same patch.
+
+Live evidence after the fixes, same server and corpus:
+
+```text
+TRAKE  L27_V015  frame=5674  ts=00:03:46 (226.96)  thumb=/keyframes/L27_V015/140.jpg
+                             was  ts=00:00:00 (0.0)   thumb=.../5674.jpg
+
+/keyframes/L27_V015/140.jpg  200  163623 bytes   (Keyframes_L27)
+/keyframes/L23_V019/002.jpg  200  158180 bytes   (Keyframes_L23)
+/keyframes/L21_V001/001.jpg  200  135232 bytes   (Keyframes_L21)
+/keyframes/L30_V031/010.jpg  200  260761 bytes   (Keyframes_L30)
+/keyframes/L27_V015/..%2F..%2F..%2Fsecret.txt   404
+```
+
+163,623 bytes is the on-disk size of that JPEG. Four batch roots answered from
+one process. KIS re-checked for regression and unchanged.
+
+`pytest tests/unit/` -> 1110 passed, 3 skipped in 47.64s.
+
+Still open:
+
+- Video serving has the same shape of problem; unverified here because no
+  `Videos_*` folder exists on this machine.
+- `/search/semantic` still resolves images against the single mounted
+  directory and was not touched.
 
 Git:
 
 - Branch: `docs/backend-ui-api-report`, rebased onto `origin/main` `712274d`
-- Push: NOT YET — `feat/backend-ui-api` belongs to another author
+- Pushed: yes, `1e03a4a`; the UI fixes above are a later commit
