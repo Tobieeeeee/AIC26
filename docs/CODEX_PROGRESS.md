@@ -1585,3 +1585,149 @@ Remaining:
 - Full real R2 pull/push against the live bucket (requires credentials).
 - Real GPU extraction run (requires GPU + model weights).
 - Building the four Docker images from the new compose/Dockerfiles.
+
+## Backend UI API — review and repair of `feat/backend-ui-api`
+
+Reviewed `6e7f1a3` ("feat: add frontend API adapter for retrieval UI", Golden)
+against `origin/main` @ `712274d`, then rebased it onto that main and repaired
+what the review found. The branch had shipped 5 files and 440 insertions with
+no documentation, so this also closes the deliverable AGENTS.md section 19
+step 11 and section 20 require. Full findings in
+`docs/reviews/BACKEND_UI_API_REPORT.md`.
+
+Fixed:
+
+- `POST /api/v1/search` TRAKE branch passed `query_translator=` to
+  `search_trake()`, which `main` `712274d` replaced with `lexical_queries`.
+  `git merge-tree` reported a clean merge (exit 0, tree `b0714903`) because the
+  two sides never touch the same line; the break would have surfaced only as a
+  runtime `TypeError` once the UI issued a TRAKE query. A failing test was
+  written first, then the call site was moved onto `QueryPreprocessingService`
+  exactly as `main`'s own `/search/trake` route does.
+- `scripts/run_backend_full.ps1` rewritten. It hardcoded one machine's
+  `D:\AIC26` layout; its dataset guard was satisfied by a directory containing
+  only a zero-byte `.gitkeep`; it invoked bare `python`, which resolved to the
+  system interpreter with no uvicorn; and it advertised an `aic_smoke`
+  directory that does not exist. Paths are now parameters and the guards throw.
+- The script never set `MVR_KEYFRAME_MAPPING_CSV`, so no
+  `KeyframeFrameIndexResolver` was built and every query answered `200 OK` with
+  zero results. It now takes `-KeyframeMappingCsv` and warns loudly without it.
+
+Verification:
+
+- `pytest tests/unit/` on a worktree checked out on this branch: 1091 passed,
+  3 skipped in 29.23s. The imported source was confirmed to be that worktree's
+  own, not another branch's.
+- Server started from the rewritten script against the real corpus
+  (`E:\AIC26_data`, index `qna_organizer_all`, 177,321 vectors; mapping sha256
+  verified equal to `manifest.mapping_sha256`). `/health` returned
+  `semantic.loaded: true`.
+- `POST /api/v1/search` KIS returned 3 real results in 24.9s
+  (`L23_V019` frame 98, timestamp 00:00:03, thumbnail resolving to a file that
+  exists on disk).
+- `POST /api/v1/search` TRAKE returned 3 chains in 4.8s, top chain
+  `L27_V015 [5674, 5786]` — the same video and frames that
+  `scripts/run_trake_pipeline.py` ranked #3 for those events during the live
+  round. Before the fix this request was an HTTP 500.
+
+Found by running it, then fixed:
+
+- TRAKE thumbnails 404ed: the URL was built from the frame index
+  (`/keyframes/L27_V015/5674.jpg`) while keyframe files are named by keyframe
+  id. `KeyframeFrameIndexResolver.keyframe_id_for()` now reads the mapping
+  backwards. That direction is not one-to-one — measured on the real
+  177,321-row mapping, 614 `(video_id, frame_idx)` pairs carry two keyframes
+  about 0.04s apart — so the lowest keyframe id wins deterministically rather
+  than whichever was inserted last.
+- TRAKE results reported `00:00:00` for every chain. The timestamp now comes
+  from the registry via the recovered keyframe id, and is withheld when
+  `keyframe_mapping.csv` and the organizer's `map-keyframes` disagree about
+  which frame that id sits at, rather than showing a time from another moment.
+- Keyframe images could only be served from one mounted directory, but the
+  organizer splits the corpus across fourteen roots. `GET
+  /keyframes/{video_id}/{filename}` is now a route ahead of the static mount:
+  mounted directory first, then `AicDatasetRegistry`, with `..` and separators
+  refused.
+
+That last one needs `1e9a8d4` ("fix: read the dataset layout the organizer
+actually ships"), which is on `feat/official-submission-format` and not yet on
+`main`. It is cherry-picked onto this branch as a prerequisite; both branches
+now carry the same patch.
+
+Live evidence after the fixes, same server and corpus:
+
+```text
+TRAKE  L27_V015  frame=5674  ts=00:03:46 (226.96)  thumb=/keyframes/L27_V015/140.jpg
+                             was  ts=00:00:00 (0.0)   thumb=.../5674.jpg
+
+/keyframes/L27_V015/140.jpg  200  163623 bytes   (Keyframes_L27)
+/keyframes/L23_V019/002.jpg  200  158180 bytes   (Keyframes_L23)
+/keyframes/L21_V001/001.jpg  200  135232 bytes   (Keyframes_L21)
+/keyframes/L30_V031/010.jpg  200  260761 bytes   (Keyframes_L30)
+/keyframes/L27_V015/..%2F..%2F..%2Fsecret.txt   404
+```
+
+163,623 bytes is the on-disk size of that JPEG. Four batch roots answered from
+one process. KIS re-checked for regression and unchanged.
+
+`pytest tests/unit/` -> 1110 passed, 3 skipped in 47.64s.
+
+Then a second, unrelated divergence, found while asking why no `Videos_*`
+folder exists on this machine:
+
+`main` `712274d` ("finish R2 reorg") rewrote object keys inside the bucket,
+`Videos_L21_a/video/L21_V001.mp4` -> `data/raw/batch1/videos/L21/...`, and
+declared that canonical in `mvr/operations/r2_layout.py`. `build_plan()` in
+`scripts/operations/r2_reng.py` moves videos and nothing else. Nobody taught
+the reading side. Probed with all three layouts in a temp tree:
+
+```text
+organizer  Videos_*/video/          -> found
+R2 mirror  <batch>/videos/<coll>/   -> NOT FOUND
+normalized videos/                  -> found
+```
+
+`scene_text.py` carried its own second copy of those rules and had the same
+gap, and its caller only warns on a miss — so an OCR run against a mirrored
+corpus would report success having read zero frames. This is not why
+`E:\AIC26_data` has no videos: that download never had them, and this machine
+has no `.env`, so nothing was ever pulled.
+
+Fixed:
+
+- `AicDatasetRegistry.RAW_LAYOUT` is now directory globs per asset kind
+  instead of one `(outer, inner)` pair; videos gained `*/videos/*`. Normalized
+  still wins, then organizer, then mirror.
+- `resolve_video_path()` keeps only its own flat convention and delegates the
+  rest to the registry, deleting the duplicate rules that let the two drift.
+- `GET /videos/{filename}` is a route ahead of the static mount, mirroring the
+  keyframe one.
+- `_frame_asset_urls` took a `video_dir` it used only as a boolean and
+  withheld the URL whenever `MVR_VIDEO_DIR` was unset; it now takes
+  `video_available`, true when either the mount or the registry can answer.
+
+Verification:
+
+- `pytest tests/unit/` -> 1121 passed, 3 skipped in 47.94s.
+- Live, after every change: TRAKE `L27_V015` frame 5674 at `00:03:46`, KIS
+  `L23_V019` frame 98 at `00:00:03` — byte-identical to before the refactor,
+  so renaming the parameter through all three result paths changed no output.
+  Keyframes served 200 from `Keyframes_L21`, `Keyframes_L27` and
+  `Keyframes_L30` in one process.
+- `/videos/L27_V015.mp4` returned 404, which is correct: there is no video
+  file anywhere on this machine. The video route and the two new video
+  layouts are covered by tests only; no real `.mp4` has been served.
+
+Still open:
+
+- `/search/semantic` still resolves images against the single mounted
+  directory; not touched.
+- `RAW_LAYOUT` here has no `objects` entry — that is `70d117f` on
+  `feat/official-submission-format`, not cherry-picked.
+- Whether the R2 bucket was actually reorganized is unverified; no credentials
+  exist on this machine and none were sought.
+
+Git:
+
+- Branch: `docs/backend-ui-api-report`, rebased onto `origin/main` `712274d`,
+  borrowing `1e9a8d4` from `feat/official-submission-format`.

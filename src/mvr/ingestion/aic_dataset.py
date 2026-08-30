@@ -77,6 +77,16 @@ class AicDatasetRegistry:
                     <root>/map-keyframes-aic25-b1/map-keyframes/<video_id>.csv
                     <root>/media-info-aic25-b1/media-info/<video_id>.json
 
+        R2 mirror   <root>/<batch>/videos/<collection>/<video_id>.mp4
+
+    The R2 reorg (main ``712274d``) retired the organizer's ``Videos_*/video/``
+    shape inside the bucket in favour of
+    ``data/raw/{batch}/videos/{collection}/`` -- see
+    ``mvr.operations.r2_layout.raw_video_key()``. A root mirrored from R2 after
+    that move nests videos one level deeper and groups them by collection, so
+    neither older shape finds them. Only videos moved; the reorg plan
+    (``scripts/operations/r2_reng.py``) touches nothing else.
+
     The raw shape is what the organizer actually ships: one folder per asset
     kind, carrying a batch suffix, with an inner directory whose name uses
     hyphens where the normalized tree uses underscores. Reading only the
@@ -88,13 +98,13 @@ class AicDatasetRegistry:
     Every subdirectory is optional.
     """
 
-    # kind -> (glob for the raw batch folder, its inner directory name)
+    # kind -> directory globs relative to the dataset root, best first.
     RAW_LAYOUT = {
-        "videos": ("Videos_*", "video"),
-        "keyframes": ("Keyframes_*", "keyframes"),
-        "map_keyframes": ("map-keyframes*", "map-keyframes"),
-        "media_info": ("media-info*", "media-info"),
-        "objects": ("objects*", "objects"),
+        "videos": ("videos", "Videos_*/video", "*/videos/*"),
+        "keyframes": ("keyframes", "Keyframes_*/keyframes"),
+        "map_keyframes": ("map_keyframes", "map-keyframes*/map-keyframes"),
+        "media_info": ("media_info", "media-info*/media-info"),
+        "objects": ("objects", "objects*/objects"),
     }
 
     def __init__(self, root: Path | str | None) -> None:
@@ -117,13 +127,11 @@ class AicDatasetRegistry:
         """
         if self.root is None:
             return []
-        outer, inner = self.RAW_LAYOUT[kind]
-        candidates = [self.root / kind]
-        candidates.extend(path / inner for path in sorted(self.root.glob(outer)))
         found: list[Path] = []
-        for candidate in candidates:
-            if candidate not in found and candidate.is_dir():
-                found.append(candidate)
+        for pattern in self.RAW_LAYOUT[kind]:
+            for candidate in sorted(self.root.glob(pattern)):
+                if candidate not in found and candidate.is_dir():
+                    found.append(candidate)
         return found
 
     # -- path helpers --------------------------------------------------

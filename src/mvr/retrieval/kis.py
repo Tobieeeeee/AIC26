@@ -68,6 +68,12 @@ class KeyframeFrameIndexResolver:
             (str(video_id), str(keyframe_id)): frame_idx
             for (video_id, keyframe_id), frame_idx in mapping.items()
         }
+        self._reverse: dict[tuple[str, int], str] = {}
+        for (video_id, keyframe_id), frame_idx in self._mapping.items():
+            key = (video_id, int(frame_idx))
+            current = self._reverse.get(key)
+            if current is None or keyframe_id < current:
+                self._reverse[key] = keyframe_id
 
     @classmethod
     def from_csv(cls, path: Path | str) -> "KeyframeFrameIndexResolver":
@@ -80,6 +86,27 @@ class KeyframeFrameIndexResolver:
 
     def resolve(self, video_id: str, keyframe_id: str) -> int | None:
         return self._mapping.get((str(video_id), str(keyframe_id)))
+
+    def keyframe_id_for(self, video_id: str, frame_idx: int) -> str | None:
+        """The same mapping read backwards: ``(video_id, frame_idx)`` -> id.
+
+        TRAKE predicts frame indices and nothing else, but keyframe files are
+        named by keyframe id, so serving a chain's thumbnail needs this
+        direction. Keyed on the pair here too, for the reason the class
+        docstring gives: a bare frame index means something different in
+        every video.
+
+        This direction is NOT one-to-one, and pretending otherwise is how the
+        forward direction went wrong before. Measured on the real 177,321-row
+        mapping: only 176,707 distinct ``(video_id, frame_idx)`` pairs, so 614
+        of them carry two keyframes -- adjacent keyframes about 0.04s apart
+        that round to the same frame index (L24_V003 keyframe ``172`` at
+        556.52s and ``173`` at 556.56s both land on frame 13913). Rather than
+        let insertion order decide, the lowest keyframe id wins, so one frame
+        always yields the same thumbnail. Organizer ids are zero-padded to a
+        fixed width, so that is also numeric order.
+        """
+        return self._reverse.get((str(video_id), int(frame_idx)))
 
 
 @dataclass(frozen=True)
