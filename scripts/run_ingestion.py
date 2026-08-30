@@ -18,7 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pyscene-threshold", type=float, default=27.0, help="Threshold for PySceneDetect")
     parser.add_argument("--transnet-threshold", type=float, default=CANONICAL_TRANSNET_THRESHOLD, help="Threshold for TransNetV2")
     parser.add_argument("--device", type=str, default="auto", help="Device (cpu/cuda/auto)")
-    parser.add_argument("--selector-mode", choices=("midpoint", "periodic", "hybrid_temporal_content"), default=CANONICAL_SELECTOR_MODE)
+    parser.add_argument("--selector-mode", choices=("midpoint", "periodic", "hybrid_temporal_content", "semantic_dedup"), default=CANONICAL_SELECTOR_MODE)
     parser.add_argument("--long-shot-seconds", type=float, default=CANONICAL_LONG_SHOT_SECONDS, help="Periodic threshold")
     parser.add_argument("--sample-every-seconds", type=float, default=CANONICAL_SAMPLE_EVERY_SECONDS, help="Periodic interval")
     parser.add_argument("--candidate-step-sec", type=float, default=1.0)
@@ -31,6 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--edge-change-mad-multiplier", type=float, default=3.0)
     parser.add_argument("--edge-change-min-score", type=float, default=0.08)
     parser.add_argument("--midpoint-mandatory", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--semantic-dedup-candidate-fps", type=float, default=2.0)
+    parser.add_argument("--semantic-dedup-similarity-threshold", type=float, default=0.85)
+    parser.add_argument("--semantic-dedup-max-gap-seconds", type=float, default=8.0)
+    parser.add_argument("--semantic-dedup-force-first-frame-per-shot", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--provider-specs-path", type=Path, default=Path("configs/embedding_providers.json"))
     parser.add_argument("--metaclip2-model")
     parser.add_argument("--allow-model-downloads", action="store_true")
@@ -66,6 +70,10 @@ def main():
         edge_change_mad_multiplier=args.edge_change_mad_multiplier,
         edge_change_min_score=args.edge_change_min_score,
         midpoint_mandatory=args.midpoint_mandatory,
+        semantic_dedup_candidate_fps=args.semantic_dedup_candidate_fps,
+        semantic_dedup_similarity_threshold=args.semantic_dedup_similarity_threshold,
+        semantic_dedup_max_gap_seconds=args.semantic_dedup_max_gap_seconds,
+        semantic_dedup_force_first_frame_per_shot=args.semantic_dedup_force_first_frame_per_shot,
         provider_specs_path=args.provider_specs_path,
         metaclip2_model=args.metaclip2_model,
         allow_model_downloads=args.allow_model_downloads,

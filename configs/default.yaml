@@ -12,7 +12,7 @@ ingestion:
   pyscene_threshold: 27.0
   transnet_threshold: 0.5
   selector:
-    mode: periodic
+    mode: hybrid_temporal_content
     candidate_step_sec: 1.0
     max_temporal_gap_sec: 8.0
     clip_knn_k: 3
@@ -25,6 +25,9 @@ ingestion:
     midpoint_mandatory: true
     metaclip_model: facebook/metaclip-2-worldwide-b16
     metaclip_revision: 8cc8591f32b43a809f3325192d3b77aa56968ddb
+  # Retired as canonical default (2026-08-31, hybrid vs semantic_dedup
+  # evaluation); retained for --selector-mode periodic opt-in and for
+  # reproducing pre-migration ingest runs.
   periodic:
     long_threshold_sec: 12.0
     interval_sec: 8.0

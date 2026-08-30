@@ -1,7 +1,7 @@
 # Canonical System Defaults — AIC26
 
-Version: 1.2
-Frozen by: DATA-02, TASK05-MILVUS, TASK-FIX-02
+Version: 1.3
+Frozen by: DATA-02, TASK05-MILVUS, TASK-FIX-02, SELECTOR-HYBRID-MIGRATION
 Config source of truth: `configs/production.yaml`
 
 ---
@@ -11,7 +11,7 @@ Config source of truth: `configs/production.yaml`
 ```text
 Canonical Production Defaults
 ------------------------------
-Ingestion: TransNetV2 @ 0.5 + periodic 12s/8s
+Ingestion: TransNetV2 @ 0.5 + hybrid_temporal_content (KNN-novelty + edge-change, max gap 8s)
 Objects:   RFDETRLarge / rf-detr-large-2026.pth @ 0.4
 Visual:    BEiT-3, MetaCLIP-2, PE-Core-L
 OCR:       DeepSolo + Vietnamese PARSeq + F-1/F/F+1
@@ -28,11 +28,25 @@ Lexical:   Elasticsearch BM25
 |---|---|
 | Shot detector | TransNetV2 |
 | Detector threshold | 0.5 |
-| Keyframe selector | periodic |
-| Long shot threshold | 12.0 seconds |
-| Periodic interval | 8.0 seconds |
+| Keyframe selector | hybrid_temporal_content |
+| Candidate step | 1.0 seconds |
+| Max temporal gap (forced keep) | 8.0 seconds |
+| CLIP novelty threshold | 0.15 |
+| CLIP rare threshold | 0.25 |
+| Edge-change min score | 0.08 (robust median + 3·MAD) |
+| Min event gap | 2.0 seconds |
+| Midpoint mandatory | true |
 
 Status: **Frozen**. Do not silently fall back to PySceneDetect.
+
+Chosen over `semantic_dedup` on a 4-video/7-query real-data benchmark
+(2026-08-31): Recall@1 0.583 vs 0.333, MRR 0.667 vs 0.417. `semantic_dedup`
+scored better on raw information coverage and had lower internal redundancy,
+but lost decisively on the retrieval task itself — see
+`scripts/experiments/evaluate_keyframe_selectors.py`,
+`evaluate_keyframe_coverage.py`, `evaluate_keyframe_redundancy.py` and their
+`results/*_full4/summary*.json` outputs. `semantic_dedup` is kept available
+(not legacy) pending a larger-scale re-evaluation, not deleted.
 
 ---
 
@@ -113,6 +127,7 @@ production defaults:
 
 | Component | Legacy backend | Why not default |
 |---|---|---|
+| Keyframe selection | periodic (12s/8s), midpoint | Replaced by hybrid_temporal_content (see benchmark note above); still selectable via `--selector-mode periodic`/`midpoint` |
 | Shot detection | PySceneDetect | Replaced by TransNetV2 |
 | Object detection | Faster R-CNN / YOLOv8n | Replaced by RF-DETR |
 | OCR | EasyOCR / PaddleOCR | Replaced by DeepSolo + PARSeq |

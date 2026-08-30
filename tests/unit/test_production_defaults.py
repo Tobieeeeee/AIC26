@@ -39,14 +39,22 @@ class TestIngestionDefaults:
     def test_detector_threshold(self, production_config):
         assert production_config["ingestion"]["detector_threshold"] == 0.5
 
-    def test_selector_is_periodic(self, production_config):
-        assert production_config["ingestion"]["selector"] == "periodic"
+    def test_selector_is_hybrid_temporal_content(self, production_config):
+        assert production_config["ingestion"]["selector"] == "hybrid_temporal_content"
 
-    def test_long_threshold(self, production_config):
-        assert production_config["ingestion"]["long_threshold_sec"] == 12.0
+    def test_hybrid_max_temporal_gap(self, production_config):
+        hybrid = production_config["ingestion"]["hybrid_temporal_content"]
+        assert hybrid["max_temporal_gap_sec"] == 8.0
 
-    def test_interval(self, production_config):
-        assert production_config["ingestion"]["interval_sec"] == 8.0
+    def test_hybrid_clip_novelty_threshold(self, production_config):
+        hybrid = production_config["ingestion"]["hybrid_temporal_content"]
+        assert hybrid["clip_novelty_threshold"] == 0.15
+
+    def test_periodic_retained_as_legacy_selector(self, production_config):
+        ingestion = production_config["ingestion"]
+        assert "periodic" in ingestion["legacy_selectors"]
+        assert ingestion["periodic"]["long_threshold_sec"] == 12.0
+        assert ingestion["periodic"]["interval_sec"] == 8.0
 
     def test_no_default_pyscenedetect(self, production_config):
         assert production_config["ingestion"]["detector"] != "pyscenedetect"

@@ -62,7 +62,13 @@ class MetaClip2ImageEncoder:
             processor = transformers.AutoProcessor.from_pretrained(
                 model_location, **load_kwargs
             )
-            model = transformers.AutoModel.from_pretrained(model_location, **load_kwargs)
+            # The checkpoint's own transformersInfo pins auto_model to this
+            # class, not the generic AutoModel; AutoModel fails to resolve
+            # the metaclip_2 architecture and raises a misleading "pytorch_model.bin"
+            # OSError regardless of allow_download.
+            model = transformers.AutoModelForZeroShotImageClassification.from_pretrained(
+                model_location, **load_kwargs
+            )
         except (OSError, ValueError) as exc:
             mode = "local cache/path" if not allow_download else "pinned repository"
             raise MetaClip2DependencyError(
@@ -102,4 +108,8 @@ class MetaClip2ImageEncoder:
         inference_context = getattr(torch, "inference_mode", torch.no_grad)
         with inference_context():
             features = model.get_image_features(**inputs)
-        return np.ascontiguousarray(features.detach().cpu().numpy(), dtype=np.float32)
+        # This transformers version's get_image_features returns the full
+        # BaseModelOutputWithPooling (projected embedding in pooler_output),
+        # not a bare tensor as its own docstring example implies.
+        vector = getattr(features, "pooler_output", features)
+        return np.ascontiguousarray(vector.detach().cpu().numpy(), dtype=np.float32)

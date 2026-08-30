@@ -160,7 +160,10 @@ class MetaClip2TextEncoder:
         inputs = {name: tensor.to(device) for name, tensor in inputs.items()}
         with _inference(torch):
             features = model.get_text_features(**inputs)
-        return np.asarray(features.detach().cpu().numpy(), dtype=np.float32)
+        # See metaclip2.py: this transformers version wraps the projected
+        # embedding in BaseModelOutputWithPooling.pooler_output.
+        vector = getattr(features, "pooler_output", features)
+        return np.asarray(vector.detach().cpu().numpy(), dtype=np.float32)
 
 
 class PerceptionEncoderTextEncoder:

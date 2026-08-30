@@ -79,7 +79,7 @@ def _add_ingest_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     parser.add_argument(
         "--selector-mode",
-        choices=["midpoint", "periodic", "hybrid_temporal_content"],
+        choices=["midpoint", "periodic", "hybrid_temporal_content", "semantic_dedup"],
         default=CANONICAL_SELECTOR_MODE,
     )
     parser.add_argument(
@@ -101,6 +101,14 @@ def _add_ingest_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--edge-change-min-score", type=float, default=0.08)
     parser.add_argument(
         "--midpoint-mandatory",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--semantic-dedup-candidate-fps", type=float, default=2.0)
+    parser.add_argument("--semantic-dedup-similarity-threshold", type=float, default=0.85)
+    parser.add_argument("--semantic-dedup-max-gap-seconds", type=float, default=8.0)
+    parser.add_argument(
+        "--semantic-dedup-force-first-frame-per-shot",
         action=argparse.BooleanOptionalAction,
         default=True,
     )

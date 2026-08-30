@@ -22,9 +22,29 @@ schema_version: "1.0"
 ingestion:
   detector: transnetv2
   detector_threshold: 0.5
-  selector: periodic
-  long_threshold_sec: 12.0
-  interval_sec: 8.0
+  selector: hybrid_temporal_content
+  hybrid_temporal_content:
+    candidate_step_sec: 1.0
+    max_temporal_gap_sec: 8.0
+    clip_knn_k: 3
+    clip_neighbor_window_sec: 4.0
+    clip_novelty_threshold: 0.15
+    clip_rare_threshold: 0.25
+    min_event_gap_sec: 2.0
+    edge_change_mad_multiplier: 3.0
+    edge_change_min_score: 0.08
+    midpoint_mandatory: true
+  # Chosen over semantic_dedup on a 4-video/7-query benchmark: Recall@1 0.583
+  # vs 0.333, MRR 0.667 vs 0.417 (semantic_dedup had better raw coverage/lower
+  # redundancy but lost on the retrieval task itself). semantic_dedup is kept
+  # available (not legacy) pending a larger-scale re-evaluation.
+  # periodic is retired as the default but kept for explicit opt-in only.
+  legacy_selectors:
+    - periodic
+    - midpoint
+  periodic:
+    long_threshold_sec: 12.0
+    interval_sec: 8.0
 
 # --------------------------------------------------------------------------
 # Object detection — canonical production default
