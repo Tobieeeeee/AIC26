@@ -1,4 +1,4 @@
-"""Build the Task05B v1 Elasticsearch lexical index."""
+"""Build the Task05B v1.2 Elasticsearch lexical index."""
 from __future__ import annotations
 
 import argparse
@@ -17,7 +17,7 @@ from mvr.indexing.lexical_index import build_lexical_index
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Build Task05B default-BM25 Elasticsearch index from Task05A documents."
+        description="Build Task05B v1.2 Vietnamese Elasticsearch index from Task05A documents."
     )
     parser.add_argument("--processed-root", type=Path, required=True)
     parser.add_argument("--elasticsearch-url", required=True)

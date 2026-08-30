@@ -30,6 +30,17 @@ def normalize_text(value: object) -> str:
     return clean_display_text(value).casefold()
 
 
+def normalize_lexical_query(value: object) -> str:
+    """Normalize a lexical query without removing Vietnamese diacritics.
+
+    The policy is deliberately identical at every Elasticsearch entry point:
+    Unicode NFC, collapsed whitespace, trim, then Unicode casefold. Accent
+    folding belongs exclusively to Elasticsearch's ``vi_folded`` analyzer.
+    """
+
+    return normalize_text(value)
+
+
 def is_punctuation_or_symbol_only(value: object) -> bool:
     """Whether non-whitespace characters are all Unicode punctuation/symbols."""
 
