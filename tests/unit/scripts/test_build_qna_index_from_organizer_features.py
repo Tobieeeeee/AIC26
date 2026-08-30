@@ -63,7 +63,7 @@ def test_discover_skips_video_missing_keyframes(tmp_path) -> None:
 def test_load_video_aligns_vectors_keyframes_and_mapping(tmp_path) -> None:
     _, assets = _make_dataset(tmp_path, n=3)
 
-    features, metadata = load_video(assets)
+    features, metadata = load_video(assets, image_root=tmp_path)
 
     assert features.shape == (3, 512)
     assert features.dtype == np.float32
@@ -77,7 +77,7 @@ def test_load_video_returns_exactly_unit_norm_vectors(tmp_path) -> None:
     outside FaissIndex's 1e-4 tolerance. They must come back exactly unit."""
     _, assets = _make_dataset(tmp_path, n=3)
 
-    features, _ = load_video(assets)
+    features, _ = load_video(assets, image_root=tmp_path)
 
     norms = np.linalg.norm(features, axis=1)
     assert np.allclose(norms, 1.0, atol=1e-6)
@@ -110,14 +110,14 @@ def test_load_video_rejects_more_vectors_than_keyframes(tmp_path) -> None:
     _, assets = _make_dataset(tmp_path, n=3, n_vectors=5)
 
     with pytest.raises(ValueError, match="length mismatch"):
-        load_video(assets)
+        load_video(assets, image_root=tmp_path)
 
 
 def test_load_video_rejects_mapping_row_count_mismatch(tmp_path) -> None:
     _, assets = _make_dataset(tmp_path, n=3, n_rows=2)
 
     with pytest.raises(ValueError, match="length mismatch"):
-        load_video(assets)
+        load_video(assets, image_root=tmp_path)
 
 
 def test_load_video_orders_keyframes_by_sorted_filename(tmp_path) -> None:
@@ -125,9 +125,33 @@ def test_load_video_orders_keyframes_by_sorted_filename(tmp_path) -> None:
     zero-padded names that is also numeric order."""
     _, assets = _make_dataset(tmp_path, n=12)
 
-    _, metadata = load_video(assets)
+    _, metadata = load_video(assets, image_root=tmp_path)
 
     ids = [m["frame_id"] for m in metadata]
     assert ids == sorted(ids)
     assert ids[:3] == ["001", "002", "003"]
     assert ids[-1] == "012"
+
+
+def test_load_video_stores_paths_relative_to_the_dataset_root(tmp_path) -> None:
+    r"""This builder produced the 177,321-vector index actually used in
+    round 1, and every image_path in it was an absolute `E:\` path. The
+    review sheet an operator opens by eye reads that column, so the index
+    was unusable to anyone but the machine that built it.
+
+    `image_root` is required rather than defaulting: a default that
+    reproduces the bug is the wrong default.
+    """
+    from mvr.indexing.faiss_index import resolve_image_path
+
+    root, assets = _make_dataset(tmp_path, n=2)
+
+    _, metadata = load_video(assets, image_root=root)
+
+    assert [m["image_path"] for m in metadata] == [
+        "Keyframes_L24/keyframes/L24_V011/001.jpg",
+        "Keyframes_L24/keyframes/L24_V011/002.jpg",
+    ]
+    assert all(
+        resolve_image_path(m, {"image_root": str(root)}).is_file() for m in metadata
+    )

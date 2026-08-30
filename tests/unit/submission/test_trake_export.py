@@ -272,6 +272,23 @@ def test_official_submission_filename_rejects_non_int_number() -> None:
         official_submission_filename(True, "trake")  # bool is technically an int
 
 
+def test_official_submission_filename_keeps_a_pack_name() -> None:
+    """The submission carries the query file's own name. The organizer says
+    so by example: their pack holds `query-1-trake.txt` and their required
+    listing holds `query-1-trake.csv` -- same name, new extension. A real
+    pack is `query-p1-16-trake`, and building `query-16-trake.csv` from it
+    invents a name their listing does not contain."""
+    assert (
+        official_submission_filename("query-p1-16-trake.txt")
+        == "query-p1-16-trake.csv"
+    )
+    assert official_submission_filename("query-p1-16-trake") == "query-p1-16-trake.csv"
+
+
+def test_official_submission_filename_keeps_a_batch_prefixed_id() -> None:
+    assert official_submission_filename("p1-16", "trake") == "query-p1-16-trake.csv"
+
+
 def test_official_csv_rejects_mixed_marker_counts_in_one_file(tmp_path: Path) -> None:
     """The organizer compares Frame ID count against the query's own
     declared event count -- a file mixing k=3 and k=4 rows is already

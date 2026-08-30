@@ -123,30 +123,32 @@ def main() -> None:
             "published example from https://sotuyenaic.oj.io.vn/. This is "
             "NOT the same file as --output-dir's local verification export; "
             "write both if you want to keep the debug copy too. Prefer "
-            "--query-number + --official-dir below unless you need an exact "
-            "custom path/filename."
+            "--official-dir below unless you need an exact custom path."
         ),
     )
     parser.add_argument(
         "--query-number", type=int, default=None,
         help=(
-            "This query's sequence number in the organizer's batch (the 'N' "
-            "in the query-N-trake.txt file the organizer handed out). "
-            "Combined with --official-dir, generates the exact "
-            "query-<N>-trake.csv filename the organizer expects "
-            "(mvr.submission.trake_export.official_submission_filename) -- "
-            "ignored if --official-csv is also given."
+            "Optional. The submission carries the QUERY FILE's own name, so "
+            "--official-dir alone is enough: query-p1-16-trake.txt writes "
+            "query-p1-16-trake.csv. Give a number only when the query file "
+            "is named something else -- it rebuilds query-<N>-trake.csv, "
+            "which loses any batch prefix. Ignored if --official-csv is given."
         ),
     )
     parser.add_argument(
         "--official-dir", type=Path, default=None,
-        help="Directory to write the --query-number-generated official CSV into",
+        help=(
+            "Write the official CSV here, named after the query file: "
+            "query-p1-16-trake.json -> query-p1-16-trake.csv"
+        ),
     )
     args = parser.parse_args()
 
     from mvr.enrichment.embeddings.openclip import OpenClipEncoder
     from mvr.indexing.faiss_index import FaissIndex
     from mvr.ingestion.aic_dataset import AicDatasetRegistry
+    from mvr.retrieval.query_preprocessing import ProcessedQuery, QueryPreprocessingService
     from mvr.retrieval.semantic import SemanticRetriever
     from mvr.retrieval.trake import search_trake
     from mvr.retrieval.trake_align import AtlasAlignment, LuciferAlignment, UceseAlignment
@@ -162,12 +164,23 @@ def main() -> None:
     )
 
     official_csv_path = args.official_csv
-    if official_csv_path is None and args.query_number is not None:
-        if args.official_dir is None:
-            raise SystemExit("--query-number requires --official-dir")
-        official_csv_path = args.official_dir / official_submission_filename(
-            args.query_number, "trake"
+    if official_csv_path is None and args.official_dir is not None:
+        # The query file's own name IS the submission name, so prefer it
+        # over --query-number: a real pack is `query-p1-16-trake.txt`, and
+        # a number can only ever rebuild `query-16-trake.csv`, which the
+        # organizer's directory listing does not contain.
+        # `.stem`, not `.name`: this script's query file is JSON, and only
+        # `.txt`/`.csv` are recognised extensions downstream.
+        source = (
+            args.query_file.stem
+            if args.query_number is None
+            else args.query_number
         )
+        official_csv_path = args.official_dir / official_submission_filename(
+            source, "trake"
+        )
+    elif official_csv_path is None and args.query_number is not None:
+        raise SystemExit("--query-number requires --official-dir")
 
     events, gap_phrases = load_query_file(args.query_file)
     query_id = args.query_id or args.query_file.stem
@@ -183,18 +196,31 @@ def main() -> None:
     semantic_service = SemanticRetriever(encoder, index)
     aic_registry = AicDatasetRegistry(args.dataset_root)
 
-    query_translator = None
+    # search_trake() no longer translates. The dense/semantic branch wants
+    # English (the index encoder is English-trained), the lexical/BM25 branch
+    # indexes Vietnamese OCR/ASR text and wants the original -- so prepare both
+    # forms here, through the same service the API server uses.
     if args.translate_query:
-        from mvr.enrichment.qna_translation import HelsinkiViEnTranslator
 
-        translator_kwargs = {"allow_model_download": args.allow_translation_download}
-        if args.translation_model:
-            translator_kwargs["model_name"] = args.translation_model
-        query_translator = HelsinkiViEnTranslator(**translator_kwargs)
-        print("[retrieval query EN]", [query_translator.translate(e) for e in events])
+        def translator_factory():
+            from mvr.enrichment.qna_translation import HelsinkiViEnTranslator
+
+            translator_kwargs = {"allow_model_download": args.allow_translation_download}
+            if args.translation_model:
+                translator_kwargs["model_name"] = args.translation_model
+            return HelsinkiViEnTranslator(**translator_kwargs)
+
+        preprocessing = QueryPreprocessingService(translator_factory=translator_factory)
+        prepared_events = [preprocessing.prepare(text) for text in events]
+        print("[retrieval query EN]", [prepared.dense for prepared in prepared_events])
+    else:
+        prepared_events = [ProcessedQuery(dense=text, lexical=text) for text in events]
 
     query = TrakeQuery(
-        events=tuple(TrakeEventQuery(i, text) for i, text in enumerate(events, start=1)),
+        events=tuple(
+            TrakeEventQuery(index, prepared.dense)
+            for index, prepared in enumerate(prepared_events, start=1)
+        ),
         gaps=tuple(translate_gap_phrase(phrase) for phrase in gap_phrases),
     )
 
@@ -208,7 +234,7 @@ def main() -> None:
         semantic_service=semantic_service,
         aic_registry=aic_registry,
         top_k=args.top_k,
-        query_translator=query_translator,
+        lexical_queries=[prepared.lexical for prepared in prepared_events],
     )
 
     if not chains:

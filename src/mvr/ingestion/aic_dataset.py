@@ -104,6 +104,7 @@ class AicDatasetRegistry:
         "keyframes": ("keyframes", "Keyframes_*/keyframes"),
         "map_keyframes": ("map_keyframes", "map-keyframes*/map-keyframes"),
         "media_info": ("media_info", "media-info*/media-info"),
+        "objects": ("objects", "objects*/objects"),
     }
 
     def __init__(self, root: Path | str | None) -> None:
@@ -150,12 +151,39 @@ class AicDatasetRegistry:
         zero-padding width (observed AIC exports are 3-digit, e.g. "003.jpg",
         but this must not assume that width is universal).
         """
-        target = _normalize_ref(keyframe_ref)
-        for root in self._directories("keyframes"):
+        return self._numbered_asset("keyframes", video_id, keyframe_ref, ".jpg")
+
+    def objects_path(self, video_id: str, keyframe_ref: str) -> Path | None:
+        """Locate this keyframe's object-detection JSON.
+
+        Matches ``ObjectsPathResolver``, so it can be handed to
+        ``search_qna()`` directly. ``None`` for a video whose detections were
+        never downloaded -- 814 of the 873 -- which Q&A reads as "no
+        detections", the truth rather than an error.
+        """
+        return self._numbered_asset("objects", video_id, keyframe_ref, ".json")
+
+    def _numbered_asset(
+        self, kind: str, video_id: str, keyframe_ref: str, suffix: str
+    ) -> Path | None:
+        """A per-keyframe file under ``<dir>/<video_id>/<NNN><suffix>``,
+        found by numeric match on the stem.
+
+        A non-numeric reference -- this repo's own ``L01_V001_S0002_K01``
+        shot ids -- is one more "not here", not an error: no organizer asset
+        is named after one, and these lookups already answer not-here with
+        ``None``. ``resolve_frame`` still raises, because inventing a
+        frame_idx is dangerous in a way that failing to find a JPEG is not.
+        """
+        try:
+            target = _normalize_ref(keyframe_ref)
+        except MissingFrameMappingError:
+            return None
+        for root in self._directories(kind):
             directory = root / video_id
             if not directory.is_dir():
                 continue
-            for candidate in sorted(directory.glob("*.jpg")):
+            for candidate in sorted(directory.glob(f"*{suffix}")):
                 try:
                     if _normalize_ref(candidate.stem) == target:
                         return candidate

@@ -55,7 +55,7 @@ Lấy 200 ảnh keyframe bất kỳ, chạy OCR trên GPU, ghi lại **giây m�
 
 ```powershell
 # 200 ảnh mẫu
-python -c "import glob,random,shutil,os; os.makedirs('bench200',exist_ok=True); [shutil.copy(p,'bench200') for p in random.sample(glob.glob('D:/AIC26_data/Keyframes_*/keyframes/*/*.jpg'), 200)]"
+python -c "import glob,random,shutil,os; os.makedirs('bench200',exist_ok=True); [shutil.copy(p,'bench200') for p in random.sample(glob.glob('E:/AIC26_data/Keyframes_*/keyframes/*/*.jpg'), 200)]"
 ```
 
 Rồi chạy engine OCR của các bạn trên thư mục đó và báo lại:
@@ -106,7 +106,7 @@ nên sample của mọi video dồn hết vào một khoá. Kết quả OCR gắ
 ```powershell
 # 1. Sinh mapping (11 giây, chạy trên máy bạn)
 python scripts/build_keyframe_mapping.py `
-    --dataset-root D:/AIC26_data `
+    --dataset-root E:/AIC26_data `
     --output artifacts/keyframe_mapping.csv
 
 # 2. OCR

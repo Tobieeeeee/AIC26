@@ -162,6 +162,7 @@ def main() -> None:
     from mvr.indexing.faiss_index import FaissIndex
     from mvr.ingestion.aic_dataset import AicDatasetRegistry
     from mvr.retrieval.qna import KeyframeNeighbourIndex, search_qna
+    from mvr.retrieval.query_preprocessing import ProcessedQuery, QueryPreprocessingService
     from mvr.retrieval.semantic import SemanticRetriever
 
     text = args.query_file.read_text(encoding="utf-8")
@@ -202,11 +203,13 @@ def main() -> None:
         print("[retrieval] semantic only (pass --elasticsearch-url to add BM25)")
 
     aic_registry = AicDatasetRegistry(args.dataset_root)
-    objects_root = args.dataset_root / "objects"
-
-    def objects_path_resolver(video_id: str, keyframe_id: str) -> Path | None:
-        path = objects_root / video_id / f"{keyframe_id}.json"
-        return path if path.is_file() else None
+    # Through the registry rather than joining `<root>/objects/` here: the
+    # organizer ships this as `<root>/objects-aic25-b1/objects/`, so the
+    # hardcoded join resolved nothing on a real download and every candidate
+    # reached the reasoner with no detections -- silently, because a missing
+    # objects file is legitimate for the 814 of 873 videos whose detections
+    # were never downloaded.
+    objects_path_resolver = aic_registry.objects_path
 
     # Temporally-expanded neighbours are not retrieval hits, so the index
     # supplied no image for them. Without this the neighbour reaches the
@@ -253,15 +256,25 @@ def main() -> None:
         ocr_engine = EasyOcrEngine()
         image_loader = lambda path: Image.open(path).convert("RGB")  # noqa: E731
 
-    query_translator = None
+    # search_qna() no longer translates: it takes the dense (English) query and
+    # the untranslated original as `lexical_query`, the same split documented
+    # in scripts/run_trake_pipeline.py. The question itself stays in the
+    # original language -- the answer reasoner, not the index, reads it.
     if args.translate_query:
-        from mvr.enrichment.qna_translation import HelsinkiViEnTranslator
 
-        translator_kwargs = {"allow_model_download": args.allow_translation_download}
-        if args.translation_model:
-            translator_kwargs["model_name"] = args.translation_model
-        query_translator = HelsinkiViEnTranslator(**translator_kwargs)
-        print(f"[retrieval query EN] {query_translator.translate(event_description)}")
+        def translator_factory():
+            from mvr.enrichment.qna_translation import HelsinkiViEnTranslator
+
+            translator_kwargs = {"allow_model_download": args.allow_translation_download}
+            if args.translation_model:
+                translator_kwargs["model_name"] = args.translation_model
+            return HelsinkiViEnTranslator(**translator_kwargs)
+
+        preprocessing = QueryPreprocessingService(translator_factory=translator_factory)
+        prepared_query = preprocessing.prepare(event_description)
+        print(f"[retrieval query EN] {prepared_query.dense}")
+    else:
+        prepared_query = ProcessedQuery(dense=event_description, lexical=event_description)
 
     if args.export_prompts is not None:
         collector = CollectingBackend()
@@ -274,7 +287,7 @@ def main() -> None:
         answer_reasoner = AnswerReasoner(HuggingFaceCausalLmBackend(**backend_kwargs))
 
     results = search_qna(
-        event_description,
+        prepared_query.dense,
         question,
         top_k=args.top_k,
         semantic_service=semantic_service,
@@ -287,7 +300,7 @@ def main() -> None:
         keyframe_path_resolver=keyframe_path_resolver,
         record_resolver=record_resolver,
         min_object_confidence=args.min_object_confidence,
-        query_translator=query_translator,
+        lexical_query=prepared_query.lexical,
         temporal_radius=args.temporal_radius,
         neighbour_cost=args.neighbour_cost,
         neighbour_index=neighbour_index,

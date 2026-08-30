@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+
+from mvr.indexing.faiss_index import resolve_image_path
 
 
 LAB6_MODEL_NAME = "RN50"
@@ -60,15 +63,24 @@ class SearchResult:
 
 
 class SemanticRetriever:
-    def __init__(self, text_encoder, index) -> None:
+    def __init__(self, text_encoder, index, *, image_root=None) -> None:
+        """`image_root` overrides the root the index recorded at build time.
+
+        Every consumer -- answer_queries, run_qna_pipeline,
+        run_trake_pipeline -- reads image_path through this class, so an
+        index whose corpus is mounted elsewhere is repointed in one place
+        rather than three.
+        """
         self.text_encoder = text_encoder
         self.index = index
+        self.image_root = image_root
 
     def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query must be a non-empty string")
         query_vector = self.text_encoder.encode_text([query.strip()])
         hits = self.index.search(query_vector, top_k=top_k)
+        manifest = getattr(self.index, "manifest", {})
         return [
             SearchResult(
                 rank=rank,
@@ -76,10 +88,22 @@ class SemanticRetriever:
                 video_id=str(hit.metadata["video_id"]),
                 timestamp=float(hit.metadata["timestamp"]),
                 score=hit.score,
-                image_path=str(hit.metadata["image_path"]),
+                image_path=self._image_path(hit.metadata, manifest),
             )
             for rank, hit in enumerate(hits, start=1)
         ]
+
+    def _image_path(self, row, manifest) -> str:
+        """The stored text, unless a root actually applies to it.
+
+        Round-tripping every path through ``Path`` would rewrite a stored
+        ``a/b.jpg`` as ``a\b.jpg`` on Windows -- a change to the data for
+        no gain, and one that travels into the review sheet and the
+        submission artifacts.
+        """
+        stored = str(row["image_path"])
+        resolved = resolve_image_path(row, manifest, image_root=self.image_root)
+        return stored if Path(stored) == resolved else str(resolved)
 
 
 class ElasticsearchSemanticRetriever:

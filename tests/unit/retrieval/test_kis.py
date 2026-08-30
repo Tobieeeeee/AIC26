@@ -9,6 +9,8 @@ from mvr.retrieval.kis import (
 
     KeyframeFrameIndexResolver,
     KisCandidate,
+    parse_keyframe_ref,
+    resolve_keyframe_ref,
     resolve_original_frame_id,
     search_kis,
 )
@@ -455,6 +457,54 @@ def test_a_frame_idx_disagreeing_with_the_resolver_raises() -> None:
         )
 
 
+# -- Manual keyframe reference ----------------------------------------
+#
+# During the round a human browses the organizer's keyframe folders,
+# finds the right JPEG by eye, and wants that frame at rank 1. What they
+# can read off the screen is `L21_V001` and `001` -- never the frame_idx,
+# which lives only in the mapping.
+
+
+def test_parse_keyframe_ref_splits_on_the_last_underscore() -> None:
+    # `video_id` itself contains an underscore, so a naive split on the
+    # first one yields ("L21", "V001_001") and resolves to nothing.
+    assert parse_keyframe_ref("L21_V001_001") == ("L21_V001", "001")
+
+
+def test_parse_keyframe_ref_accepts_the_slash_form_shown_on_screen() -> None:
+    # The interactive listing prints `L21_V001/001`; copying that back is
+    # the obvious thing to do, so it must not be an error.
+    assert parse_keyframe_ref("L21_V001/001") == ("L21_V001", "001")
+
+
+def test_parse_keyframe_ref_rejects_a_bare_id() -> None:
+    # A bare keyframe id does not identify a keyframe: 166,550 keyframes
+    # carry only 632 distinct ids.
+    with pytest.raises(ValueError):
+        parse_keyframe_ref("001")
+
+
+def test_resolve_keyframe_ref_maps_the_pair_to_a_frame_index() -> None:
+    resolver = KeyframeFrameIndexResolver(
+        {("L21_V001", "001"): 0, ("L21_V001", "050"): 5760}
+    )
+
+    assert resolve_keyframe_ref(resolver, "L21_V001_050") == ("L21_V001", "050", 5760)
+
+
+def test_resolve_keyframe_ref_retries_with_a_zero_padded_id() -> None:
+    # The JPEG stem is `050`; typing `50` in a hurry should still land.
+    resolver = KeyframeFrameIndexResolver({("L21_V001", "050"): 5760})
+
+    assert resolve_keyframe_ref(resolver, "L21_V001_50") == ("L21_V001", "050", 5760)
+
+
+def test_resolve_keyframe_ref_reports_a_miss_instead_of_guessing() -> None:
+    # Returning a plausible integer for an unmapped pair is the exact
+    # failure KeyframeFrameIndexResolver exists to prevent.
+    resolver = KeyframeFrameIndexResolver({("L21_V001", "001"): 0})
+
+    assert resolve_keyframe_ref(resolver, "L30_V072_050")[2] is None
 def test_keyframe_id_for_reverses_the_frame_index_lookup() -> None:
     """TRAKE predicts a frame_idx and nothing else, but keyframe files are
     named by keyframe id, so serving a thumbnail for a chain needs the
