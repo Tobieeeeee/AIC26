@@ -172,6 +172,75 @@ class HybridSearchResponse(SearchResponse):
     rrf_k: int = Field(ge=1)
 
 
+class UiSpatialFilter(BaseModel):
+    enabled: bool = False
+    logic: Literal["AND", "OR"] = "AND"
+    objects: list[str] = Field(default_factory=list)
+    colors: list[str] = Field(default_factory=list)
+
+
+class UiVisualQuery(BaseModel):
+    image_url: str = ""
+
+
+class UiSearchRequest(BaseModel):
+    task_mode: Literal["KIS", "TRAKE", "Q&A"]
+    query: str = Field(min_length=1)
+    model_engine: str = "use all"
+    sim_reorder: bool = True
+    spatial_filter: UiSpatialFilter | None = None
+    visual_query: UiVisualQuery | None = None
+    top_k: int = Field(default=100, ge=1, le=100)
+    question: str | None = None
+    event_description: str | None = None
+    trake_events: list[str] | None = None
+    gap_phrases: list[str] | None = None
+
+    _validate_query = field_validator("query")(_require_non_blank)
+
+
+class UiKeyframeResult(BaseModel):
+    id: str
+    video_id: str
+    frame_id: int
+    timestamp: str
+    timestamp_sec: float
+    thumbnail_url: str
+    video_url: str
+    score: float
+    objects: list[str] = Field(default_factory=list)
+    answer: str | None = None
+    frames: list[int | None] | None = None
+
+
+class UiSearchResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    total_results: int = Field(ge=0)
+    results: list[UiKeyframeResult]
+
+
+class UiSubmissionItem(BaseModel):
+    video_id: str
+    frame_id: int
+    answer: str | None = None
+
+
+class UiSubmitRequest(BaseModel):
+    query_id: str = Field(min_length=1)
+    task_mode: Literal["KIS", "TRAKE", "Q&A"]
+    items: list[UiSubmissionItem] = Field(default_factory=list, max_length=100)
+
+    _validate_query_id = field_validator("query_id")(_require_non_blank)
+
+
+class UiSubmitResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    query_id: str
+    task_mode: Literal["KIS", "TRAKE", "Q&A"]
+    row_count: int = Field(ge=0)
+    csv_preview: str
+
+
 class SemanticRuntimeStatus(BaseModel):
     configured: bool
     available: bool

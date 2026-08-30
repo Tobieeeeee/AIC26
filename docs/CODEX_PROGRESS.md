@@ -1585,3 +1585,56 @@ Remaining:
 - Full real R2 pull/push against the live bucket (requires credentials).
 - Real GPU extraction run (requires GPU + model weights).
 - Building the four Docker images from the new compose/Dockerfiles.
+
+## Backend UI API — review report for `feat/backend-ui-api`
+
+Reviewed `6e7f1a3` ("feat: add frontend API adapter for retrieval UI", Golden)
+against `origin/main` @ `712274d`. The branch shipped 5 files and 440
+insertions with no documentation, so this closes the deliverable required by
+AGENTS.md §19 step 11 and §20. Full findings in
+`docs/reviews/BACKEND_UI_API_REPORT.md`.
+
+What the branch adds: CORS middleware, the `_format_timestamp` /
+`_frame_asset_urls` / `_ui_result` helpers, and the two endpoints the UI calls
+— `POST /api/v1/search` and `POST /api/v1/submit` — plus the Ui* Pydantic
+schemas. Nothing existing was modified or deleted.
+
+Verification:
+
+- `pytest tests/unit/api/` on a worktree checked out at `6e7f1a3`: 52 passed
+  in 16.92s. The worktree's own `src/` was confirmed to be the imported one
+  (`mvr resolved to: <worktree>\src\mvr\__init__.py`), not another branch's.
+- `create_app()` constructed for real; route table read back — 7 routes.
+- Static keyword-vs-signature check of every `search_trake()` / `search_qna()`
+  call in `src/mvr/api/app.py`: all four `ok` on this branch in isolation.
+
+Findings:
+
+- Merging into current `main` breaks `POST /api/v1/search`. `main` `712274d`
+  replaced `query_translator` with `lexical_queries` / `lexical_query`; this
+  branch adds a new `search_trake()` call still passing `query_translator`.
+  `git merge-tree --write-tree` reports a clean merge (exit 0, tree
+  `b0714903`), and the same static check on the merged file reports
+  `line 821 search_trake() -> BROKEN ['query_translator']`. It would surface
+  only at runtime, after the encoder and index load.
+- `scripts/run_backend_full.ps1` cannot start the server here:
+  `D:\AIC26\data\raw` exists but is empty (0 entries), and neither
+  `artifacts/indexes/aic_full/manifest.json` nor `artifacts/indexes/aic_smoke`
+  exists — so it exits 2, and its fallback message names a directory that is
+  not there. The real corpus is `E:/AIC26_data` with index
+  `artifacts/indexes/qna_organizer_all`.
+- The same script hardcodes `D:\AIC26` in three places, reintroducing the
+  personal-path pattern `637be9d` removed from eight other scripts.
+
+Git:
+
+- Branch: `docs/backend-ui-api-report`, based on `origin/feat/backend-ui-api`
+- Commit: `docs: report what feat/backend-ui-api does, and what it breaks`
+- Push: NOT YET — `feat/backend-ui-api` belongs to another author
+
+Remaining:
+
+- Fix the one `search_trake()` call site to the `lexical_queries` contract.
+- Make `run_backend_full.ps1` take the dataset root and index as arguments.
+- Start the server against a real index and issue one request per endpoint.
+  Until then the backend must not be described as working end to end.
