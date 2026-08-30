@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..enrichment.qna_answer import AnswerReasoner, AnswerReasonerUnavailable, HuggingFaceCausalLmBackend
@@ -592,7 +593,7 @@ def _frame_asset_urls(
     keyframe_id: str | None,
     image_path: str | None,
     keyframe_dir: Path | None,
-    video_dir: Path | None,
+    video_available: bool,
 ) -> tuple[str, str]:
     thumbnail = _servable_keyframe_url(image_path, keyframe_dir)
     if thumbnail is None and image_path and str(image_path).startswith("/keyframes/"):
@@ -603,8 +604,62 @@ def _frame_asset_urls(
     if thumbnail is None:
         thumbnail = f"/keyframes/{video_id}/{frame_id}.jpg"
 
-    video_url = f"/videos/{video_id}.mp4" if video_dir is not None else ""
+    video_url = f"/videos/{video_id}.mp4" if video_available else ""
     return thumbnail, video_url
+
+
+def _is_safe_path_component(value: str) -> bool:
+    """One path segment that cannot climb out of the directory it names."""
+    return bool(value) and value not in (".", "..") and "/" not in value and "\\" not in value
+
+
+def _trake_frame_details(
+    *,
+    video_id: str,
+    frame_idx: int,
+    pipeline_resolver: Any,
+    aic_registry: Any,
+) -> tuple[str | None, float | None]:
+    """Keyframe id and timestamp for one frame of a TRAKE chain.
+
+    A chain carries frame indices and nothing else, but keyframe files are
+    named by keyframe id and the UI needs a real time to scrub to. Both come
+    from reading the keyframe mapping backwards.
+
+    Returns ``(None, None)`` for anything it cannot establish, rather than
+    raising: TRAKE already tolerates missing pieces per event instead of
+    aborting a whole result set, and a chain with no thumbnail is worth more
+    to a reviewer than no chain at all.
+    """
+    keyframe_id: str | None = None
+    if pipeline_resolver is not None:
+        try:
+            keyframe_id = pipeline_resolver.keyframe_id_for(video_id, frame_idx)
+        except Exception:
+            logger.exception("keyframe_id_for failed for %s/%s", video_id, frame_idx)
+            keyframe_id = None
+    if keyframe_id is None or aic_registry is None:
+        return keyframe_id, None
+    try:
+        mapping = aic_registry.resolve_frame(video_id, keyframe_id)
+    except Exception:
+        return keyframe_id, None
+    # The id came from keyframe_mapping.csv and the timestamp from the
+    # organizer's map-keyframes -- two files. If they disagree about which
+    # frame this id sits at, the timestamp belongs to a different moment, and
+    # a reviewer scrubbing to it would land on the wrong shot with nothing to
+    # say so. Drop it instead.
+    if int(getattr(mapping, "frame_idx", -1)) != int(frame_idx):
+        logger.warning(
+            "frame mapping disagreement for %s keyframe %s: mapping says frame %s, "
+            "chain says %s; withholding the timestamp",
+            video_id,
+            keyframe_id,
+            getattr(mapping, "frame_idx", None),
+            frame_idx,
+        )
+        return keyframe_id, None
+    return keyframe_id, float(mapping.timestamp)
 
 
 def _ui_result(
@@ -617,7 +672,7 @@ def _ui_result(
     keyframe_id: str | None,
     image_path: str | None,
     keyframe_dir: Path | None,
-    video_dir: Path | None,
+    video_available: bool,
     answer: str | None = None,
     objects: list[str] | None = None,
     frames: list[int | None] | None = None,
@@ -628,7 +683,7 @@ def _ui_result(
         keyframe_id=keyframe_id,
         image_path=image_path,
         keyframe_dir=keyframe_dir,
-        video_dir=video_dir,
+        video_available=video_available,
     )
     timestamp_sec = float(timestamp if timestamp is not None else 0.0)
     return UiKeyframeResult(
@@ -710,12 +765,72 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Registered BEFORE the static mount so it wins for the two-segment
+    # <video>/<file> shape every thumbnail URL uses; anything deeper still
+    # falls through to the mount below.
+    @application.get("/keyframes/{video_id}/{filename}", include_in_schema=False)
+    def keyframe_image(video_id: str, filename: str) -> FileResponse:
+        """Serve one keyframe, whatever layout the corpus is in.
+
+        A mounted directory answers the normalized layout. The organizer's
+        download splits the same corpus across fourteen roots
+        (``Keyframes_L21/keyframes`` ... ``Keyframes_L30/keyframes``), which no
+        single mount can express, so the dataset registry -- which already
+        globs those batch folders -- is asked second.
+        """
+        if not all(_is_safe_path_component(part) for part in (video_id, filename)):
+            raise HTTPException(status_code=404, detail="keyframe not found")
+
+        if isinstance(keyframe_dir, Path):
+            direct = keyframe_dir / video_id / filename
+            if direct.is_file():
+                return FileResponse(direct)
+
+        if kis_aic_registry is not None:
+            try:
+                resolved = kis_aic_registry.keyframe_path(video_id, Path(filename).stem)
+            except Exception:
+                logger.exception("keyframe_path failed for %s/%s", video_id, filename)
+                resolved = None
+            if resolved is not None and Path(resolved).is_file():
+                return FileResponse(resolved)
+
+        raise HTTPException(status_code=404, detail="keyframe not found")
+
     if isinstance(keyframe_dir, Path) and keyframe_dir.is_dir():
         application.mount(
             "/keyframes",
             StaticFiles(directory=keyframe_dir),
             name="keyframes",
         )
+    @application.get("/videos/{filename}", include_in_schema=False)
+    def video_file(filename: str) -> FileResponse:
+        """Serve one video, whatever layout the corpus is in.
+
+        Same shape of problem the keyframes had, one level worse: besides the
+        organizer's ``Videos_*/video/``, the R2 reorg introduced
+        ``<batch>/videos/<collection>/``. The registry knows both, so ask it
+        rather than keeping a third copy of the rules here.
+        """
+        if not _is_safe_path_component(filename):
+            raise HTTPException(status_code=404, detail="video not found")
+
+        if isinstance(video_dir, Path):
+            direct = video_dir / filename
+            if direct.is_file():
+                return FileResponse(direct)
+
+        if kis_aic_registry is not None:
+            try:
+                resolved = kis_aic_registry.video_path(Path(filename).stem)
+            except Exception:
+                logger.exception("video_path failed for %s", filename)
+                resolved = None
+            if resolved is not None and Path(resolved).is_file():
+                return FileResponse(resolved)
+
+        raise HTTPException(status_code=404, detail="video not found")
+
     if isinstance(video_dir, Path) and video_dir.is_dir():
         application.mount(
             "/videos",
@@ -752,6 +867,9 @@ def create_app(
     def ui_search(request: UiSearchRequest) -> UiSearchResponse:
         served_keyframes = keyframe_dir if isinstance(keyframe_dir, Path) else None
         served_videos = video_dir if isinstance(video_dir, Path) else None
+        # The /videos route falls back to the dataset registry, so a link is
+        # worth emitting whenever either the mount or the registry can answer.
+        videos_servable = served_videos is not None or kis_aic_registry is not None
 
         if request.task_mode == "Q&A":
             question = (request.question or "").strip() or request.query
@@ -782,7 +900,7 @@ def create_app(
                     keyframe_id=candidate.keyframe_id,
                     image_path=candidate.image_path,
                     keyframe_dir=served_keyframes,
-                    video_dir=served_videos,
+                    video_available=videos_servable,
                     answer=candidate.answer,
                 )
                 for candidate in candidates
@@ -810,10 +928,15 @@ def create_app(
                         ),
                     )
                 try:
+                    # Same split /search/trake uses: the dense branch gets the
+                    # translated text, the lexical/BM25 branch the original.
+                    prepared_events = [
+                        query_preprocessing.prepare(text) for text in event_texts
+                    ]
                     query = TrakeQuery(
                         events=tuple(
-                            TrakeEventQuery(index, text)
-                            for index, text in enumerate(event_texts, start=1)
+                            TrakeEventQuery(index, prepared.dense)
+                            for index, prepared in enumerate(prepared_events, start=1)
                         ),
                         gaps=tuple(translate_gap_phrase(phrase) for phrase in gap_phrases),
                     )
@@ -827,7 +950,7 @@ def create_app(
                         aic_registry=kis_aic_registry,
                         top_k=request.top_k,
                         pipeline_resolver=kis_pipeline_resolver,
-                        query_translator=trake_query_translator,
+                        lexical_queries=tuple(p.lexical for p in prepared_events),
                     )
                 except RuntimeError as exc:
                     raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -837,17 +960,23 @@ def create_app(
                 results: list[UiKeyframeResult] = []
                 for rank, chain in enumerate(chains, start=1):
                     first_frame = next((frame for frame in chain.frames if frame is not None), 0)
+                    chain_keyframe_id, chain_timestamp = _trake_frame_details(
+                        video_id=chain.video_id,
+                        frame_idx=int(first_frame or 0),
+                        pipeline_resolver=kis_pipeline_resolver,
+                        aic_registry=kis_aic_registry,
+                    )
                     results.append(
                         _ui_result(
                             rank=rank,
                             video_id=chain.video_id,
                             frame_id=int(first_frame or 0),
                             score=chain.score,
-                            timestamp=None,
-                            keyframe_id=None,
+                            timestamp=chain_timestamp,
+                            keyframe_id=chain_keyframe_id,
                             image_path=None,
                             keyframe_dir=served_keyframes,
-                            video_dir=served_videos,
+                            video_available=videos_servable,
                             frames=list(chain.frames),
                         )
                     )
@@ -877,7 +1006,7 @@ def create_app(
                 keyframe_id=candidate.keyframe_id,
                 image_path=None,
                 keyframe_dir=served_keyframes,
-                video_dir=served_videos,
+                video_available=videos_servable,
             )
             for candidate in candidates
         ]

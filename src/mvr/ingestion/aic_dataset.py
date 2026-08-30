@@ -65,57 +65,109 @@ def _normalize_ref(value: str) -> str:
 class AicDatasetRegistry:
     """Original-video frame registry backed by an optional AIC dataset root.
 
-    Expected directory layout (every subdirectory is optional except at least
-    one video file under ``videos/``)::
+    Two directory layouts are read, normalized first::
 
-        <root>/videos/<video_id>.mp4
-        <root>/keyframes/<video_id>/<NNN>.jpg
-        <root>/map_keyframes/<video_id>.csv   (n, pts_time, fps, frame_idx)
-        <root>/media_info/<video_id>.json     (YouTube descriptive metadata only)
+        normalized  <root>/videos/<video_id>.mp4
+                    <root>/keyframes/<video_id>/<NNN>.jpg
+                    <root>/map_keyframes/<video_id>.csv
+                    <root>/media_info/<video_id>.json
+
+        raw         <root>/Videos_L21_a/video/<video_id>.mp4
+                    <root>/Keyframes_L26_a/keyframes/<video_id>/<NNN>.jpg
+                    <root>/map-keyframes-aic25-b1/map-keyframes/<video_id>.csv
+                    <root>/media-info-aic25-b1/media-info/<video_id>.json
+
+        R2 mirror   <root>/<batch>/videos/<collection>/<video_id>.mp4
+
+    The R2 reorg (main ``712274d``) retired the organizer's ``Videos_*/video/``
+    shape inside the bucket in favour of
+    ``data/raw/{batch}/videos/{collection}/`` -- see
+    ``mvr.operations.r2_layout.raw_video_key()``. A root mirrored from R2 after
+    that move nests videos one level deeper and groups them by collection, so
+    neither older shape finds them. Only videos moved; the reorg plan
+    (``scripts/operations/r2_reng.py``) touches nothing else.
+
+    The raw shape is what the organizer actually ships: one folder per asset
+    kind, carrying a batch suffix, with an inner directory whose name uses
+    hyphens where the normalized tree uses underscores. Reading only the
+    normalized tree meant a registry pointed at the real download resolved
+    nothing at all -- every TRAKE run returned "(no candidate chains found)",
+    and Q&A saw no object detections. ``build_keyframe_mapping.py`` has read
+    both layouts all along, which is why KIS was unaffected.
+
+    Every subdirectory is optional.
     """
+
+    # kind -> directory globs relative to the dataset root, best first.
+    RAW_LAYOUT = {
+        "videos": ("videos", "Videos_*/video", "*/videos/*"),
+        "keyframes": ("keyframes", "Keyframes_*/keyframes"),
+        "map_keyframes": ("map_keyframes", "map-keyframes*/map-keyframes"),
+        "media_info": ("media_info", "media-info*/media-info"),
+    }
 
     def __init__(self, root: Path | str | None) -> None:
         self.root = Path(root) if root is not None else None
         self._frame_maps: dict[str, dict[str, AicFrameMapping]] = {}
 
+    def _directories(self, kind: str) -> list[Path]:
+        """Every directory that could hold this asset kind, best first.
+
+        The normalized directory leads: a normalized tree is something a
+        person built deliberately from the raw download, and letting the raw
+        copy win would silently discard that work.
+
+        Deliberately re-globbed on every call rather than cached. The
+        ingestion pipeline writes keyframes and then asks for them through a
+        registry that already existed, so a list of directories captured
+        earlier would answer "nothing here" about files that are now on disk.
+        The cost is one listing of the dataset root beside the per-video
+        ``*.jpg`` scan ``keyframe_path`` already does.
+        """
+        if self.root is None:
+            return []
+        found: list[Path] = []
+        for pattern in self.RAW_LAYOUT[kind]:
+            for candidate in sorted(self.root.glob(pattern)):
+                if candidate not in found and candidate.is_dir():
+                    found.append(candidate)
+        return found
+
     # -- path helpers --------------------------------------------------
 
     def video_path(self, video_id: str) -> Path | None:
-        if self.root is None:
-            return None
-        candidate = self.root / "videos" / f"{video_id}.mp4"
-        return candidate if candidate.is_file() else None
+        return self._first_file("videos", f"{video_id}.mp4")
+
+    def _first_file(self, kind: str, filename: str) -> Path | None:
+        for directory in self._directories(kind):
+            candidate = directory / filename
+            if candidate.is_file():
+                return candidate
+        return None
 
     def keyframe_path(self, video_id: str, keyframe_ref: str) -> Path | None:
         """Locate the organizer keyframe JPEG by numeric match, not by guessed
         zero-padding width (observed AIC exports are 3-digit, e.g. "003.jpg",
         but this must not assume that width is universal).
         """
-        if self.root is None:
-            return None
-        directory = self.root / "keyframes" / video_id
-        if not directory.is_dir():
-            return None
         target = _normalize_ref(keyframe_ref)
-        for candidate in sorted(directory.glob("*.jpg")):
-            try:
-                if _normalize_ref(candidate.stem) == target:
-                    return candidate
-            except MissingFrameMappingError:
+        for root in self._directories("keyframes"):
+            directory = root / video_id
+            if not directory.is_dir():
                 continue
+            for candidate in sorted(directory.glob("*.jpg")):
+                try:
+                    if _normalize_ref(candidate.stem) == target:
+                        return candidate
+                except MissingFrameMappingError:
+                    continue
         return None
 
     def _map_keyframes_csv(self, video_id: str) -> Path | None:
-        if self.root is None:
-            return None
-        candidate = self.root / "map_keyframes" / f"{video_id}.csv"
-        return candidate if candidate.is_file() else None
+        return self._first_file("map_keyframes", f"{video_id}.csv")
 
     def _media_info_path(self, video_id: str) -> Path | None:
-        if self.root is None:
-            return None
-        candidate = self.root / "media_info" / f"{video_id}.json"
-        return candidate if candidate.is_file() else None
+        return self._first_file("media_info", f"{video_id}.json")
 
     # -- frame mapping (organizer support data) -------------------------
 
