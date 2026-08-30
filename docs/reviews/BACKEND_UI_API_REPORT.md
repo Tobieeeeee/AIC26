@@ -1,6 +1,11 @@
 # Backend UI API Report
 
-Version: 4.0
+Version: 4.1
+
+Supersedes v1.0, which `main` merged as `d58f70a` (PR #20) before this branch
+was rebased. That version states the backend was never run end to end, and
+calls `D:\AIC26\data\raw` empty. The first is no longer true; the second was
+never true -- see section 3b. Merging this branch replaces it.
 Branch: `docs/backend-ui-api-report`, rebased onto `origin/main` @ `712274d`
 Reviews: `6e7f1a3` — "feat: add frontend API adapter for retrieval UI",
 Golden <24521777@gm.uit.edu.vn>
@@ -84,6 +89,22 @@ and passing `lexical_queries=`, identical to what `main`'s own `/search/trake`
 route does thirty lines below. The regression test
 (`test_ui_search_trake_mode_reaches_search_trake`) stays.
 
+### That merge has since happened
+
+PR #20 merged this branch's v1.0 commit into `main`. Because the branch was cut
+from `feat/backend-ui-api`, that carried Golden's `6e7f1a3` along with it, so
+`main` took the endpoint as well as the report warning about it. Checked
+against `main`'s own `search_trake` signature, not this branch's:
+
+```text
+origin/main app.py line 992: ok
+origin/main app.py line 821: BROKEN ['query_translator']
+```
+
+`POST /api/v1/search` with `task_mode: TRAKE` raises `TypeError` on `main`
+today, and no test on `main` covers that path. The fix is on this branch;
+merging it is what closes this.
+
 ## 3. The launch script could not start the server
 
 `scripts/run_backend_full.ps1` was rewritten. Three faults, each verified on
@@ -141,17 +162,13 @@ manifest.mapping_sha256          e57bfdb35b86946a8b6aace5bed5949293a2d8d1f9ab92a
 manifest.mapping_row_count       177321
 ```
 
-## 5. Verification
+## 5. The backend, running for the first time
 
-Unit tests, from a worktree checked out on this branch, with the imported
-source confirmed to be that worktree's own (`mvr resolved to:
-<worktree>\src\mvr\__init__.py`) rather than another branch's:
+Test totals for the finished branch are in section 8, which is the only place
+this report quotes them. This section is the first live run -- what turned the
+sections above from readings of the code into observations of it.
 
-```text
-pytest tests/unit/   ->  1110 passed, 3 skipped in 47.64s
-```
-
-Live run, server started via the rewritten script against the real corpus:
+Server started via the rewritten script against the real corpus:
 
 ```text
 run_backend_full.ps1 -DatasetRoot E:\AIC26_data
@@ -253,10 +270,6 @@ mount cannot do.
 KIS was re-checked for regression and is unchanged: `L23_V019` frame 98 at
 `00:00:03`, thumbnail `/keyframes/L23_V019/002.jpg` serving 158,180 bytes.
 
-```text
-pytest tests/unit/   ->  1110 passed, 3 skipped in 47.64s
-```
-
 ## 7. The R2 reorg moved the videos and nothing on the reading side was told
 
 Section 6c blamed the organizer's fourteen keyframe roots for the media
@@ -312,6 +325,14 @@ bucket.
   longer hidden.
 
 ## 8. Verification
+
+One total, for the finished branch. Earlier drafts quoted 1091 and then 1110 as
+the work progressed; those are gone rather than left where a reader could
+mistake one for the current figure.
+
+Unit tests, from a worktree checked out on this branch, with the imported
+source confirmed to be that worktree's own (`mvr resolved to:
+<worktree>\src\mvr\__init__.py`) rather than another branch's:
 
 ```text
 pytest tests/unit/   ->  1121 passed, 3 skipped in 47.94s
