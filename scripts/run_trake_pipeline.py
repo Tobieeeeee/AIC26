@@ -148,6 +148,7 @@ def main() -> None:
     from mvr.enrichment.embeddings.openclip import OpenClipEncoder
     from mvr.indexing.faiss_index import FaissIndex
     from mvr.ingestion.aic_dataset import AicDatasetRegistry
+    from mvr.retrieval.query_preprocessing import ProcessedQuery, QueryPreprocessingService
     from mvr.retrieval.semantic import SemanticRetriever
     from mvr.retrieval.trake import search_trake
     from mvr.retrieval.trake_align import AtlasAlignment, LuciferAlignment, UceseAlignment
@@ -195,18 +196,31 @@ def main() -> None:
     semantic_service = SemanticRetriever(encoder, index)
     aic_registry = AicDatasetRegistry(args.dataset_root)
 
-    query_translator = None
+    # search_trake() no longer translates. The dense/semantic branch wants
+    # English (the index encoder is English-trained), the lexical/BM25 branch
+    # indexes Vietnamese OCR/ASR text and wants the original -- so prepare both
+    # forms here, through the same service the API server uses.
     if args.translate_query:
-        from mvr.enrichment.qna_translation import HelsinkiViEnTranslator
 
-        translator_kwargs = {"allow_model_download": args.allow_translation_download}
-        if args.translation_model:
-            translator_kwargs["model_name"] = args.translation_model
-        query_translator = HelsinkiViEnTranslator(**translator_kwargs)
-        print("[retrieval query EN]", [query_translator.translate(e) for e in events])
+        def translator_factory():
+            from mvr.enrichment.qna_translation import HelsinkiViEnTranslator
+
+            translator_kwargs = {"allow_model_download": args.allow_translation_download}
+            if args.translation_model:
+                translator_kwargs["model_name"] = args.translation_model
+            return HelsinkiViEnTranslator(**translator_kwargs)
+
+        preprocessing = QueryPreprocessingService(translator_factory=translator_factory)
+        prepared_events = [preprocessing.prepare(text) for text in events]
+        print("[retrieval query EN]", [prepared.dense for prepared in prepared_events])
+    else:
+        prepared_events = [ProcessedQuery(dense=text, lexical=text) for text in events]
 
     query = TrakeQuery(
-        events=tuple(TrakeEventQuery(i, text) for i, text in enumerate(events, start=1)),
+        events=tuple(
+            TrakeEventQuery(index, prepared.dense)
+            for index, prepared in enumerate(prepared_events, start=1)
+        ),
         gaps=tuple(translate_gap_phrase(phrase) for phrase in gap_phrases),
     )
 
@@ -220,7 +234,7 @@ def main() -> None:
         semantic_service=semantic_service,
         aic_registry=aic_registry,
         top_k=args.top_k,
-        query_translator=query_translator,
+        lexical_queries=[prepared.lexical for prepared in prepared_events],
     )
 
     if not chains:
