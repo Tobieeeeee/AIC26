@@ -157,16 +157,20 @@ class TestIncrementalIngest:
 
     def _build_entities(self, start: int, n: int) -> list[dict[str, Any]]:
         from mvr.indexing.milvus_schema import (
-            FIELD_KEYFRAME_ID, FIELD_VIDEO_ID, FIELD_FRAME_ID, FIELD_SHOT_ID,
+            FIELD_ENTITY_ID, FIELD_KEYFRAME_ID, FIELD_VIDEO_ID, FIELD_FRAME_ID, FIELD_SHOT_ID,
             FIELD_TIMESTAMP, FIELD_BATCH_ID, FIELD_COLLECTION_ID,
             FIELD_BEIT3_VECTOR, FIELD_METACLIP2_VECTOR, FIELD_PE_VECTOR,
+            make_entity_id,
         )
         rng = np.random.RandomState(start)
         entities = []
         for i in range(start, start + n):
+            keyframe_id = f"kf{i:04d}"
+            video_id = f"V{i // 3:03d}"
             entities.append({
-                FIELD_KEYFRAME_ID: f"kf{i:04d}",
-                FIELD_VIDEO_ID: f"V{i // 3:03d}",
+                FIELD_ENTITY_ID: make_entity_id(video_id, keyframe_id),
+                FIELD_KEYFRAME_ID: keyframe_id,
+                FIELD_VIDEO_ID: video_id,
                 FIELD_FRAME_ID: i * 10,
                 FIELD_SHOT_ID: i,
                 FIELD_TIMESTAMP: float(i),
@@ -179,7 +183,7 @@ class TestIncrementalIngest:
         return entities
 
     def test_batch2_does_not_duplicate_batch1(self):
-        """Upsert semantics: inserting same keyframe_id twice should not create duplicate."""
+        """Upsert semantics: inserting same entity_id twice should not create duplicate."""
         # Simulate an in-memory store (PK-deduplicated like Milvus upsert)
         store: dict[str, dict] = {}
 
@@ -187,9 +191,9 @@ class TestIncrementalIngest:
         batch2 = self._build_entities(3, 5)  # overlaps kf3, kf4 with batch1
 
         for e in batch1:
-            store[e["keyframe_id"]] = e
+            store[e["entity_id"]] = e
         for e in batch2:
-            store[e["keyframe_id"]] = e  # upsert
+            store[e["entity_id"]] = e  # upsert
 
         # Total should be 0-7 = 8 unique keyframes, not 10
         assert len(store) == 8
@@ -198,34 +202,60 @@ class TestIncrementalIngest:
         store: dict[str, dict] = {}
         batch1 = self._build_entities(0, 3)
         for e in batch1:
-            store[e["keyframe_id"]] = e
+            store[e["entity_id"]] = e
         assert len(store) == 3
 
         batch2 = self._build_entities(3, 3)  # no overlap
         for e in batch2:
-            store[e["keyframe_id"]] = e
+            store[e["entity_id"]] = e
         assert len(store) == 6
 
     def test_changed_rows_upserted(self):
         store: dict[str, dict] = {}
         batch1 = self._build_entities(0, 1)
         for e in batch1:
-            store[e["keyframe_id"]] = e
+            store[e["entity_id"]] = e
 
-        # Same keyframe_id, different vector
+        # Same entity_id, different vector
         updated = dict(batch1[0])
         updated["beit3_vector"] = [999.0] * 768
-        store[updated["keyframe_id"]] = updated
+        store[updated["entity_id"]] = updated
 
-        assert store["kf0000"]["beit3_vector"][0] == pytest.approx(999.0)
+        assert store["V000/kf0000"]["beit3_vector"][0] == pytest.approx(999.0)
         assert len(store) == 1  # no new entry
 
     def test_entity_count_updates(self):
         store: dict[str, dict] = {}
         for e in self._build_entities(0, 5):
-            store[e["keyframe_id"]] = e
+            store[e["entity_id"]] = e
         assert len(store) == 5
 
         for e in self._build_entities(5, 3):
-            store[e["keyframe_id"]] = e
+            store[e["entity_id"]] = e
         assert len(store) == 8
+
+    def test_same_keyframe_id_different_video_id_does_not_collide(self):
+        """The whole point of entity_id: keyframe_id alone is NOT globally
+        unique across the organizer's dataset (see task05a.py), so two
+        videos sharing a keyframe_id string must never overwrite each
+        other's entity in an upsert-by-PK store."""
+        from mvr.indexing.milvus_schema import make_entity_id
+
+        store: dict[str, dict] = {}
+        shared_keyframe_id = "034"
+        entity_a = {
+            "entity_id": make_entity_id("L21_V001", shared_keyframe_id),
+            "keyframe_id": shared_keyframe_id,
+            "video_id": "L21_V001",
+        }
+        entity_b = {
+            "entity_id": make_entity_id("L21_V002", shared_keyframe_id),
+            "keyframe_id": shared_keyframe_id,
+            "video_id": "L21_V002",
+        }
+        store[entity_a["entity_id"]] = entity_a
+        store[entity_b["entity_id"]] = entity_b
+
+        assert len(store) == 2
+        assert store[entity_a["entity_id"]]["video_id"] == "L21_V001"
+        assert store[entity_b["entity_id"]]["video_id"] == "L21_V002"

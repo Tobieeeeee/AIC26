@@ -41,7 +41,7 @@ class SemanticIndexManifest:
     entity_count: int = 0
     keyframe_mapping_checksum: str = ""
     providers: dict[str, ProviderManifestEntry] = field(default_factory=dict)
-    index_type: str = "FLAT"
+    index_type: str = "HNSW"
     metric: str = "IP"
     index_params: dict[str, Any] = field(default_factory=dict)
     build_timestamp: str = ""

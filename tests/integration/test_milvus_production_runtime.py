@@ -19,8 +19,10 @@ from mvr.indexing.milvus_client import MilvusClient, MilvusConfig
 from mvr.indexing.milvus_schema import (
     COLLECTION_NAME,
     EXPECTED_DIMENSIONS,
+    INDEX_TYPE_PARAMS,
     VECTOR_FIELDS,
     build_collection_schema,
+    make_entity_id,
     vector_field_for_provider,
 )
 from mvr.retrieval.milvus_semantic import MilvusSemanticService
@@ -72,10 +74,13 @@ def _build_fixture() -> tuple[MilvusSemanticService, dict[str, np.ndarray]]:
     }
     entities = []
     for row in range(5):
+        keyframe_id = f"kf-{row}"
+        video_id = "fixture-video"
         entities.append(
             {
-                "keyframe_id": f"kf-{row}",
-                "video_id": "fixture-video",
+                "entity_id": make_entity_id(video_id, keyframe_id),
+                "keyframe_id": keyframe_id,
+                "video_id": video_id,
                 "frame_id": 100 + row,
                 "shot_id": row,
                 "timestamp": float(row) * 1.25,
@@ -86,21 +91,44 @@ def _build_fixture() -> tuple[MilvusSemanticService, dict[str, np.ndarray]]:
                 "pe_vector": vectors["perception_encoder"][row].tolist(),
             }
         )
+    # Collision-safety proof: a different video sharing keyframe_id "kf-0"
+    # with row 0 above must become its own entity, not overwrite row 0 --
+    # keyframe_id is not globally unique across the organizer's dataset
+    # (see task05a.py). Its vectors deliberately do not match the unit-query
+    # fixture, so if entity_id ever collapses back to bare keyframe_id, this
+    # row would silently corrupt row 0's data and the parity assertions
+    # below would fail.
+    collision_video_id = "fixture-video-2"
+    collision_entity = {
+        "entity_id": make_entity_id(collision_video_id, "kf-0"),
+        "keyframe_id": "kf-0",
+        "video_id": collision_video_id,
+        "frame_id": 999,
+        "shot_id": 99,
+        "timestamp": 99.0,
+        "batch_id": "fixture-batch",
+        "collection_id": "fixture-collection",
+        "beit3_vector": (-vectors["beit3"][0]).tolist(),
+        "metaclip2_vector": (-vectors["metaclip2"][0]).tolist(),
+        "pe_vector": (-vectors["perception_encoder"][0]).tolist(),
+    }
+    entities.append(collision_entity)
     inserted = client.upsert_batch(entities, collection_name=COLLECTION_NAME)
-    assert len(inserted) == 5
+    assert len(inserted) == 6
     client.flush_collection(COLLECTION_NAME)
     for field in VECTOR_FIELDS:
         client.create_index(
             field,
-            index_type="FLAT",
+            index_type="HNSW",
             metric_type="IP",
-            params={},
+            params=INDEX_TYPE_PARAMS["HNSW"],
             collection_name=COLLECTION_NAME,
         )
     client.load_collection(COLLECTION_NAME)
     backend = MilvusProviderBackend(
-        client, index_type="FLAT", collection_name=COLLECTION_NAME
+        client, index_type="HNSW", collection_name=COLLECTION_NAME
     )
+    assert client.entity_count(COLLECTION_NAME) == 6
     return MilvusSemanticService(backend, query_encoders=_FixtureEncoders()), vectors
 
 
@@ -112,7 +140,7 @@ def test_live_milvus_fixture_parity_and_fastapi_runtime() -> None:
     assert health["backend"] == "milvus"
     assert health["reachable"] is True
     assert health["collection_ready"] is True
-    assert health["entities"] == 5
+    assert health["entities"] == 6
 
     for provider in PROVIDERS:
         query = np.zeros(EXPECTED_DIMENSIONS[provider], dtype=np.float32)

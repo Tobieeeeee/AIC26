@@ -303,3 +303,59 @@ class TestManifest:
         from mvr.indexing.milvus_manifest import load_manifest
         result = load_manifest(tmp_path / "nonexistent.json")
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# insert_batch entity_id computation
+# ---------------------------------------------------------------------------
+
+class TestInsertBatchEntityId:
+    """MilvusProviderBackend.insert_batch() must compute entity_id itself,
+    at the layer closest to the actual Milvus write -- not trust an
+    upstream caller to have already namespaced it by video."""
+
+    def _make_backend(self):
+        from mvr.indexing.milvus_backend import MilvusProviderBackend
+        from mvr.indexing.milvus_client import MilvusClient
+        client = MagicMock(spec=MilvusClient)
+        return MilvusProviderBackend(client, index_type="HNSW", batch_size=1000)
+
+    def _contract(self):
+        from mvr.indexing.provider_indexes import ProviderIndexContract
+        return ProviderIndexContract(
+            model_id="beit3",
+            collection_name="aic26_keyframes",
+            dimension=768,
+            metric="IP",
+            normalized=True,
+            backend="milvus",
+        )
+
+    def test_entity_id_is_video_id_slash_keyframe_id(self):
+        backend = self._make_backend()
+        vectors = np.zeros((1, 768), dtype=np.float32)
+        metadata = [{"keyframe_id": "K01", "video_id": "L21_V001"}]
+        backend.insert_batch(self._contract(), vectors, metadata)
+        assert backend._staged[0]["entity_id"] == "L21_V001/K01"
+
+    def test_two_videos_same_keyframe_id_get_different_entity_ids(self):
+        backend = self._make_backend()
+        vectors = np.zeros((2, 768), dtype=np.float32)
+        metadata = [
+            {"keyframe_id": "034", "video_id": "L21_V001"},
+            {"keyframe_id": "034", "video_id": "L21_V002"},
+        ]
+        backend.insert_batch(self._contract(), vectors, metadata)
+        entity_ids = [row["entity_id"] for row in backend._staged]
+        assert entity_ids[0] != entity_ids[1]
+        assert len(set(entity_ids)) == 2
+
+    def test_missing_video_id_raises(self):
+        """A caller that never resolved video_id must fail loudly, not
+        silently write an entity_id like "/keyframe_id" that still
+        collides across videos."""
+        backend = self._make_backend()
+        vectors = np.zeros((1, 768), dtype=np.float32)
+        metadata = [{"keyframe_id": "K01", "video_id": ""}]
+        with pytest.raises(ValueError, match="non-empty"):
+            backend.insert_batch(self._contract(), vectors, metadata)

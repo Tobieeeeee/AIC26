@@ -13,6 +13,7 @@ from .milvus_client import CANONICAL_METRIC, MilvusConfigError
 # ---------------------------------------------------------------------------
 # Canonical field names
 # ---------------------------------------------------------------------------
+FIELD_ENTITY_ID = "entity_id"
 FIELD_KEYFRAME_ID = "keyframe_id"
 FIELD_VIDEO_ID = "video_id"
 FIELD_FRAME_ID = "frame_id"
@@ -26,6 +27,7 @@ FIELD_METACLIP2_VECTOR = "metaclip2_vector"
 FIELD_PE_VECTOR = "pe_vector"
 
 SCALAR_FIELDS = (
+    FIELD_ENTITY_ID,
     FIELD_KEYFRAME_ID,
     FIELD_VIDEO_ID,
     FIELD_FRAME_ID,
@@ -60,6 +62,7 @@ SCHEMA_VERSION = "1.0"
 
 # Output fields returned with every semantic search hit
 SEARCH_OUTPUT_FIELDS = [
+    FIELD_ENTITY_ID,
     FIELD_KEYFRAME_ID,
     FIELD_VIDEO_ID,
     FIELD_FRAME_ID,
@@ -86,6 +89,21 @@ SEARCH_PARAMS: dict[str, dict[str, Any]] = {
 }
 
 
+def make_entity_id(video_id: str, keyframe_id: str) -> str:
+    """Build the deterministic Milvus primary key for a keyframe.
+
+    `keyframe_id` alone is not globally unique across the organizer's
+    dataset (the same id string recurs across many videos), so the actual
+    Milvus primary key namespaces it by video: ``video_id/keyframe_id``.
+    Every write path must go through this single helper.
+    """
+    video_id = video_id.strip()
+    keyframe_id = keyframe_id.strip()
+    if not video_id or not keyframe_id:
+        raise ValueError("video_id and keyframe_id must be non-empty")
+    return f"{video_id}/{keyframe_id}"
+
+
 @dataclass(frozen=True)
 class VectorFieldSpec:
     name: str
@@ -99,6 +117,7 @@ def build_collection_schema(
     beit3_dim: int = EXPECTED_DIMENSIONS["beit3"],
     metaclip2_dim: int = EXPECTED_DIMENSIONS["metaclip2"],
     pe_dim: int = EXPECTED_DIMENSIONS["perception_encoder"],
+    max_entity_id_len: int = 512,
     max_keyframe_id_len: int = 256,
     max_string_len: int = 128,
 ):
@@ -115,12 +134,18 @@ def build_collection_schema(
 
     fields = [
         FieldSchema(
+            name=FIELD_ENTITY_ID,
+            dtype=DataType.VARCHAR,
+            max_length=max_entity_id_len,
+            is_primary=True,
+            auto_id=False,
+            description="Unique entity identifier (primary key): video_id/keyframe_id",
+        ),
+        FieldSchema(
             name=FIELD_KEYFRAME_ID,
             dtype=DataType.VARCHAR,
             max_length=max_keyframe_id_len,
-            is_primary=True,
-            auto_id=False,
-            description="Unique keyframe identifier (primary key)",
+            description="Keyframe identifier (not globally unique; scalar metadata only)",
         ),
         FieldSchema(
             name=FIELD_VIDEO_ID,

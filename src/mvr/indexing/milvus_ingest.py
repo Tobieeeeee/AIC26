@@ -189,7 +189,7 @@ def ingest_to_milvus(
     # }
     manifest_path: Path,
     client: MilvusClient | None = None,
-    index_type: str = "FLAT",
+    index_type: str = "HNSW",
     collection_name: str = COLLECTION_NAME,
     policy: str = "upsert",
     batch_size: int = 1000,
