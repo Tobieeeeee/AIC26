@@ -80,20 +80,29 @@ pytest -q python -m
 
 ## Canonical ingestion command
 
-Canonical ingestion V1 uses TransNetV2 at threshold `0.5` and the deterministic
-periodic midpoint + 12s/8s selector. The default path does not load a content
-embedding model:
+Canonical ingestion uses TransNetV2 at threshold `0.5` and the deterministic
+`hybrid_temporal_content` selector. It evaluates a 1-second candidate grid with
+pinned MetaCLIP-2 novelty and grayscale/Canny change signals, retains every shot
+midpoint, and repairs temporal gaps to at most 8 seconds:
 
 ```powershell
 py -3.12 -m mvr.cli ingest "D:\project\STUDY\NAM_2\SELF_PRJ\AIC26\New folder\shot-boundary-lab-student\student\data\videos\L01_V001.mp4" --output "artifacts\keyframes\phase02-smoke"
 ```
 
 The output contains `shots.json`, the unchanged canonical
-`keyframe_mapping.csv`, `selector_manifest.json`, benchmark JSON/CSV, and JPEG
-keyframes. The input may also be a directory. PySceneDetect, midpoint-only, and
-`hybrid_temporal_content` remain explicit non-default modes. TransNetV2 failures
-are surfaced; ingestion never silently switches to PySceneDetect. See
+`keyframe_mapping.csv`, `selector_manifest.json`, benchmark JSON/CSV, selector
+cache/provenance artifacts, and JPEG keyframes. The input may also be a
+directory. PySceneDetect, periodic 12s/8s, midpoint-only, and semantic dedup
+remain explicit non-default modes. TransNetV2 or pinned MetaCLIP-2 failures are
+surfaced; ingestion never silently switches detector or selector. See
 `docs/architecture/CANONICAL_INGESTION.md`.
+
+For unattended raw-R2 ingestion without enrichment, use
+`scripts/operations/run_pipeline_local.py --ingest-only`. It uploads each
+publishable per-video tree to `data/staging/ingestion/<run-id>/...`, excludes
+the regenerable local `selector_cache/`, and writes the R2 `_SUCCESS.json`
+marker before recording the video as complete locally. See
+`docs/R2_DATA_MANAGEMENT.md` for the resumable command.
 
 ## Verified semantic retrieval commands
 

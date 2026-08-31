@@ -1,6 +1,6 @@
 """Multi-video, 4-strategy keyframe-selector comparison.
 
-Strategies: midpoint, periodic (12s/8s, current canonical default),
+Strategies: midpoint, periodic (12s/8s, former baseline),
 hybrid_temporal_content, semantic_dedup. Each strategy's own selected
 keyframes are extracted (if not already on disk) and encoded directly with
 MetaCLIP-2 -- unlike the original single-video

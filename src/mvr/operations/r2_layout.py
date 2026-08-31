@@ -23,9 +23,26 @@ STAGING_PREFIX = "data/staging"
 CORPUS_PREFIX = "data/corpus"
 
 
+def raw_batch_segment(batch_id: str) -> str:
+    """Normalize operator-facing ``1`` and layout-facing ``batch1`` alike."""
+    value = str(batch_id).strip().strip("/")
+    if not value:
+        raise ValueError("batch_id must be non-empty")
+    if value.lower().startswith("batch"):
+        value = value[5:]
+    if not value:
+        raise ValueError("batch_id must include a value after 'batch'")
+    return f"batch{value}"
+
+
+def raw_video_prefix(batch_id: str, collection_id: str) -> str:
+    """Object-key prefix containing one collection's raw videos."""
+    return f"{RAW_PREFIX}/{raw_batch_segment(batch_id)}/videos/{collection_id}/"
+
+
 def raw_video_key(batch_id: str, collection_id: str, video_id: str) -> str:
     """Object key for a raw video in R2."""
-    return f"{RAW_PREFIX}/{batch_id}/videos/{collection_id}/{video_id}.mp4"
+    return f"{raw_video_prefix(batch_id, collection_id)}{video_id}.mp4"
 
 
 def staging_key(feature: str, run_id: str, *parts: str) -> str:

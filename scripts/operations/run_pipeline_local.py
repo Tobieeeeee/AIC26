@@ -8,6 +8,8 @@ Autopilot that replaces the manual multi-command flow:
 Reads videos from the canonical R2 layout (data/raw/batch1/videos/...), so it
 works correctly after the R2 reorg that moves Videos_* into data/raw. Processes
 one video at a time to bound peak disk/VRAM, with resume via a state file.
+Ingestion inherits the canonical detector and selector directly from
+``mvr.ingestion.pipeline`` instead of freezing a second copy in this runner.
 
 Usage:
     python scripts/operations/run_pipeline_local.py --device cuda
@@ -16,8 +18,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
+import os
 import shutil
 import sys
 import time
@@ -27,12 +31,15 @@ from pathlib import Path
 
 LOGGER = logging.getLogger("run_pipeline_local")
 
-CANONICAL_TRANSNET_THRESHOLD = 0.5
-CANONICAL_LONG_SHOT_SECONDS = 12.0
-CANONICAL_SAMPLE_EVERY_SECONDS = 8.0
 CANONICAL_DETECTOR_THRESHOLD = 0.4
 CANONICAL_PROVIDERS = ("beit3", "metaclip2", "perception_encoder")
 CANONICAL_BATCH = "1"
+DEFAULT_RFDETR_CHECKPOINT = Path(
+    "artifacts/verification/rfdetr-production-pin/models/rf-detr-large-2026.pth"
+)
+DEFAULT_BEIT3_CHECKPOINT = Path(
+    "artifacts/_embedding_models/beit3/beit3_base_itc_patch16_224.pth"
+)
 
 
 @dataclass
@@ -57,16 +64,29 @@ class VideoResult:
         }
 
 
+@dataclass(frozen=True)
+class RuntimeSettings:
+    detector_checkpoint: Path
+    beit3_checkpoint: Path
+    pe_checkpoint: Path | None
+    metaclip2_model: str | None
+    allow_model_downloads: bool
+
+
 def _r2_client():
     from mvr.operations.r2_client import R2Client
     return R2Client()
 
 
-def discover_videos(client, collections: list[str]) -> list[tuple[str, str, int]]:
+def discover_videos(
+    client, collections: list[str], batch_id: str
+) -> list[tuple[str, str, int]]:
     """List videos from the canonical layout: data/raw/batch1/videos/{collection}/*."""
+    from mvr.operations.r2_layout import raw_video_prefix
+
     found: list[tuple[str, str, int]] = []
     for collection in collections:
-        prefix = f"data/raw/batch1/videos/{collection}/"
+        prefix = raw_video_prefix(batch_id, collection)
         for obj in client.list_objects(prefix):
             key = obj["Key"]
             if not key.endswith(".mp4"):
@@ -77,25 +97,37 @@ def discover_videos(client, collections: list[str]) -> list[tuple[str, str, int]
     return found
 
 
-def download_video(client, collection: str, video_id: str, dest: Path) -> int:
+def download_video(
+    client, collection: str, video_id: str, dest: Path, batch_id: str
+) -> int:
+    from mvr.operations.r2_layout import raw_video_key
+
     dest.parent.mkdir(parents=True, exist_ok=True)
-    key = f"data/raw/batch1/videos/{collection}/{video_id}.mp4"
+    key = raw_video_key(batch_id, collection, video_id)
     client.download_file(key, dest)
     return dest.stat().st_size
 
 
-def run_ingest(video_path: Path, out_root: Path, device: str) -> Path:
+def run_ingest(
+    video_path: Path,
+    out_root: Path,
+    device: str,
+    *,
+    provider_specs_path: Path,
+    metaclip2_model: str | None,
+    allow_model_downloads: bool,
+    embedding_batch_size: int,
+) -> Path:
     from mvr.ingestion.pipeline import run_pipeline
+
     run_pipeline(
         input_path=video_path,
         output_root=out_root,
-        methods=["transnetv2"],
-        primary="transnetv2",
-        transnet_threshold=CANONICAL_TRANSNET_THRESHOLD,
-        selector_mode="periodic",
-        long_shot_seconds=CANONICAL_LONG_SHOT_SECONDS,
-        sample_every_seconds=CANONICAL_SAMPLE_EVERY_SECONDS,
         device=device,
+        provider_specs_path=provider_specs_path,
+        metaclip2_model=metaclip2_model,
+        allow_model_downloads=allow_model_downloads,
+        embedding_batch_size=embedding_batch_size,
     )
     mapping = out_root / "keyframe_mapping.csv"
     if not mapping.is_file():
@@ -103,9 +135,14 @@ def run_ingest(video_path: Path, out_root: Path, device: str) -> Path:
     return mapping
 
 
+def count_keyframes(mapping_csv: Path) -> int:
+    with Path(mapping_csv).open("r", encoding="utf-8", newline="") as stream:
+        return sum(1 for _ in csv.DictReader(stream))
+
+
 def _build_provider_encoder(
     provider_id: str, spec, device: str, *,
-    beit3_checkpoint, pe_checkpoint, metaclip2_model,
+    beit3_checkpoint, pe_checkpoint, metaclip2_model, allow_model_downloads,
 ):
     if provider_id == "beit3":
         from mvr.enrichment.embeddings.artifacts import verify_file_sha256
@@ -116,7 +153,12 @@ def _build_provider_encoder(
         return Beit3ImageEncoder(spec=spec, checkpoint_path=beit3_checkpoint, device=device)
     if provider_id == "metaclip2":
         from mvr.enrichment.embeddings.metaclip2 import MetaClip2ImageEncoder
-        return MetaClip2ImageEncoder(spec=spec, model_location=metaclip2_model, device=device, allow_download=False)
+        return MetaClip2ImageEncoder(
+            spec=spec,
+            model_location=metaclip2_model,
+            device=device,
+            allow_download=allow_model_downloads,
+        )
     if provider_id == "perception_encoder":
         from mvr.enrichment.embeddings.perception_encoder import PerceptionEncoderImageEncoder
         if pe_checkpoint is None:
@@ -139,9 +181,12 @@ def _free_vram() -> None:
 def run_objects_and_embeddings(
     mapping_csv, keyframe_root, out_dir, detector, video_id,
     provider_ids, provider_specs_path, beit3_checkpoint, pe_checkpoint,
-    metaclip2_model, device, batch_size,
+    metaclip2_model, device, batch_size, allow_model_downloads,
 ):
-    from mvr.enrichment.embeddings.offline import extract_embedding_artifacts
+    from mvr.enrichment.embeddings.offline import (
+        extract_embedding_artifacts,
+        reuse_embedding_artifact,
+    )
     from mvr.enrichment.embeddings.provider_specs import load_provider_specs
     from mvr.enrichment.feature_extraction import extract_objects, sort_keyframes_deterministically
 
@@ -161,10 +206,28 @@ def run_objects_and_embeddings(
         if spec is None:
             raise RuntimeError(f"provider {provider_id} absent from {provider_specs_path}")
         started = time.perf_counter()
+        if provider_id == "metaclip2":
+            selector_artifact = (
+                Path(mapping_csv).parent / "selector_embeddings" / "metaclip2"
+            )
+            if selector_artifact.is_dir():
+                reuse_embedding_artifact(
+                    selector_artifact,
+                    embeddings_root=embeddings_root,
+                    rows=keyframes,
+                    spec=spec,
+                )
+                timings[provider_id] = time.perf_counter() - started
+                LOGGER.info(
+                    "reused validated selector MetaCLIP-2 artifact: %s",
+                    selector_artifact,
+                )
+                continue
         encoder = _build_provider_encoder(
             provider_id, spec, device,
             beit3_checkpoint=beit3_checkpoint, pe_checkpoint=pe_checkpoint,
             metaclip2_model=metaclip2_model,
+            allow_model_downloads=allow_model_downloads,
         )
         try:
             extract_embedding_artifacts(
@@ -234,6 +297,31 @@ def push_artifacts(sync, out_dir: Path, video_id: str, collection: str, run_id: 
     return pushed
 
 
+def push_ingestion_artifacts(
+    sync,
+    out_dir: Path,
+    *,
+    video_id: str,
+    collection: str,
+    batch_id: str,
+    run_id: str,
+) -> int:
+    """Push a publishable per-video ingestion tree and require its success marker."""
+    stats = sync.push_ingestion_run(
+        out_dir,
+        run_id=run_id,
+        batch_id=batch_id,
+        collection_id=collection,
+        video_id=video_id,
+    )
+    if stats.errors:
+        raise RuntimeError(
+            f"R2 ingestion upload incomplete for {video_id}: "
+            f"uploaded={stats.uploaded}, errors={stats.errors}"
+        )
+    return stats.uploaded
+
+
 def build_detector(checkpoint: Path, device: str, threshold: float):
     from mvr.enrichment.objects.rfdetr import RFDETRConfig, RFDETRDetector
     config = RFDETRConfig(checkpoint_path=checkpoint, device=device, score_threshold=threshold)
@@ -252,6 +340,44 @@ def _default_pe_checkpoint() -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+def _env_path(name: str) -> Path | None:
+    value = os.environ.get(name, "").strip()
+    return Path(value).expanduser() if value else None
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def resolve_runtime_settings(args: argparse.Namespace) -> RuntimeSettings:
+    return RuntimeSettings(
+        detector_checkpoint=(
+            args.detector_checkpoint
+            or _env_path("MVR_RFDETR_CHECKPOINT")
+            or DEFAULT_RFDETR_CHECKPOINT
+        ),
+        beit3_checkpoint=(
+            args.beit3_checkpoint
+            or _env_path("MVR_BEIT3_CHECKPOINT")
+            or DEFAULT_BEIT3_CHECKPOINT
+        ),
+        pe_checkpoint=(
+            args.pe_checkpoint
+            or _env_path("MVR_PE_CHECKPOINT")
+            or _default_pe_checkpoint()
+        ),
+        metaclip2_model=(
+            args.metaclip2_model
+            or os.environ.get("MVR_METACLIP2_MODEL", "").strip()
+            or None
+        ),
+        allow_model_downloads=(
+            args.allow_model_downloads
+            or _env_flag("MVR_METACLIP2_ALLOW_DOWNLOAD")
+        ),
+    )
 
 
 def load_state(path: Path) -> dict:
@@ -280,41 +406,75 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--limit", type=int, default=0, help="Process at most N videos (0 = all)")
     p.add_argument("--work-root", type=Path, default=Path("_corpus_work"))
     p.add_argument("--batch-id", default=CANONICAL_BATCH)
-    p.add_argument("--detector-checkpoint", type=Path,
-                   default=Path("artifacts/verification/rfdetr-production-pin/models/rf-detr-large-2026.pth"))
+    p.add_argument("--detector-checkpoint", type=Path, default=None)
     p.add_argument("--detector-threshold", type=float, default=CANONICAL_DETECTOR_THRESHOLD)
     p.add_argument("--device", default="cuda", choices=["cuda", "cpu", "auto"])
     p.add_argument("--providers", default=",".join(CANONICAL_PROVIDERS))
     p.add_argument("--provider-specs", type=Path, default=Path("configs/embedding_providers.json"))
-    p.add_argument("--beit3-checkpoint", type=Path,
-                   default=Path("artifacts/_embedding_models/beit3/beit3_base_itc_patch16_224.pth"))
+    p.add_argument("--beit3-checkpoint", type=Path, default=None)
     p.add_argument("--pe-checkpoint", type=Path, default=None)
     p.add_argument("--metaclip2-model", default=None)
+    p.add_argument(
+        "--allow-model-downloads",
+        action="store_true",
+        help="Explicitly allow pinned model downloads (disabled by default)",
+    )
     p.add_argument("--embedding-batch-size", type=int, default=8)
     p.add_argument("--run-id", default=None)
+    p.add_argument(
+        "--ingest-only",
+        action="store_true",
+        help="Stop after canonical ingestion and upload its publishable artifacts",
+    )
     p.add_argument("--no-push", action="store_true")
     p.add_argument("--keep-video", action="store_true")
+    p.add_argument(
+        "--evict-artifacts-after-push",
+        action="store_true",
+        help=(
+            "Delete each local ingestion output only after its R2 _SUCCESS marker "
+            "is uploaded (requires --ingest-only with push enabled)"
+        ),
+    )
     p.add_argument("--state-file", type=Path, default=None)
     p.add_argument("--report", type=Path, default=None)
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.evict_artifacts_after_push and not args.ingest_only:
+        p.error("--evict-artifacts-after-push requires --ingest-only")
+    if args.evict_artifacts_after_push and args.no_push:
+        p.error("--evict-artifacts-after-push requires R2 push to be enabled")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
     args = parse_args(argv)
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+    except ImportError:
+        # Explicit process environment variables remain fully supported.
+        pass
     run_id = args.run_id or time.strftime("run-%Y%m%d-%H%M%S")
     work = args.work_root.resolve()
-    state_file = (args.state_file or work / "state.json").resolve()
-    report_file = (args.report or work / "report.json").resolve()
+    state_name = "ingest_state.json" if args.ingest_only else "state.json"
+    report_name = "ingest_report.json" if args.ingest_only else "report.json"
+    state_file = (args.state_file or work / state_name).resolve()
+    report_file = (args.report or work / report_name).resolve()
+    runtime = resolve_runtime_settings(args)
 
     client = _r2_client()
     sync = None if args.no_push else __import__("mvr.operations.r2_sync", fromlist=["R2Sync"]).R2Sync(client=client)
 
     provider_ids = tuple(p.strip() for p in args.providers.split(",") if p.strip())
-    if not provider_ids:
+    if not args.ingest_only and not provider_ids:
         raise SystemExit("--providers must name at least one provider")
-    pe_checkpoint = args.pe_checkpoint or _default_pe_checkpoint()
-    detector = build_detector(args.detector_checkpoint, args.device, args.detector_threshold)
+    detector = None
+    if not args.ingest_only:
+        detector = build_detector(
+            runtime.detector_checkpoint, args.device, args.detector_threshold
+        )
 
     if args.collections:
         collections = [c.strip() for c in args.collections.split(",") if c.strip()]
@@ -326,14 +486,23 @@ def main(argv: list[str] | None = None) -> int:
         video_ids = [v.strip() for v in args.videos.split(",") if v.strip()]
         queue = [(collections[0], vid, 0) for vid in video_ids]
     else:
-        queue = discover_videos(client, collections)
+        queue = discover_videos(client, collections, args.batch_id)
     if args.limit:
         queue = queue[: args.limit]
 
     state = load_state(state_file)
     results: list[VideoResult] = []
     total = len(queue)
-    LOGGER.info("run_id=%s collections=%s videos=%d device=%s", run_id, collections, total, args.device)
+    mode = "ingest-only" if args.ingest_only else "full"
+    LOGGER.info(
+        "run_id=%s mode=%s collections=%s videos=%d device=%s",
+        run_id,
+        mode,
+        collections,
+        total,
+        args.device,
+    )
+    completion_token = "INGEST_DONE" if args.ingest_only else "DONE"
 
     for idx, (collection, video_id, size) in enumerate(queue, 1):
         res = VideoResult(video_id=video_id, collection=collection)
@@ -345,9 +514,13 @@ def main(argv: list[str] | None = None) -> int:
 
         video_dir = work / "videos" / collection
         video_path = video_dir / f"{video_id}.mp4"
-        out_dir = work / "artifacts" / collection / video_id
+        output_namespace = "ingestion" if args.ingest_only else "artifacts"
+        out_dir = work / output_namespace / collection / video_id
         status_file = out_dir / f"{video_id}.status"
-        if status_file.is_file() and status_file.read_text().strip() == "DONE":
+        if (
+            status_file.is_file()
+            and status_file.read_text().strip() == completion_token
+        ):
             state["completed"][video_id] = True
             save_state(state_file, state)
             res.status = "SKIPPED"
@@ -360,50 +533,88 @@ def main(argv: list[str] | None = None) -> int:
             # 1. pull
             ta = time.perf_counter()
             if not video_path.is_file():
-                res.bytes_downloaded = download_video(client, collection, video_id, video_path)
+                res.bytes_downloaded = download_video(
+                    client, collection, video_id, video_path, args.batch_id
+                )
             res.seconds["pull"] = time.perf_counter() - ta
 
             # 2. ingest
             ta = time.perf_counter()
             out_dir.mkdir(parents=True, exist_ok=True)
-            mapping = run_ingest(video_path, out_dir, args.device)
-            res.seconds["ingest"] = time.perf_counter() - ta
-
-            # 3. objects + embeddings
-            ta = time.perf_counter()
-            res.keyframe_count, provider_timings = run_objects_and_embeddings(
-                mapping, out_dir, out_dir, detector, video_id,
-                provider_ids, args.provider_specs,
-                args.beit3_checkpoint, pe_checkpoint, args.metaclip2_model,
-                args.device, args.embedding_batch_size,
+            mapping = run_ingest(
+                video_path,
+                out_dir,
+                args.device,
+                provider_specs_path=args.provider_specs,
+                metaclip2_model=runtime.metaclip2_model,
+                allow_model_downloads=runtime.allow_model_downloads,
+                embedding_batch_size=args.embedding_batch_size,
             )
-            res.seconds["enrich"] = time.perf_counter() - ta
-            res.seconds.update(provider_timings)
+            res.seconds["ingest"] = time.perf_counter() - ta
+            res.keyframe_count = count_keyframes(mapping)
 
-            # 4. consolidate Parquet (objects + extraction_status)
-            ta = time.perf_counter()
-            for feature in ("objects", "extraction_status"):
-                consolidate_feature(out_dir, feature, args.batch_id, collection)
-            res.seconds["consolidate"] = time.perf_counter() - ta
-
-            # 5. promote to canonical
-            ta = time.perf_counter()
-            for feature in ("objects", "extraction_status"):
-                promote_feature(out_dir, feature, args.batch_id, collection)
-            res.seconds["promote"] = time.perf_counter() - ta
-
-            # 6. push
-            if sync is not None:
+            if args.ingest_only:
+                if sync is not None:
+                    ta = time.perf_counter()
+                    pushed = push_ingestion_artifacts(
+                        sync,
+                        out_dir,
+                        video_id=video_id,
+                        collection=collection,
+                        batch_id=args.batch_id,
+                        run_id=run_id,
+                    )
+                    res.seconds["push"] = time.perf_counter() - ta
+                    res.seconds["pushed_files"] = pushed
+            else:
+                # 3. objects + embeddings
                 ta = time.perf_counter()
-                pushed = push_artifacts(sync, out_dir, video_id, collection, run_id, args.batch_id)
-                res.seconds["push"] = time.perf_counter() - ta
-                res.seconds["pushed_files"] = pushed
+                res.keyframe_count, provider_timings = run_objects_and_embeddings(
+                    mapping, out_dir, out_dir, detector, video_id,
+                    provider_ids, args.provider_specs,
+                    runtime.beit3_checkpoint, runtime.pe_checkpoint,
+                    runtime.metaclip2_model, args.device, args.embedding_batch_size,
+                    runtime.allow_model_downloads,
+                )
+                res.seconds["enrich"] = time.perf_counter() - ta
+                res.seconds.update(provider_timings)
 
-            status_file.write_text("DONE\n", encoding="utf-8")
+                # 4. consolidate Parquet (objects + extraction_status)
+                ta = time.perf_counter()
+                for feature in ("objects", "extraction_status"):
+                    consolidate_feature(out_dir, feature, args.batch_id, collection)
+                res.seconds["consolidate"] = time.perf_counter() - ta
+
+                # 5. promote to canonical
+                ta = time.perf_counter()
+                for feature in ("objects", "extraction_status"):
+                    promote_feature(out_dir, feature, args.batch_id, collection)
+                res.seconds["promote"] = time.perf_counter() - ta
+
+                # 6. push
+                if sync is not None:
+                    ta = time.perf_counter()
+                    pushed = push_artifacts(
+                        sync, out_dir, video_id, collection, run_id, args.batch_id
+                    )
+                    res.seconds["push"] = time.perf_counter() - ta
+                    res.seconds["pushed_files"] = pushed
+
+            status_file.write_text(f"{completion_token}\n", encoding="utf-8")
             state["completed"][video_id] = True
+            state["failed"].pop(video_id, None)
             save_state(state_file, state)
             if not args.keep_video and video_path.is_file():
-                video_path.unlink()
+                try:
+                    video_path.unlink()
+                except OSError as exc:
+                    LOGGER.warning("could not evict raw video %s: %s", video_path, exc)
+            if args.evict_artifacts_after_push:
+                shutil.rmtree(out_dir, ignore_errors=True)
+                if out_dir.exists():
+                    LOGGER.warning("could not evict ingestion artifacts: %s", out_dir)
+                else:
+                    LOGGER.info("evicted uploaded ingestion artifacts: %s", out_dir)
             res.status = "DONE"
         except Exception as exc:
             LOGGER.error("[%d/%d] FAILED %s/%s: %s", idx, total, collection, video_id, exc)
@@ -411,8 +622,10 @@ def main(argv: list[str] | None = None) -> int:
             res.error = f"{type(exc).__name__}: {exc}"
             state["failed"][video_id] = res.error
             save_state(state_file, state)
-            if out_dir.exists():
+            if out_dir.exists() and not args.ingest_only:
                 shutil.rmtree(out_dir, ignore_errors=True)
+            elif out_dir.exists():
+                LOGGER.info("preserving incomplete ingestion output for retry: %s", out_dir)
         res.seconds["total"] = time.perf_counter() - t0
         results.append(res)
 
@@ -420,8 +633,9 @@ def main(argv: list[str] | None = None) -> int:
     failed = sum(1 for r in results if r.status == "FAILED")
     skipped = sum(1 for r in results if r.status == "SKIPPED")
     report = {
-        "run_id": run_id, "device": args.device, "batch_id": args.batch_id,
-        "checkpoint": str(args.detector_checkpoint),
+        "run_id": run_id, "mode": mode, "device": args.device,
+        "batch_id": args.batch_id,
+        "checkpoint": str(runtime.detector_checkpoint),
         "collections": collections,
         "summary": {"total": total, "done": done, "failed": failed, "skipped": skipped},
         "results": [r.to_dict() for r in results],

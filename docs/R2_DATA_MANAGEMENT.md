@@ -104,8 +104,12 @@ python scripts/operations/r2_push.py --embeddings out/beit3.npy --provider beit3
    ```
 2. Ingest (shot detection + keyframe extraction):
    ```bash
-   python -m mvr.cli ingest data/raw/1/videos/L21/L21_V001.mp4 --output artifacts/ingest_L21_V001
+   python -m mvr.cli ingest data/raw/batch1/videos/L21/L21_V001.mp4 --output artifacts/ingest_L21_V001
    ```
+   The default is the canonical TransNetV2 `0.5` +
+   `hybrid_temporal_content` selector and therefore requires the pinned
+   MetaCLIP-2 model to be cached locally. Add `--allow-model-downloads` only
+   when an explicit first-run download is intended.
 3. Run feature extraction:
    ```bash
    python scripts/run_feature_extraction.py \
@@ -125,10 +129,77 @@ See [GPU_DEPLOYMENT_RUNBOOK.md](./GPU_DEPLOYMENT_RUNBOOK.md) for the full
 step-by-step guide. The short version:
 
 1. Clone the repo, copy `.env.example` to `.env`, fill in R2 credentials.
-2. Pull data from R2: `python scripts/operations/r2_pull.py --corpus`
-3. Run extraction with GPU: `python scripts/run_feature_extraction.py ... --device cuda`
-4. Push results: `python scripts/operations/r2_push.py --embeddings ...`
-5. Start the serving stack: `docker compose -f docker-compose.gpu.yml up -d`
+   Set the pinned model locations with `MVR_RFDETR_CHECKPOINT`,
+   `MVR_BEIT3_CHECKPOINT`, `MVR_METACLIP2_MODEL`, and `MVR_PE_CHECKPOINT`.
+2. Run a one-video canonical canary directly from R2:
+   `python scripts/operations/run_pipeline_local.py --collections L21 --videos L21_V001 --device cuda`.
+3. Expand to selected collections, for example `--collections L21,L22`, or
+   omit both filters for L21-L30. The autopilot pulls one video at a time and
+   pushes results by default; add `--no-push` for a local-only run. CLI
+   checkpoint arguments override `.env`; `.env` overrides the repository-local
+   fallback paths.
+4. Start the serving stack: `docker compose -f docker-compose.gpu.yml up -d`
+
+## Unattended ingestion-only workflow
+
+Use the operations runner when raw videos already live on R2 and only
+canonical ingestion should run. The runner pulls one video at a time, runs
+TransNetV2 `0.5` plus `hybrid_temporal_content`, uploads the publishable output
+tree, records resume state, and then moves to the next video. The regenerable
+`selector_cache/` candidate frames are not uploaded and remain local until any
+requested post-success eviction; final `keyframes/`, `selector_embeddings/`,
+mappings, metadata, manifests, and the success marker are uploaded. It does
+not run RF-DETR, the downstream three-provider embedding stage, consolidation,
+or promotion.
+
+One-video canary:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\operations\run_pipeline_local.py `
+  --ingest-only `
+  --collections L21 `
+  --videos L21_V001 `
+  --device cuda `
+  --run-id ingest-batch1-canary
+```
+
+Unattended selected-collection run with bounded local disk:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\operations\run_pipeline_local.py `
+  --ingest-only `
+  --collections L21,L22 `
+  --device cuda `
+  --run-id ingest-batch1-001 `
+  --work-root D:\aic26_ingest_work `
+  --evict-artifacts-after-push
+```
+
+Omit `--collections` to process the runner's default L21-L30 set. Add
+`--allow-model-downloads` only when the pinned MetaCLIP-2 first-run download is
+intentional. Raw local videos are removed after success unless `--keep-video`
+is passed. `--evict-artifacts-after-push` additionally removes the local
+ingestion tree only after R2 accepts the final success marker.
+
+Each completed video is staged under:
+
+```text
+data/staging/ingestion/<run-id>/batch=1/collection=<Lxx>/<video-id>/
+```
+
+The runner uploads `_SUCCESS.json` last. A prefix without that marker is
+partial and is not marked complete locally. Resume state and the final report
+default to `<work-root>/ingest_state.json` and
+`<work-root>/ingest_report.json`. To resume after an interruption, rerun the
+same command with the same `--run-id` and `--work-root`; completed videos are
+skipped and failed/incomplete videos are attempted again.
+
+Excluding `selector_cache/` affects only new uploads. It does not delete cache
+objects already present under an existing R2 run prefix.
+
+These objects intentionally remain in `data/staging`. Validation and promotion
+into the single corpus-level `data/corpus/ingest/keyframe_mapping.csv` are a
+separate operation; per-video workers must not overwrite that shared mapping.
 
 ## Caching
 

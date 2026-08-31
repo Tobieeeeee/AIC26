@@ -1,4 +1,8 @@
-"""One-command R2 corpus runner: pull -> ingest -> objects + 3 CLIP providers -> push -> evict.
+"""Legacy pre-reorganization R2 corpus runner.
+
+New canonical runs use ``scripts/operations/run_pipeline_local.py``. This file
+is retained only to reproduce the old ``Videos_L*`` bucket layout and periodic
+12s/8s selector.
 
 Processes videos one at a time so peak disk stays bounded: each video is
 downloaded from R2, ingested (TransNetV2 keyframes), enriched (RF-DETR objects +
@@ -8,8 +12,8 @@ and then the local video is deleted before the next one starts.
 Resume is automatic: a video whose per-video status file already reads DONE is
 skipped without any R2 GET.
 
-Canonical defaults are preserved: TransNetV2 @ 0.5 + periodic 12s/8s,
-RF-DETR Large @ 0.4 pinned, and the 3-provider visual-embedding stack
+The legacy profile is TransNetV2 @ 0.5 + periodic 12s/8s, RF-DETR Large @ 0.4
+pinned, and the 3-provider visual-embedding stack
 (BEiT-3 + MetaCLIP-2 + PE-Core-L). Encoders are built lazily and unloaded
 after each video to keep VRAM bounded.
 """
@@ -526,7 +530,6 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
 
 
 

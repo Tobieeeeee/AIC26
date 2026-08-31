@@ -1,6 +1,7 @@
 """Tests for the R2 sync orchestration library."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -102,6 +103,81 @@ class TestR2SyncPush:
         stats = sync.push_staging("ocr", "run-001", [tmp_path / "missing.json"])
         assert stats.uploaded == 0
         assert stats.errors == 0
+
+    def test_push_ingestion_run_preserves_tree_and_writes_success_last(self, tmp_path):
+        client = MagicMock()
+        client.upload_file.return_value = {"key": "k", "size": 5, "sha256": "x"}
+        cache = BoundedCache(str(tmp_path / "cache"), max_size_gb=1)
+        sync = R2Sync(client=client, local_root=tmp_path, cache=cache)
+        output = tmp_path / "ingest"
+        (output / "keyframes" / "L21_V001").mkdir(parents=True)
+        (output / "selector_cache" / "L21_V001" / "candidates").mkdir(
+            parents=True
+        )
+        (output / "selector_embeddings" / "metaclip2").mkdir(parents=True)
+        (output / "keyframe_mapping.csv").write_text("keyframe_id\nkf-1\n")
+        (output / "keyframes" / "L21_V001" / "kf-1.jpg").write_bytes(b"jpeg")
+        (output / "selector_cache" / "L21_V001" / "candidate_embeddings.npy").write_bytes(
+            b"candidate-vectors"
+        )
+        (output / "selector_cache" / "L21_V001" / "candidates" / "c-1.jpg").write_bytes(
+            b"candidate-jpeg"
+        )
+        (output / "selector_embeddings" / "metaclip2" / "L21_V001.npy").write_bytes(
+            b"selected-vector"
+        )
+
+        stats = sync.push_ingestion_run(
+            output,
+            run_id="run-001",
+            batch_id="1",
+            collection_id="L21",
+            video_id="L21_V001",
+        )
+
+        assert stats.uploaded == 4
+        assert stats.errors == 0
+        keys = [call.args[1] for call in client.upload_file.call_args_list]
+        assert keys == [
+            "data/staging/ingestion/run-001/batch=1/collection=L21/L21_V001/"
+            "keyframe_mapping.csv",
+            "data/staging/ingestion/run-001/batch=1/collection=L21/L21_V001/"
+            "keyframes/L21_V001/kf-1.jpg",
+            "data/staging/ingestion/run-001/batch=1/collection=L21/L21_V001/"
+            "selector_embeddings/metaclip2/L21_V001.npy",
+            "data/staging/ingestion/run-001/batch=1/collection=L21/L21_V001/"
+            "_SUCCESS.json",
+        ]
+        assert all("/selector_cache/" not in key for key in keys)
+        marker = json.loads((output / "_SUCCESS.json").read_text(encoding="utf-8"))
+        assert marker["artifact_count"] == 3
+        assert (output / "selector_cache/L21_V001/candidates/c-1.jpg").is_file()
+
+    def test_push_ingestion_run_omits_success_marker_after_partial_failure(self, tmp_path):
+        client = MagicMock()
+        client.upload_file.side_effect = [
+            {"key": "k", "size": 5, "sha256": "x"},
+            RuntimeError("upload failed"),
+        ]
+        cache = BoundedCache(str(tmp_path / "cache"), max_size_gb=1)
+        sync = R2Sync(client=client, local_root=tmp_path, cache=cache)
+        output = tmp_path / "ingest"
+        output.mkdir()
+        (output / "a.json").write_text("{}")
+        (output / "b.json").write_text("{}")
+
+        stats = sync.push_ingestion_run(
+            output,
+            run_id="run-001",
+            batch_id="1",
+            collection_id="L21",
+            video_id="L21_V001",
+        )
+
+        assert stats.uploaded == 1
+        assert stats.errors == 1
+        assert not (output / "_SUCCESS.json").exists()
+        assert client.upload_file.call_count == 2
 
     def test_push_corpus_metadata(self, tmp_path):
         client = MagicMock()
