@@ -1774,3 +1774,32 @@ Verification:
 - Full repository regression after cache exclusion: 1,420 passed, 15 skipped.
 - Python compilation and `git diff --check`: passed. No full Batch1 run was
   completed by this change.
+
+---
+
+# Task05B schema 1.2 — Vietnamese lexical fallback
+
+Status: IMPLEMENTED; FIVE-DOCUMENT SMOKE INDEX REBUILT; FULL CORPUS DEFERRED
+
+Branch: `fix/elasticsearch-vi-search-fallback`
+
+- Added `vi_exact` and retained `vi_folded`; `ocr_text`/`asr_text` are now
+  exact base fields with folded multi-fields.
+- Added shared NFC, whitespace-collapse, trim, and casefold query
+  normalization without Python accent removal.
+- Replaced one-shot BM25 with strict exact phrase -> folded phrase -> bounded
+  fuzzy fallback. Only the first strategy with nonzero `hits.total` is used;
+  raw BM25 scores from strategies are never mixed.
+- Preserved `_source`, `top_k`, hit serialization, composite document IDs,
+  dense/Milvus routing, and rank-only RRF.
+- Rebuilt only `keyframes` from `artifacts/fasttest/processed`: 5 indexed,
+  zero failed/missing/extra/duplicate documents. No full-corpus reindex ran.
+- Elasticsearch 8.11.4 integration verified analyzer tokens and the required
+  exact/exact/folded/fuzzy strategies using a dedicated temporary index.
+
+Verification:
+
+- Combined lexical, API, KIS/Q&A/TRAKE, Milvus-contract, and real
+  Elasticsearch integration suite: 249 passed, 15 skipped.
+- Full-corpus rebuild remains an explicit operator action with alias/rollback
+  planning; it was not started.

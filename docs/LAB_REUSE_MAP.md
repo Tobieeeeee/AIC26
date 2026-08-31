@@ -440,6 +440,17 @@ independent provider retriever, and rank-only semantic RRF implementation.
 | The Task05 service exposed provider-field search but was not a complete query-to-fused-results API service. | The existing three provider query encoders route only to `beit3_vector` (768), `metaclip2_vector` (512), and `pe_vector` (1024), then reuse rank-only RRF with `k=60`. | Compatibility wiring only; required-provider failure policy remains fail-closed and raw scores are never summed across providers. | Deterministic unit routing/RRF assertions plus a five-entity live Milvus FLAT fixture compared with real FAISS exact search. | VERIFIED |
 | Readiness checked field presence but did not expose dimensions, loaded state, or all-vector-index readiness to the API. | Readiness distinguishes configured, reachable, collection-ready, and loaded state and validates all canonical dimensions and vector indexes. | Makes runtime state observable; it does not relax schema or manifest checks. | Live Docker Milvus 2.4.13 status and FastAPI health smoke. | VERIFIED |
 
+## Task05B schema 1.2 — Vietnamese exact/folded/fuzzy fallback
+
+This approved lexical-search change preserves Task05A `_source` text and the
+existing composite Elasticsearch identity. It changes only Task05B analysis
+and query orchestration; dense retrieval, Milvus, semantic RRF, and embedding
+queries remain unchanged.
+
+| Previous behavior | Schema 1.2 behavior | Reason / compatibility | Verification | Status |
+|---|---|---|---|---|
+| `ocr_text` and `asr_text` used only `vi_folded`; every query was one non-phrase `multi_match`. | Base fields use `vi_exact` (`standard` + `lowercase`) and `.folded` subfields use `vi_folded` (`standard` + `lowercase` + `asciifolding`). Search runs exact phrase, then folded phrase only on zero hits, then bounded fuzzy only when both phrase stages return zero. | Preserves diacritics for precision while retaining accent-insensitive recall. Existing hit schema, `top_k`, and `_id = <video_id>/<keyframe_id>` are unchanged. Python normalization is NFC + whitespace collapse + trim + casefold and never removes accents. | Unit request/orchestration/identity regressions plus opt-in Elasticsearch 8.11.4 analyzer and four-query integration test. | VERIFIED |
+
 ## RF-DETR production runtime pin
 
 This approved fix does not migrate a new lab detector. It completes the

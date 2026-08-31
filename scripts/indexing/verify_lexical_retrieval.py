@@ -1,4 +1,4 @@
-"""Run a Task05B v1 lexical retrieval verification query."""
+"""Run a Task05B v1.2 lexical fallback verification query."""
 from __future__ import annotations
 
 import argparse
@@ -12,12 +12,12 @@ SOURCE_ROOT = REPOSITORY_ROOT / "src"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from mvr.retrieval.lexical_bm25 import search_task05b_lexical
+from mvr.retrieval.lexical_bm25 import search_task05b_lexical_with_strategy
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Verify Task05B default-BM25 lexical retrieval."
+        description="Verify Task05B exact/folded/fuzzy lexical retrieval."
     )
     parser.add_argument("--elasticsearch-url", required=True)
     parser.add_argument("--index-name", required=True)
@@ -35,15 +35,16 @@ def main(argv: list[str] | None = None) -> int:
             "Elasticsearch client is missing; install the project's search extra"
         ) from exc
     client = Elasticsearch(args.elasticsearch_url)
-    results = search_task05b_lexical(
+    result = search_task05b_lexical_with_strategy(
         client,
         args.query,
         index_name=args.index_name,
         top_k=args.top_k,
     )
+    print(f"strategy={result.strategy}", file=sys.stderr)
     print(
         json.dumps(
-            [result.to_dict() for result in results],
+            [hit.to_dict() for hit in result.hits],
             ensure_ascii=False,
             indent=2,
         )

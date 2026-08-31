@@ -1,7 +1,7 @@
 import pytest
 
 
-def test_lexical_request_preserves_ocr_boost_caption_fallback_and_filters() -> None:
+def test_lexical_exact_request_uses_phrase_and_preserves_filters() -> None:
     from mvr.retrieval.lexical import build_lexical_request
 
     assert build_lexical_request("giá vàng", top_k=5, person_min=2, car_min=1) == {
@@ -12,7 +12,8 @@ def test_lexical_request_preserves_ocr_boost_caption_fallback_and_filters() -> N
                     {
                         "multi_match": {
                             "query": "giá vàng",
-                            "fields": ["ocr_text^2", "caption"],
+                            "type": "phrase",
+                            "fields": ["ocr_text^2", "asr_text"],
                         }
                     }
                 ],
@@ -46,10 +47,17 @@ def test_lexical_search_sends_request_to_selected_index() -> None:
     class Client:
         def search(self, **kwargs):
             calls.append(kwargs)
-            return {"hits": {"hits": []}}
+            strategy = len(calls)
+            if strategy < 3:
+                return {"hits": {"total": {"value": 0}, "hits": []}}
+            return {"hits": {"total": {"value": 1}, "hits": [{"_id": "x"}]}}
 
     response = search_lexical(Client(), "giá vàng", top_k=3, index_name="frames")
 
-    assert response == {"hits": {"hits": []}}
+    assert response["hits"]["total"]["value"] == 1
     assert calls[0]["index"] == "frames"
     assert calls[0]["size"] == 3
+    assert len(calls) == 3
+    assert calls[0]["query"]["bool"]["must"][0]["multi_match"]["type"] == "phrase"
+    assert "fuzziness" not in calls[1]["query"]["bool"]["must"][0]["multi_match"]
+    assert calls[2]["query"]["bool"]["must"][0]["multi_match"]["fuzziness"] == "AUTO"

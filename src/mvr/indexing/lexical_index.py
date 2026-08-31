@@ -19,8 +19,9 @@ from .validation import identity_key
 from typing import Any
 
 
-TASK05B_SCHEMA_VERSION = "1.1"
+TASK05B_SCHEMA_VERSION = "1.2"
 SEARCHABLE_FIELDS = ["ocr_text", "asr_text"]
+FOLDED_SEARCHABLE_FIELDS = ["ocr_text.folded", "asr_text.folded"]
 
 #: Sao nguyên từ `elasticsearch_index.SETTINGS`, index Lab 6 vốn đã dùng đúng
 #: analyzer này cho tiếng Việt. `asciifolding` bỏ dấu ở CẢ lúc index lẫn lúc
@@ -29,6 +30,10 @@ SEARCHABLE_FIELDS = ["ocr_text", "asr_text"]
 LEXICAL_SETTINGS: dict[str, Any] = {
     "analysis": {
         "analyzer": {
+            "vi_exact": {
+                "tokenizer": "standard",
+                "filter": ["lowercase"],
+            },
             "vi_folded": {
                 "tokenizer": "standard",
                 "filter": ["lowercase", "asciifolding"],
@@ -43,8 +48,20 @@ LEXICAL_MAPPINGS: dict[str, Any] = {
         "frame_idx": {"type": "integer"},
         "shot_id": {"type": "integer"},
         "timestamp": {"type": "float"},
-        "ocr_text": {"type": "text", "analyzer": "vi_folded"},
-        "asr_text": {"type": "text", "analyzer": "vi_folded"},
+        "ocr_text": {
+            "type": "text",
+            "analyzer": "vi_exact",
+            "fields": {
+                "folded": {"type": "text", "analyzer": "vi_folded"},
+            },
+        },
+        "asr_text": {
+            "type": "text",
+            "analyzer": "vi_exact",
+            "fields": {
+                "folded": {"type": "text", "analyzer": "vi_folded"},
+            },
+        },
     }
 }
 
@@ -376,6 +393,11 @@ def create_lexical_index(
     if recreate and exists:
         client.indices.delete(index=index_name)
         exists = False
+    elif exists:
+        raise FileExistsError(
+            f"Elasticsearch index already exists: {index_name}; "
+            "choose a new versioned index name or pass recreate=True explicitly"
+        )
     if not exists:
         client.indices.create(
             index=index_name,
@@ -505,7 +527,10 @@ def build_lexical_index(
         "mapping": LEXICAL_MAPPINGS,
         "settings": {
             "similarity": "Elasticsearch default BM25",
-            "analysis": "Elasticsearch default text analysis",
+            "analysis": {
+                "exact": "standard tokenizer -> lowercase",
+                "folded": "standard tokenizer -> lowercase -> asciifolding",
+            },
             "bulk_chunk_size": 50,
             "refresh_per_document": False,
             "final_refresh": True,
