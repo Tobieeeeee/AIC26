@@ -1775,6 +1775,26 @@ Verification:
 - Python compilation and `git diff --check`: passed. No full Batch1 run was
   completed by this change.
 
+## 2026-08-31 - RTX 5060 Ti one-command R2 ingestion bootstrap
+
+- Added `scripts/operations/run_ingest_rtx5060ti.sh` for the verified Ubuntu
+  24.04 / RTX 5060 Ti 16 GB VM profile.
+- The idempotent setup uses PyTorch 2.7.1 + torchvision 0.22.1 from the CUDA
+  12.8 index, deliberately avoiding the generic MetaCLIP-2 extra's PyTorch
+  2.5.1 pin. It verifies compute capability `(12, 0)`, compiled `sm_120`
+  support, CUDA matmul, required imports, `pip check`, FFmpeg, and real R2 list
+  access before ingestion.
+- The runner requires an explicit collection shard and run ID, delegates to
+  canonical `--ingest-only --device cuda`, evicts only after successful R2
+  publication by default, and supports resumable detached execution with a
+  PID/log under the work root.
+- No detector, selector, model, threshold, keyframe identity, upload boundary,
+  success-marker ordering, or resume behavior changed. No ingestion job or
+  model download was started as part of this implementation.
+- Focused operations/bootstrap regression: 12 passed, 1 Linux CI shell-syntax
+  test skipped on Windows. Full regression: 1,439 passed, 16 skipped. Git Bash
+  `bash -n`, help smoke, and `git diff --check`: passed.
+
 ---
 
 # Task05B schema 1.2 — Vietnamese lexical fallback

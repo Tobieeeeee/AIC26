@@ -140,6 +140,54 @@ step-by-step guide. The short version:
    fallback paths.
 4. Start the serving stack: `docker compose -f docker-compose.gpu.yml up -d`
 
+### RTX 5060 Ti one-command ingestion runner
+
+For the verified Ubuntu 24.04 / RTX 5060 Ti 16 GB host profile, use the
+dedicated bootstrap instead of installing the generic `metaclip2` extra. The
+generic extra pins PyTorch 2.5.1, while this Blackwell GPU needs the verified
+PyTorch 2.7.1 + CUDA 12.8 runtime with `sm_120` kernels.
+
+The initial VM still needs the private repository cloned and its untracked
+`.env` copied into the repository root. After that, the same script installs
+or reuses `.venv`, verifies the GPU and imports, proves real R2 read access
+with `r2 list`, and delegates to the canonical ingestion-only runner.
+
+Install and validate without starting ingestion:
+
+```bash
+bash scripts/operations/run_ingest_rtx5060ti.sh --setup-only
+```
+
+Run a one-video canary:
+
+```bash
+bash scripts/operations/run_ingest_rtx5060ti.sh \
+  --collections L26 \
+  --videos L26_V001 \
+  --run-id ingest-batch1-vm1-canary \
+  --allow-model-downloads
+```
+
+Run an unattended shard and return immediately to the shell:
+
+```bash
+bash scripts/operations/run_ingest_rtx5060ti.sh \
+  --collections L26,L27,L28,L29,L30 \
+  --run-id ingest-batch1-vm1 \
+  --detach \
+  --allow-model-downloads
+
+tail -f ~/aic26_ingest/ingest-batch1-vm1/runner.log
+```
+
+`--collections` and `--run-id` are deliberately required so two machines do
+not accidentally claim the same shard and so resume state is stable. Reuse
+the same command/run ID to resume; completed videos are skipped. The default
+removes each local raw video and ingestion tree only after the R2 success
+marker is accepted. Add `--keep-artifacts` when local ingestion output should
+remain on disk. After the first successful MetaCLIP-2 download, omit
+`--allow-model-downloads` on later runs that reuse the same model cache.
+
 ## Unattended ingestion-only workflow
 
 Use the operations runner when raw videos already live on R2 and only

@@ -428,6 +428,17 @@ tree-preservation, partial-upload, stage-skipping, and resume-state
 regressions; one live L21_V001 canary preceded the cache-exclusion change, but
 no full Batch1 run was executed.
 
+### RTX 5060 Ti operational bootstrap
+
+`scripts/operations/run_ingest_rtx5060ti.sh` is compatibility-only packaging
+for Ubuntu 24.04 / RTX 5060 Ti (`sm_120`). It installs the verified PyTorch
+2.7.1 + CUDA 12.8 runtime instead of the generic MetaCLIP-2 extra's incompatible
+PyTorch 2.5.1 pin, validates the GPU/runtime and real R2 list access, then
+delegates to `run_pipeline_local.py --ingest-only`. It does not change the
+canonical detector, selector, thresholds, identities, extraction, uploader,
+success-marker ordering, or resume semantics. Static contract tests and shell
+syntax validation cover the wrapper; no second full-corpus run was launched.
+
 ## Milvus production semantic runtime fix
 
 This approved runtime fix migrates no new lab implementation. It reuses the
