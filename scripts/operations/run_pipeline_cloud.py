@@ -44,7 +44,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--videos", default=None)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--providers", default="beit3,metaclip2,perception_encoder")
+    p.add_argument(
+        "--ingest-only",
+        action="store_true",
+        help="Run canonical ingestion only and stage each completed tree on R2",
+    )
     p.add_argument("--no-push", action="store_true")
+    p.add_argument(
+        "--evict-artifacts-after-push",
+        action="store_true",
+        help="Bound disk use by evicting ingestion output after successful upload",
+    )
+    p.add_argument(
+        "--allow-model-downloads",
+        action="store_true",
+        help="Explicitly allow pinned model downloads on the GPU worker",
+    )
     p.add_argument("--skip-provision", action="store_true",
                    help="Skip clone/install (repo already provisioned).")
     return p.parse_args(argv)
@@ -67,7 +82,15 @@ def provision(args: argparse.Namespace) -> None:
         run(["python3.12", "-m", "venv", str(venv)])
     pip = venv / "bin" / "pip"
     run([pip, "install", "--upgrade", "pip", "setuptools", "wheel"])
-    run([pip, "install", "-e", ".[dev,api,semantic,search,ocr,objects,milvus]"], cwd=dest)
+    run(
+        [
+            pip,
+            "install",
+            "-e",
+            ".[dev,api,semantic,search,ocr,objects,milvus,operations,metaclip2]",
+        ],
+        cwd=dest,
+    )
 
     # Deploy env file
     env_target = dest / ".env"
@@ -98,8 +121,14 @@ def main(argv: list[str] | None = None) -> int:
         cmd += ["--limit", str(args.limit)]
     if args.no_push:
         cmd += ["--no-push"]
+    if args.ingest_only:
+        cmd += ["--ingest-only"]
+    if args.evict_artifacts_after_push:
+        cmd += ["--evict-artifacts-after-push"]
+    if args.allow_model_downloads:
+        cmd += ["--allow-model-downloads"]
 
-    return subprocess.run(cmd).returncode
+    return subprocess.run(cmd, cwd=repo).returncode
 
 
 if __name__ == "__main__":

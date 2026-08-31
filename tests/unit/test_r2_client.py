@@ -21,7 +21,9 @@ from mvr.operations.r2_layout import (
     corpus_embedding_key,
     corpus_key,
     corpus_metadata_key,
+    raw_batch_segment,
     raw_video_key,
+    raw_video_prefix,
     staging_key,
 )
 
@@ -34,6 +36,9 @@ class TestR2Layout:
     def test_raw_video_key(self):
         key = raw_video_key("batch1", "L21", "L21_V010")
         assert key == "data/raw/batch1/videos/L21/L21_V010.mp4"
+        assert raw_video_key("1", "L21", "L21_V010") == key
+        assert raw_video_prefix("1", "L21") == "data/raw/batch1/videos/L21/"
+        assert raw_batch_segment("batch1") == "batch1"
 
     def test_staging_key(self):
         key = staging_key("ocr", "run-001", "L21_V010", "kf001.json")

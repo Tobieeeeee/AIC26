@@ -447,9 +447,24 @@ def _run_show_defaults() -> None:
     ]
     if config:
         ing = config.get("ingestion", {})
+        selector = ing.get("selector", "?")
+        if selector == "hybrid_temporal_content":
+            hybrid = ing.get("hybrid_temporal_content", {})
+            selector_summary = (
+                f"{selector} (candidate {hybrid.get('candidate_step_sec', '?')}s, "
+                f"max gap {hybrid.get('max_temporal_gap_sec', '?')}s)"
+            )
+        elif selector == "periodic":
+            periodic = ing.get("periodic", {})
+            selector_summary = (
+                f"periodic {periodic.get('long_threshold_sec', '?')}s/"
+                f"{periodic.get('interval_sec', '?')}s"
+            )
+        else:
+            selector_summary = str(selector)
         lines.append(
             f"Ingestion: {ing.get('detector', '?')} @ {ing.get('detector_threshold', '?')} "
-            f"+ {ing.get('selector', '?')} {ing.get('long_threshold_sec', '?')}s/{ing.get('interval_sec', '?')}s"
+            f"+ {selector_summary}"
         )
         obj = config.get("objects", {})
         pin = obj.get("pin_status", "unknown")
@@ -467,7 +482,8 @@ def _run_show_defaults() -> None:
         lines.append(f"ASR:       {vad.get('provider', '?')} VAD + {asr.get('recognizer', '?')}")
     else:
         lines.extend([
-            "Ingestion: TransNetV2 @ 0.5 + periodic 12s/8s",
+            "Ingestion: TransNetV2 @ 0.5 + hybrid_temporal_content "
+            "(candidate 1.0s, max gap 8.0s)",
             "Objects:   RFDETRLarge / rf-detr-large-2026.pth (pin: pinned)",
             "Visual:    beit3, metaclip2, perception_encoder",
             "OCR:       DeepSolo + Vietnamese PARSeq + F-1/F/F+1",

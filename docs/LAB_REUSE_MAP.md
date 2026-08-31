@@ -401,6 +401,33 @@ freeze below supersedes its default status without changing its algorithm.
 |---|---|---|---|---|
 | `hybrid_temporal_content` with PySceneDetect in runnable entrypoints | TransNetV2 at `0.5` plus periodic midpoint + `duration >= 12s` / every `8s` | Approved Batch1 freeze based on the four-video/99-GT re-evaluation. Periodic mathematics and canonical identity/mapping semantics are unchanged. PySceneDetect, midpoint, hybrid, and provider experiments remain explicit non-default modes. | CLI, script, config, and library default-resolution tests; default pipeline isolation test; focused ingestion regressions. | VERIFIED |
 
+## SELECTOR-HYBRID-MIGRATION current production freeze
+
+This later approved migration supersedes the V1 selector default above without
+changing TransNetV2, canonical keyframe identity, or the retained periodic
+implementation.
+
+| Previous production behavior | Current production behavior | Reason and compatibility | Verification | Status |
+|---|---|---|---|---|
+| TransNetV2 `0.5` plus periodic midpoint + 12s/8s | TransNetV2 `0.5` plus `hybrid_temporal_content`: 1s candidates, pinned MetaCLIP-2 local novelty, grayscale/Canny change events, mandatory midpoint, and temporal repair to `<=8s` | Approved four-video/seven-query benchmark favored hybrid over semantic dedup and periodic on retrieval Recall@1/MRR. Periodic and midpoint remain explicit reproduction modes; semantic dedup remains available for larger re-evaluation. | Selector/default/config unit suites plus local/cloud R2-runner call-contract regression; no full Batch1 rerun in this wiring fix. | VERIFIED |
+
+### R2 ingestion-only operational wiring
+
+No detector, selector, identity, or extraction behavior changes here. The
+operations runner reuses canonical ingestion unchanged and publishes the
+per-video final keyframes, selected embeddings, mappings, metadata, and
+manifests under the run-scoped ingestion staging prefix. The regenerable
+`selector_cache/` candidate tree is excluded from R2 to avoid publishing
+intermediate JPEGs and vectors; it remains in local output unless optional
+post-success eviction is requested. This is an operational packaging change
+only: selector computation and local output are unchanged.
+The runner publishes a success marker last and records resume completion only
+after a successful upload. Direct per-video promotion to the shared corpus
+mapping is deliberately not performed. Verified with mocked R2 exclusion,
+tree-preservation, partial-upload, stage-skipping, and resume-state
+regressions; one live L21_V001 canary preceded the cache-exclusion change, but
+no full Batch1 run was executed.
+
 ## Milvus production semantic runtime fix
 
 This approved runtime fix migrates no new lab implementation. It reuses the

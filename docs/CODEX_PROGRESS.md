@@ -1732,6 +1732,49 @@ Git:
 - Branch: `docs/backend-ui-api-report`, rebased onto `origin/main` `712274d`,
   borrowing `1e9a8d4` from `feat/official-submission-format`.
 
+## 2026-08-31 - R2 runners aligned with canonical hybrid ingestion
+
+- `scripts/operations/run_pipeline_local.py` no longer hard-codes the retired
+  periodic selector or a duplicate TransNet profile. It inherits detector and
+  selector defaults from `mvr.ingestion.pipeline`, currently TransNetV2 `0.5`
+  plus `hybrid_temporal_content`.
+- The local runner passes the pinned provider specification, MetaCLIP-2 model
+  location, download policy, and embedding batch size into canonical
+  ingestion. It reuses the validated selected-keyframe MetaCLIP-2 artifact
+  emitted by the hybrid selector instead of running that encoder twice. Model
+  paths resolve from CLI, then `.env`, then repository/cache defaults. Model
+  downloads remain explicit opt-in.
+- The cloud runner installs the R2/operations and canonical MetaCLIP-2 ingest
+  extras, forwards the explicit download flag, and starts the child process
+  from the cloned repository so `.env`, configs, and relative checkpoint paths
+  resolve consistently. It does not combine the incompatible isolated BEiT-3
+  and Perception Encoder dependency pins into one venv.
+- README, R2 runbook, and canonical ingestion documentation now describe the
+  current selector. The older V1 periodic freeze remains documented as
+  superseded history in `LAB_REUSE_MAP.md`.
+- Added a lightweight call-contract regression that proves the R2 runner does
+  not override `selector_mode` and that the cloud wrapper forwards the current
+  runtime controls without loading models.
+- Added resumable `--ingest-only` local/cloud operation mode for unattended
+  raw-R2 processing. Each video uploads its publishable relative artifact tree
+  to run-scoped ingestion staging and uploads `_SUCCESS.json` last; local state
+  is marked complete only afterward. Regenerable `selector_cache/` candidates
+  are not uploaded and remain local until optional post-upload eviction, while
+  final keyframes, selected embeddings, metadata, and manifests remain
+  included. Optional post-upload eviction bounds local disk usage, while
+  failed/partial outputs remain available for retry.
+
+Verification:
+
+- Real R2 canary `L21_V001`: 381 final keyframes, successful `_SUCCESS`
+  publication, `done=1`, `failed=0`, and `skipped=0`. The canary preceded the
+  cache-exclusion change and exposed 1,404 regenerable `selector_cache/`
+  objects, which motivated the uploader boundary correction.
+- Focused R2 runner/sync regression: 20 passed.
+- Full repository regression after cache exclusion: 1,420 passed, 15 skipped.
+- Python compilation and `git diff --check`: passed. No full Batch1 run was
+  completed by this change.
+
 ---
 
 # Task05B schema 1.2 — Vietnamese lexical fallback

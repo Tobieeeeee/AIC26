@@ -46,6 +46,19 @@ def test_ingest_command_uses_canonical_hybrid_defaults(monkeypatch, tmp_path: Pa
     ]
 
 
+def test_show_defaults_reports_canonical_hybrid_profile(capsys) -> None:
+    from mvr import cli
+
+    cli.main(["show-defaults"])
+
+    output = capsys.readouterr().out
+    assert (
+        "Ingestion: transnetv2 @ 0.5 + hybrid_temporal_content "
+        "(candidate 1.0s, max gap 8.0s)"
+    ) in output
+    assert "?s" not in output
+
+
 def test_build_index_command_uses_lab3_defaults(monkeypatch, tmp_path: Path) -> None:
     from mvr import cli
 

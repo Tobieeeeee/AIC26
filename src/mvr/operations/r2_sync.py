@@ -8,6 +8,7 @@ Push path:  local working tree -> R2 (under data/staging or data/corpus)
 """
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 from dataclasses import dataclass
@@ -30,6 +31,8 @@ from .r2_layout import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+INGESTION_UPLOAD_EXCLUDED_ROOTS = frozenset({"selector_cache"})
 
 
 @dataclass
@@ -214,6 +217,109 @@ class R2Sync:
                 stats.bytes_transferred += path.stat().st_size
             else:
                 stats.errors += 1
+        return stats
+
+    def push_ingestion_run(
+        self,
+        output_root: Path,
+        *,
+        run_id: str,
+        batch_id: str,
+        collection_id: str,
+        video_id: str,
+    ) -> SyncStats:
+        """Upload one publishable per-video ingestion tree to staging.
+
+        Published artifacts keep their paths relative to ``output_root``.
+        Regenerable selector candidates under ``selector_cache/`` are excluded
+        from this upload; final keyframes, selected embeddings, and metadata
+        remain publishable. A ``_SUCCESS.json`` marker is uploaded only after
+        every preceding file succeeds, so an unattended runner can safely
+        distinguish complete videos from partial uploads.
+        """
+        root = Path(output_root)
+        stats = SyncStats()
+        if not root.is_dir():
+            LOGGER.error("ingestion output root does not exist: %s", root)
+            stats.errors = 1
+            return stats
+
+        marker = root / "_SUCCESS.json"
+        files = sorted(
+            path
+            for path in root.rglob("*")
+            if path.is_file()
+            and path != marker
+            and path.relative_to(root).parts[0]
+            not in INGESTION_UPLOAD_EXCLUDED_ROOTS
+        )
+        if not files:
+            LOGGER.error("ingestion output root contains no files: %s", root)
+            stats.errors = 1
+            return stats
+
+        prefix_parts = (
+            f"batch={batch_id}",
+            f"collection={collection_id}",
+            video_id,
+        )
+        content_types = {
+            ".csv": "text/csv",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".json": "application/json",
+            ".npy": "application/octet-stream",
+        }
+        for path in files:
+            relative = path.relative_to(root)
+            key = staging_key(
+                "ingestion", run_id, *prefix_parts, *relative.parts
+            )
+            if self.push_file(
+                path,
+                key,
+                content_type=content_types.get(path.suffix.lower()),
+            ):
+                stats.uploaded += 1
+                stats.bytes_transferred += path.stat().st_size
+            else:
+                stats.errors += 1
+
+        if stats.errors:
+            LOGGER.error(
+                "ingestion upload incomplete for %s: uploaded=%d errors=%d",
+                video_id,
+                stats.uploaded,
+                stats.errors,
+            )
+            return stats
+
+        marker.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "status": "DONE",
+                    "run_id": run_id,
+                    "batch_id": batch_id,
+                    "collection_id": collection_id,
+                    "video_id": video_id,
+                    "artifact_count": len(files),
+                    "artifact_bytes": stats.bytes_transferred,
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        marker_key = staging_key(
+            "ingestion", run_id, *prefix_parts, marker.name
+        )
+        if self.push_file(marker, marker_key, content_type="application/json"):
+            stats.uploaded += 1
+            stats.bytes_transferred += marker.stat().st_size
+        else:
+            stats.errors += 1
         return stats
 
     def push_corpus_metadata(

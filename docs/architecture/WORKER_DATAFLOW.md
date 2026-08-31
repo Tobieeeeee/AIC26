@@ -21,7 +21,7 @@ evicts only after the last consumer is done. It does **not** replace or modify a
 DATA-02 code, and it never syncs the full R2 corpus — only the object keys the
 queued work items explicitly declare.
 
-Canonical model defaults (TransNetV2 @0.5 + periodic 12s/8s, pinned RF-DETR,
+Canonical model defaults (TransNetV2 @0.5 + `hybrid_temporal_content`, pinned RF-DETR,
 BEiT-3 + MetaCLIP-2 + PE-Core-L, DeepSolo + Vietnamese PARSeq + F-1/F/F+1,
 Silero VAD + ChunkFormer) are untouched — the orchestrator only sequences the I/O
 around the stages that run those models; it does not choose or configure them.
