@@ -43,12 +43,14 @@ from .milvus_schema import (
     EXPECTED_DIMENSIONS,
     FIELD_BATCH_ID,
     FIELD_COLLECTION_ID,
+    FIELD_ENTITY_ID,
     FIELD_FRAME_ID,
     FIELD_KEYFRAME_ID,
     FIELD_SHOT_ID,
     FIELD_TIMESTAMP,
     FIELD_VIDEO_ID,
     build_collection_schema,
+    make_entity_id,
     validate_provider_dimensions,
 )
 
@@ -160,13 +162,34 @@ def _build_entity_row(
     meta_row: dict[str, Any],
     provider_vectors: dict[str, np.ndarray],
 ) -> dict[str, Any]:
-    """Build a flat entity dict for Milvus upsert."""
+    """Build a flat entity dict for Milvus upsert.
+
+    This path writes to Milvus directly (not via
+    ``MilvusProviderBackend.insert_batch``), so it must build ``entity_id``
+    through the same shared helper rather than leaving the primary key unset.
+    """
     from .milvus_schema import (
         FIELD_BEIT3_VECTOR, FIELD_METACLIP2_VECTOR, FIELD_PE_VECTOR,
     )
+    video_id = str(meta_row.get(FIELD_VIDEO_ID, "")).strip()
+    if not video_id:
+        # Refuse rather than write a primary key that collapses to
+        # "/keyframe_id" for every video: keyframe_id is not globally unique
+        # across the dataset, so such a row would silently overwrite another
+        # video's keyframe. The extraction-status schema currently carries no
+        # video_id at all -- see
+        # docs/reviews/MILVUS_VECTOR_MAPPING_IDENTITY_GAP_FINDING.md.
+        raise MilvusIngestError(
+            f"no video_id for keyframe {keyframe_id!r}: cannot build a "
+            "collision-safe entity_id. keyframe_id is not globally unique "
+            "across videos, so this entity would risk overwriting another "
+            "video's keyframe. The extraction-status row must carry video_id; "
+            "see docs/reviews/MILVUS_VECTOR_MAPPING_IDENTITY_GAP_FINDING.md"
+        )
     return {
+        FIELD_ENTITY_ID: make_entity_id(video_id, keyframe_id),
         FIELD_KEYFRAME_ID: keyframe_id,
-        FIELD_VIDEO_ID: meta_row.get(FIELD_VIDEO_ID, ""),
+        FIELD_VIDEO_ID: video_id,
         FIELD_FRAME_ID: int(meta_row.get(FIELD_FRAME_ID, 0)),
         FIELD_SHOT_ID: int(meta_row.get(FIELD_SHOT_ID, -1)),
         FIELD_TIMESTAMP: float(meta_row.get(FIELD_TIMESTAMP, 0.0)),

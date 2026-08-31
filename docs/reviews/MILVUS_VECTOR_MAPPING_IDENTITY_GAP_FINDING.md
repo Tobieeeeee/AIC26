@@ -35,9 +35,16 @@ for row in eligible_rows:          # row comes from status_parquet — no video_
     entity = _build_entity_row(kf_id, row, provider_vecs)
 ```
 
-`_build_entity_row()` reads `meta_row.get(FIELD_VIDEO_ID, "")` — since `row`
-(sourced from `status_parquet`) never has this key, **every entity currently
-written to Milvus via the `milvus ingest` CLI gets `video_id=""`**.
+`_build_entity_row()` used to read `meta_row.get(FIELD_VIDEO_ID, "")` — since
+`row` (sourced from `status_parquet`) never has this key, **every entity
+written to Milvus via the `milvus ingest` CLI got `video_id=""`**.
+
+As of the `entity_id` migration this no longer silently produces bad rows:
+`_build_entity_row()` now raises `MilvusIngestError` with an actionable
+message when `video_id` is missing, so the CLI ingest fails fast and visibly
+instead of writing entities whose primary key collapses to `/keyframe_id`
+for every video. The underlying schema gap described below is still open —
+this only converts silent data corruption into a loud, diagnosable stop.
 
 Separately, `_load_mapping()` (`milvus_ingest.py:122-130`) builds each
 provider's `keyframe_id → row_idx` lookup as a flat dict with no `video_id`
@@ -50,14 +57,20 @@ get attached to a keyframe under a colliding id.
 ## Why the Milvus `entity_id` fix (this PR) does not fully solve this
 
 The Milvus migration in this branch changes the primary key from
-`keyframe_id` to `entity_id = video_id + "/" + keyframe_id`. But since
-`ingest_to_milvus()` currently always resolves `video_id` to `""`, in
-practice this collapses back to `entity_id = "/" + keyframe_id` for every
-row — still colliding across videos, just with an extra leading slash. The
-`entity_id` primary-key fix is real and correct for any caller that supplies
-a proper `video_id` (e.g. `MilvusProviderBackend.insert_batch()` called
-directly with correct metadata), but the production `milvus ingest` CLI path
-will not benefit from it until this identity gap is closed upstream.
+`keyframe_id` to `entity_id = video_id + "/" + keyframe_id`, and both write
+paths (`MilvusProviderBackend.insert_batch()` and `_build_entity_row()`)
+build it through the shared `make_entity_id()` helper. That is correct and
+verified end-to-end against a live Milvus for any caller that supplies a
+real `video_id`: two videos sharing `keyframe_id` "034" produce
+`L21_V001/034` and `L21_V002/034` as separate entities.
+
+What it does **not** do is give the production `milvus ingest` CLI a
+`video_id` to supply. Because `status_parquet` has no such column, that CLI
+path now stops with `MilvusIngestError` instead of ingesting anything. So
+the collision risk is contained rather than resolved: no bad rows can be
+written, but the CLI ingest cannot run at all until the identity gap below
+is closed upstream. Callers that already hold correct per-keyframe metadata
+(e.g. `MilvusProviderBackend.insert_batch()`) are unaffected and work today.
 
 ## What a real fix would require (not done here)
 

@@ -359,3 +359,45 @@ class TestInsertBatchEntityId:
         metadata = [{"keyframe_id": "K01", "video_id": ""}]
         with pytest.raises(ValueError, match="non-empty"):
             backend.insert_batch(self._contract(), vectors, metadata)
+
+
+class TestBuildEntityRowEntityId:
+    """ingest_to_milvus() upserts through the client directly rather than
+    through MilvusProviderBackend.insert_batch(), so _build_entity_row must
+    set the entity_id primary key itself -- otherwise every CLI-driven
+    ingest writes rows with no primary key at all."""
+
+    def _vectors(self):
+        return {
+            "beit3": np.zeros(768, dtype=np.float32),
+            "metaclip2": np.zeros(512, dtype=np.float32),
+            "perception_encoder": np.zeros(1024, dtype=np.float32),
+        }
+
+    def test_entity_id_is_set_from_video_id_and_keyframe_id(self):
+        from mvr.indexing.milvus_ingest import _build_entity_row
+        row = _build_entity_row(
+            "K01", {"video_id": "L21_V001", "frame_id": 5}, self._vectors()
+        )
+        assert row["entity_id"] == "L21_V001/K01"
+        assert row["keyframe_id"] == "K01"
+        assert row["video_id"] == "L21_V001"
+
+    def test_two_videos_same_keyframe_id_get_different_entity_ids(self):
+        from mvr.indexing.milvus_ingest import _build_entity_row
+        row_a = _build_entity_row("034", {"video_id": "L21_V001"}, self._vectors())
+        row_b = _build_entity_row("034", {"video_id": "L21_V002"}, self._vectors())
+        assert row_a["entity_id"] != row_b["entity_id"]
+
+    def test_missing_video_id_raises_actionable_ingest_error(self):
+        """The extraction-status schema currently has no video_id column, so
+        this path must refuse rather than write "/keyframe_id" keys that
+        collide across every video."""
+        from mvr.indexing.milvus_ingest import MilvusIngestError, _build_entity_row
+        with pytest.raises(MilvusIngestError, match="collision-safe entity_id"):
+            _build_entity_row("K01", {"frame_id": 5}, self._vectors())
+
+    def test_blank_video_id_raises(self):
+        from mvr.indexing.milvus_ingest import MilvusIngestError, _build_entity_row
+        with pytest.raises(MilvusIngestError, match="no video_id"):
+            _build_entity_row("K01", {"video_id": "   "}, self._vectors())
