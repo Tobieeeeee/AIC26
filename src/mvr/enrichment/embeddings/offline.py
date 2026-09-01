@@ -353,3 +353,215 @@ def reuse_embedding_artifact(
             shutil.rmtree(staging)
         raise
     return target
+
+
+def reuse_embedding_artifacts(
+    source_roots: Sequence[Path],
+    *,
+    embeddings_root: Path,
+    rows: Sequence[Mapping[str, str]],
+    spec: ProviderSpec,
+) -> Path:
+    """Merge validated selector artifacts into one provider artifact.
+
+    Canonical ingestion publishes one MetaCLIP-2 artifact per video.  Offline
+    enrichment operates on a collection, so this function validates every
+    source against the locked provider contract and atomically publishes one
+    collection-level artifact without running MetaCLIP inference again.
+    """
+    from .artifacts import load_mapping, load_provider_artifact, sha256_file
+
+    rows = list(rows)
+    roots = [Path(root) for root in source_roots]
+    if not rows:
+        raise OfflineEmbeddingError("canonical mapping must not be empty")
+    if not roots:
+        raise OfflineEmbeddingError("selector artifact sources must not be empty")
+
+    expected_contract = (
+        spec.model_id,
+        spec.model_name,
+        spec.checkpoint_or_pretrained,
+        spec.model_revision,
+        spec.embedding_dimension,
+        spec.dtype,
+        spec.normalized,
+    )
+    expected_rows: dict[tuple[str, str, str], Mapping[str, str]] = {}
+    for row in rows:
+        identity = (
+            (row.get("video_id") or "").strip(),
+            (row.get("keyframe_id") or "").strip(),
+            str(row.get("frame_idx") or row.get("frame_id") or "").strip(),
+        )
+        if not all(identity):
+            raise OfflineEmbeddingError(
+                "canonical mapping has an empty selector reuse identity"
+            )
+        if identity in expected_rows:
+            raise OfflineEmbeddingError(
+                f"duplicate canonical selector identity: {identity[0]}/{identity[1]}"
+            )
+        expected_rows[identity] = row
+
+    records_by_identity = {}
+    vector_sources: dict[str, tuple[Path, str]] = {}
+    source_manifests: list[dict[str, str | int]] = []
+    for root in roots:
+        source = load_provider_artifact(
+            root, verify_checksum=True, verify_mapping=True
+        )
+        manifest = source.manifest
+        actual_contract = (
+            manifest.model_id,
+            manifest.model_name,
+            manifest.checkpoint_or_pretrained,
+            manifest.model_revision,
+            manifest.embedding_dimension,
+            manifest.dtype,
+            manifest.normalized,
+        )
+        if actual_contract != expected_contract:
+            raise OfflineEmbeddingError(
+                f"selector artifact contract mismatch: {root}"
+            )
+        try:
+            payload = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OfflineEmbeddingError(
+                f"cannot read selector MetaCLIP manifest: {root}"
+            ) from exc
+        execution = payload.get("execution")
+        if (
+            not isinstance(execution, dict)
+            or execution.get("image_preprocessing") != spec.image_preprocessing
+        ):
+            raise OfflineEmbeddingError(
+                f"selector MetaCLIP preprocessing mismatch: {root}"
+            )
+        hashes = execution.get("vector_files_sha256")
+        if not isinstance(hashes, dict) or not hashes:
+            raise OfflineEmbeddingError(
+                f"selector MetaCLIP artifact lacks vector hashes: {root}"
+            )
+
+        records = load_mapping(source)
+        referenced_files = {record.feature_file for record in records}
+        if not referenced_files.issubset(hashes):
+            raise OfflineEmbeddingError(
+                f"selector MetaCLIP artifact lacks referenced vector hashes: {root}"
+            )
+        for filename in sorted(referenced_files):
+            vector_path = source.resolve_vector_path(filename)
+            actual_hash = sha256_file(vector_path)
+            if actual_hash != hashes[filename]:
+                raise OfflineEmbeddingError(
+                    f"selector MetaCLIP vector hash mismatch: {vector_path}"
+                )
+            previous = vector_sources.get(filename)
+            if previous is not None and previous != (vector_path, actual_hash):
+                raise OfflineEmbeddingError(
+                    f"selector artifacts collide on vector filename: {filename}"
+                )
+            vector_sources[filename] = (vector_path, actual_hash)
+
+        for record in records:
+            identity = (
+                record.video_id,
+                record.keyframe_id,
+                str(record.frame_id or "").strip(),
+            )
+            if identity in records_by_identity:
+                raise OfflineEmbeddingError(
+                    "selector artifacts contain duplicate identity: "
+                    f"{record.video_id}/{record.keyframe_id}"
+                )
+            records_by_identity[identity] = record
+        source_manifests.append(
+            {
+                "root": str(root),
+                "keyframe_count": manifest.keyframe_count,
+                "manifest_sha256": sha256_file(root / "manifest.json"),
+            }
+        )
+
+    expected_ids = set(expected_rows)
+    actual_ids = set(records_by_identity)
+    if expected_ids != actual_ids:
+        missing = len(expected_ids - actual_ids)
+        extra = len(actual_ids - expected_ids)
+        raise OfflineEmbeddingError(
+            "selector MetaCLIP artifacts do not match canonical mapping: "
+            f"missing={missing}, extra={extra}"
+        )
+
+    target = Path(embeddings_root) / spec.model_id
+    if target.exists():
+        raise FileExistsError(f"provider artifact already exists: {target}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = target.parent / f".{spec.model_id}.{uuid.uuid4().hex}.reuse.tmp"
+    staging.mkdir()
+    try:
+        for filename, (source_path, _) in sorted(vector_sources.items()):
+            destination = staging / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, destination)
+
+        output_rows = []
+        for identity, row in expected_rows.items():
+            record = records_by_identity[identity]
+            output_rows.append(
+                {
+                    "keyframe_id": record.keyframe_id,
+                    "video_id": record.video_id,
+                    "feature_file": record.feature_file,
+                    "feature_index": record.feature_index,
+                    "frame_id": row.get("frame_id") or row.get("frame_idx") or "",
+                    "shot_id": row.get("shot_id") or "",
+                    "timestamp": row.get("timestamp") or "",
+                    "image_path": row.get("image_path") or "",
+                }
+            )
+        mapping_path = staging / "feature_mapping.csv"
+        _write_mapping(mapping_path, output_rows)
+        manifest = EmbeddingManifest(
+            schema_version="1.0",
+            model_id=spec.model_id,
+            model_name=spec.model_name,
+            checkpoint_or_pretrained=spec.checkpoint_or_pretrained,
+            model_revision=spec.model_revision,
+            embedding_dimension=spec.embedding_dimension,
+            dtype=spec.dtype,
+            normalized=spec.normalized,
+            mapping_path="feature_mapping.csv",
+            mapping_sha256=sha256_file(mapping_path),
+            keyframe_count=len(rows),
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        payload = manifest.to_dict()
+        payload.update(
+            {
+                "source_repository": spec.source_repository,
+                "source_revision": spec.source_revision,
+                "checkpoint_sha256": spec.checkpoint_sha256,
+                "execution": {
+                    "adapter": "reuse.selector_artifacts",
+                    "image_preprocessing": spec.image_preprocessing,
+                    "source_artifacts": source_manifests,
+                    "vector_files_sha256": {
+                        name: digest
+                        for name, (_, digest) in sorted(vector_sources.items())
+                    },
+                },
+            }
+        )
+        (staging / "manifest.json").write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        staging.replace(target)
+    except Exception:
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
+    return target

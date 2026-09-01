@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -165,6 +166,57 @@ class R2Sync:
                 stats.errors += 1
         return stats
 
+    def pull_objects_parallel(
+        self,
+        objects: Iterable[tuple[str, Path]],
+        *,
+        force: bool = False,
+        workers: int = 16,
+    ) -> SyncStats:
+        """Download exact object keys concurrently without duplicating a cache.
+
+        This path is intended for immutable, already-canonical corpora such as
+        keyframes.  ``R2Client.download_file`` publishes each destination via
+        an atomic rename, so a non-empty destination is a safe resume token.
+        Avoiding ``BoundedCache`` here also avoids storing a second copy of a
+        multi-gigabyte keyframe corpus.
+        """
+        if workers < 1:
+            raise ValueError("workers must be at least 1")
+        transfers = [(str(key), Path(path)) for key, path in objects]
+        if len({key for key, _ in transfers}) != len(transfers):
+            raise ValueError("parallel pull contains duplicate object keys")
+        if len({path.resolve() for _, path in transfers}) != len(transfers):
+            raise ValueError("parallel pull contains duplicate local paths")
+
+        stats = SyncStats()
+
+        def _pull(key: str, local_path: Path) -> tuple[bool, int]:
+            if not force and local_path.is_file() and local_path.stat().st_size > 0:
+                return False, 0
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            self.client.download_file(key, local_path)
+            return True, local_path.stat().st_size
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            pending = {
+                executor.submit(_pull, key, local_path): (key, local_path)
+                for key, local_path in transfers
+            }
+            for future in as_completed(pending):
+                key, _ = pending[future]
+                try:
+                    downloaded, size = future.result()
+                    if downloaded:
+                        stats.downloaded += 1
+                        stats.bytes_transferred += size
+                    else:
+                        stats.skipped_up_to_date += 1
+                except Exception as exc:
+                    LOGGER.error("failed to pull %s: %s", key, exc)
+                    stats.errors += 1
+        return stats
+
     def pull_corpus(self, *, force: bool = False, max_keys: int | None = None) -> SyncStats:
         """Pull the canonical corpus tree (keyframes/metadata/features/indexes)."""
         return self.pull_prefix(self.corpus_prefix, force=force, max_keys=max_keys)
@@ -217,6 +269,74 @@ class R2Sync:
                 stats.bytes_transferred += path.stat().st_size
             else:
                 stats.errors += 1
+        return stats
+
+    def push_files_parallel(
+        self,
+        files: Iterable[tuple[Path, str]],
+        *,
+        workers: int = 8,
+        existing_prefix: str | None = None,
+    ) -> SyncStats:
+        """Upload exact local-path/object-key pairs concurrently.
+
+        When ``existing_prefix`` is supplied, one prefix listing is used to
+        skip objects whose remote and local sizes already match.  This keeps a
+        retry from repeating thousands of paid PUT operations.
+        """
+        if workers < 1:
+            raise ValueError("workers must be at least 1")
+        transfers = [(Path(path), str(key)) for path, key in files]
+        if len({key for _, key in transfers}) != len(transfers):
+            raise ValueError("parallel push contains duplicate object keys")
+
+        stats = SyncStats()
+        existing: dict[str, int] = {}
+        if existing_prefix:
+            existing = {
+                str(obj["Key"]): int(obj.get("Size", -1))
+                for obj in self.client.list_objects(existing_prefix)
+            }
+
+        content_types = {
+            ".csv": "text/csv",
+            ".gz": "application/gzip",
+            ".json": "application/json",
+            ".npy": "application/octet-stream",
+            ".parquet": "application/octet-stream",
+        }
+        pending_transfers: list[tuple[Path, str]] = []
+        for path, key in transfers:
+            if not path.is_file():
+                LOGGER.error("parallel push source is missing: %s", path)
+                stats.errors += 1
+                continue
+            if existing.get(key) == path.stat().st_size:
+                stats.skipped_up_to_date += 1
+                continue
+            pending_transfers.append((path, key))
+
+        def _push(path: Path, key: str) -> int:
+            self.client.upload_file(
+                path,
+                key,
+                content_type=content_types.get(path.suffix.lower()),
+            )
+            return path.stat().st_size
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            pending = {
+                executor.submit(_push, path, key): (path, key)
+                for path, key in pending_transfers
+            }
+            for future in as_completed(pending):
+                path, key = pending[future]
+                try:
+                    stats.bytes_transferred += future.result()
+                    stats.uploaded += 1
+                except Exception as exc:
+                    LOGGER.error("failed to push %s -> %s: %s", path, key, exc)
+                    stats.errors += 1
         return stats
 
     def push_ingestion_run(

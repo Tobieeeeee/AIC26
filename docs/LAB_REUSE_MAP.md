@@ -454,6 +454,22 @@ the earlier L24 canonical identity only after a 3,579-object backup and verified
 declared stale and requires rebuild. Synthetic activation regressions and the
 live R2 activation verified this compatibility boundary.
 
+### R2 enrichment-only scheduling and transport boundary
+
+No model, checkpoint, threshold, preprocessing, normalization, embedding
+dimension, RF-DETR detection behavior, or Task05A projection changes here.
+The optimized runner reuses the existing RF-DETR Large adapter, BEiT-3 and
+PE-Core-L image encoders, provider-neutral artifact writer, selector-produced
+MetaCLIP-2 artifacts, and flat object-staging schema. Scheduling changes from
+constructing BEiT-3/PE once per video to retaining one provider runtime across
+all selected collections. Canonical keyframes are prefetched once and shared
+by all providers. Object staging rows are consolidated once per collection;
+the unchanged Task05A JSON envelopes are packaged into a transport archive to
+avoid one R2 PUT per keyframe. Run-scoped success/ready markers do not promote
+or mutate canonical data. Synthetic exact-key download/upload-resume,
+collection planning, provider merge, and identity/audit tests verify this
+operational boundary; a real Batch1 GPU run remains pending.
+
 ## Milvus production semantic runtime fix
 
 This approved runtime fix migrates no new lab implementation. It reuses the

@@ -8,6 +8,7 @@ import hashlib
 import logging
 import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -93,26 +94,30 @@ class R2Client:
             raise R2ConfigError("max_pool_connections must be at least 1")
         self.max_pool_connections = max_pool_connections
         self._client: Any = None
+        self._client_lock = threading.Lock()
 
     def _get_client(self) -> Any:
         if self._client is None:
-            try:
-                import boto3
-            except ImportError as exc:
-                raise R2ConfigError(
-                    "boto3 is required for R2 operations; install with: "
-                    'pip install boto3'
-                ) from exc
-            from botocore.config import Config
+            with self._client_lock:
+                if self._client is not None:
+                    return self._client
+                try:
+                    import boto3
+                except ImportError as exc:
+                    raise R2ConfigError(
+                        "boto3 is required for R2 operations; install with: "
+                        'pip install boto3'
+                    ) from exc
+                from botocore.config import Config
 
-            self._client = boto3.client(
-                "s3",
-                endpoint_url=self._endpoint_url,
-                aws_access_key_id=self._access_key_id,
-                aws_secret_access_key=self._secret_access_key,
-                region_name="auto",
-                config=Config(max_pool_connections=self.max_pool_connections),
-            )
+                self._client = boto3.client(
+                    "s3",
+                    endpoint_url=self._endpoint_url,
+                    aws_access_key_id=self._access_key_id,
+                    aws_secret_access_key=self._secret_access_key,
+                    region_name="auto",
+                    config=Config(max_pool_connections=self.max_pool_connections),
+                )
         return self._client
 
     def _retry(self, operation: str, fn, *args, **kwargs) -> Any:

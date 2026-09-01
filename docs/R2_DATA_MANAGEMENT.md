@@ -270,6 +270,77 @@ The real Batch1 activation `batch1-hybrid-20260901` completed with 872 videos,
 identity, removed 251 stale L24 images after backup, and marked downstream data
 `REBUILD_REQUIRED`.
 
+## Optimized enrichment-only run from canonical keyframes
+
+After ingestion activation, do **not** use the old full mode of
+`run_pipeline_local.py`: that mode downloads raw videos and runs ingestion
+again. Use the dedicated enrichment runner. It downloads the canonical JPEGs
+once, shares that local tree across every feature, and publishes only to a
+run-scoped staging prefix.
+
+One-video canary on Linux/RTX 5060 Ti:
+
+```bash
+./scripts/operations/run_enrichment_rtx5060ti.sh \
+  L21 enrich-batch1-5060ti-canary /home/ezycloudx-admin/aic26_enrichment \
+  --videos L21_V001
+```
+
+Full Batch1 after the canary succeeds:
+
+```bash
+./scripts/operations/run_enrichment_rtx5060ti.sh \
+  L21,L22,L23,L24,L25,L26,L27,L28,L29,L30 \
+  enrich-batch1-5060ti-v1 \
+  /home/ezycloudx-admin/aic26_enrichment
+```
+
+The equivalent direct command is:
+
+```bash
+.venv/bin/python scripts/operations/run_enrichment_r2.py \
+  --collections L21,L22,L23,L24,L25,L26,L27,L28,L29,L30 \
+  --batch-id 1 \
+  --run-id enrich-batch1-5060ti-v1 \
+  --work-root /home/ezycloudx-admin/aic26_enrichment \
+  --device cuda \
+  --download-workers 24 \
+  --upload-workers 12 \
+  --embedding-batch-size 8
+```
+
+Use the same `--run-id` and `--work-root` to resume. Exact R2 downloads are
+atomic and existing local files are skipped. Upload retries list the collection
+prefix once and skip remote objects with the same size, avoiding duplicate
+PUTs. Model execution is provider-major: RF-DETR, BEiT-3, and PE-Core-L are
+each loaded once and reused across all selected collections; only one GPU model
+is resident at a time. MetaCLIP-2 is not loaded because the runner validates
+and merges the selected-vector artifacts already produced during ingestion.
+
+The result layout is:
+
+```text
+data/staging/enrichment/<run-id>/
+  batch=1/collection=<Lxx>/
+    embeddings/{beit3,metaclip2,perception_encoder}/
+    metadata/objects/part-000.parquet
+    task05a/objects.tar.gz
+    collection_report.json
+    _SUCCESS.json
+  enrichment_report.json
+  _READY.json
+```
+
+`objects.tar.gz` replaces one PUT per keyframe object envelope; the flat object
+rows are consolidated once per collection into Parquet. `_SUCCESS.json` is
+written last for each collection and `_READY.json` last for the run. These
+markers mean the VM output is safely present on R2. They do **not** mean the
+artifacts are canonical: this runner never overwrites `data/corpus`, and a
+separate validation/promotion step is still required. Extraction-status
+Parquet is also deliberately not fabricated here because its current shared
+schema lacks `video_id`; that identity gap must be resolved before status or
+Milvus ingest can be safely promoted.
+
 ## Caching
 
 R2 downloads are cached locally under `.cache/mvr/` (configurable via

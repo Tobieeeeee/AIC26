@@ -104,6 +104,13 @@ the regenerable local `selector_cache/`, and writes the R2 `_SUCCESS.json`
 marker before recording the video as complete locally. See
 `docs/R2_DATA_MANAGEMENT.md` for the resumable command.
 
+For an already-activated ingestion corpus, use
+`scripts/operations/run_enrichment_r2.py` (or the RTX 5060 Ti wrapper
+`scripts/operations/run_enrichment_rtx5060ti.sh`). It stages RF-DETR objects
+and the three canonical embedding-provider artifacts without downloading raw
+videos or rerunning ingestion. Canonical promotion remains a separate guarded
+operation.
+
 ## Verified semantic retrieval commands
 
 The Phase 03 smoke run reused the five real keyframes produced above and ran OpenCLIP and FAISS on CPU:

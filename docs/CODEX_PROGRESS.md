@@ -1881,3 +1881,40 @@ Verification:
 - Python compilation and `git diff --check`: passed.
 - Live R2 activation returned `status=ACTIVATED`, final keyframes 133,265, and
   downstream status `REBUILD_REQUIRED`.
+
+---
+
+# 2026-09-01 - Optimized R2 enrichment-only runner
+
+Status: IMPLEMENTED; SYNTHETIC CONTRACT TESTED; REAL GPU RUN PENDING
+
+Branch: `perf/r2-enrichment-runner`
+
+- Added a dedicated enrichment-only path over the activated canonical mapping
+  and JPEGs. It does not download raw MP4s or rerun TransNetV2/keyframe
+  selection.
+- Added exact-key parallel R2 downloads without a second cache copy and
+  concurrent uploads with prefix-size resume, backed by a thread-safe lazy
+  boto3 client initialization.
+- Changed scheduling from per-video model construction to provider-major
+  execution: one RF-DETR, one BEiT-3 encoder, and one PE-Core-L encoder are
+  reused across every selected collection, with only one GPU model resident at
+  a time. MetaCLIP-2 is merged from validated per-video selector artifacts and
+  is not inferred again.
+- Corrected the object consolidation boundary to consume
+  `objects_staging/` once per collection. Task05A per-keyframe envelopes are
+  uploaded as one low-compression `objects.tar.gz` per collection instead of
+  one PUT per JSON.
+- Added collection `_SUCCESS.json` and run `_READY.json` markers under
+  `data/staging/enrichment/<run-id>/`. Canonical promotion is intentionally
+  separate; extraction-status Parquet remains blocked by the documented
+  missing-`video_id` schema gap.
+- Added the RTX 5060 Ti one-command wrapper and updated the R2/GPU runbooks.
+
+Verification:
+
+- Focused R2/operations/provider/object/script regression: 194 passed.
+- Full repository regression: 1,471 passed, 15 skipped.
+- Python compilation, shell syntax, CLI `--help`, and `git diff --check`: passed.
+- No real Batch1 model run or R2 staging mutation was performed by this code
+  change.

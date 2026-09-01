@@ -77,6 +77,27 @@ class TestR2SyncPrefix:
         assert path is not None
         assert path == (tmp_path / "data/corpus/dataset_manifest.json")
 
+    def test_parallel_exact_pull_is_resumable_without_cache_copy(self, tmp_path):
+        client = MagicMock()
+        client.download_file = MagicMock(side_effect=_writing_download(b"jpeg"))
+        sync = R2Sync(client=client, local_root=tmp_path)
+        existing = tmp_path / "keyframes/existing.jpg"
+        existing.parent.mkdir(parents=True)
+        existing.write_bytes(b"already")
+
+        stats = sync.pull_objects_parallel(
+            [
+                ("data/corpus/keyframes/new.jpg", tmp_path / "keyframes/new.jpg"),
+                ("data/corpus/keyframes/existing.jpg", existing),
+            ],
+            workers=2,
+        )
+
+        assert stats.downloaded == 1
+        assert stats.skipped_up_to_date == 1
+        assert (tmp_path / "keyframes/new.jpg").read_bytes() == b"jpeg"
+        assert client.download_file.call_count == 1
+
 
 class TestR2SyncPush:
     def test_push_staging(self, tmp_path):
@@ -103,6 +124,32 @@ class TestR2SyncPush:
         stats = sync.push_staging("ocr", "run-001", [tmp_path / "missing.json"])
         assert stats.uploaded == 0
         assert stats.errors == 0
+
+    def test_parallel_push_skips_remote_objects_with_same_size(self, tmp_path):
+        client = MagicMock()
+        client.list_objects.return_value = [
+            _make_obj("data/staging/enrichment/run/a.json", 3)
+        ]
+        client.upload_file.return_value = {"key": "k", "size": 4, "sha256": "x"}
+        sync = R2Sync(client=client, local_root=tmp_path)
+        first = tmp_path / "a.json"
+        second = tmp_path / "b.json"
+        first.write_text("aaa")
+        second.write_text("bbbb")
+
+        stats = sync.push_files_parallel(
+            [
+                (first, "data/staging/enrichment/run/a.json"),
+                (second, "data/staging/enrichment/run/b.json"),
+            ],
+            workers=2,
+            existing_prefix="data/staging/enrichment/run/",
+        )
+
+        assert stats.uploaded == 1
+        assert stats.skipped_up_to_date == 1
+        assert stats.bytes_transferred == 4
+        assert client.upload_file.call_args.args[1].endswith("/b.json")
 
     def test_push_ingestion_run_preserves_tree_and_writes_success_last(self, tmp_path):
         client = MagicMock()

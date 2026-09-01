@@ -98,6 +98,28 @@ python -m mvr.cli milvus status
 
 ## 7. Run extraction (GPU)
 
+### Activated R2 Batch1 on RTX 5060 Ti
+
+When canonical ingestion already exists on R2, use the enrichment-only wrapper
+instead of pulling the complete corpus or rerunning raw-video ingestion:
+
+```bash
+./scripts/operations/run_enrichment_rtx5060ti.sh \
+  L21 enrich-batch1-5060ti-canary /home/ezycloudx-admin/aic26_enrichment \
+  --videos L21_V001
+
+./scripts/operations/run_enrichment_rtx5060ti.sh \
+  L21,L22,L23,L24,L25,L26,L27,L28,L29,L30 \
+  enrich-batch1-5060ti-v1 \
+  /home/ezycloudx-admin/aic26_enrichment
+```
+
+The wrapper requires `.env` to point at the pinned RF-DETR, BEiT-3, and
+PE-Core-L checkpoints. Reuse the same run ID/work root after a disconnect.
+Results are complete on R2 only when
+`data/staging/enrichment/<run-id>/_READY.json` exists. See
+`R2_DATA_MANAGEMENT.md` for the artifact layout and promotion boundary.
+
 ### Feature extraction (embeddings + objects)
 
 ```bash
