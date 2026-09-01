@@ -1841,3 +1841,43 @@ Verification:
   6 data checksum entries; no remote size mismatches.
 - Ruff was unavailable in the current venv and was not installed solely for
   this task.
+
+---
+
+# 2026-09-01 - Batch1 R2 ingestion candidate activated; old L24 superseded
+
+Status: COMPLETE; CANONICAL INGESTION ACTIVE, DOWNSTREAM REBUILD REQUIRED
+
+Branch: `feat/r2-ingestion-promote`
+
+- Added `mvr.operations.ingestion_activation` and a standalone guarded
+  activation command. It verifies local SHA-256/size contracts and remote
+  `_READY` identity/count/bytes, requires explicit stale-collection
+  acknowledgement, snapshots the old canonical state, performs resumable
+  server-side keyframe copies, verifies the complete destination set, writes
+  canonical manifests with the dataset manifest last, and removes only exact
+  stale image keys after backup.
+- Added configurable boto connection-pool sizing to `R2Client`; the activation
+  CLI binds pool size to `--workers`. The interrupted 10-worker copy resumed at
+  20 workers and skipped 7,333 already-identical destinations by size/ETag.
+- Activated `batch1-hybrid-20260901` across L21-L30: 872 videos, 97,712 shots,
+  and 133,265/133,265 final canonical keyframes. The operation copied 125,932
+  remaining images, skipped 7,333 identical images, and removed 251 superseded
+  L24 images.
+- Backed up 3,579 old canonical objects under
+  `data/staging/ingestion-promotion-backups/batch1-hybrid-20260901/` before the
+  first canonical mutation. Old L24 embedding/object/ASR artifacts remain on
+  R2 but the new dataset manifest marks them `STALE_RETAINED_ON_R2` and the
+  collection `REBUILD_REQUIRED`.
+- Published the activation report and `_ACTIVATED.json` under
+  `data/corpus/reports/ingestion/batch1-hybrid-20260901/`.
+
+Verification:
+
+- Activation unit regressions cover fail-before-write acknowledgement,
+  backup-before-replacement, exact stale cleanup, and stale-downstream manifest
+  state.
+- R2 client, ingestion promotion, sync, and operation-default suite: 49 passed.
+- Python compilation and `git diff --check`: passed.
+- Live R2 activation returned `status=ACTIVATED`, final keyframes 133,265, and
+  downstream status `REBUILD_REQUIRED`.

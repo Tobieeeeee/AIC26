@@ -441,6 +441,19 @@ last. Activation remains separate and fail-closed when the candidate would
 invalidate an already enriched canonical collection. Synthetic unit coverage
 and the real 872-video Batch1 preparation verified the operational contract.
 
+### R2 ingestion activation boundary
+
+No detector, selector, model, threshold, or keyframe identity rule is changed.
+`mvr.operations.ingestion_activation` completes the operational single-writer
+boundary around the reused ingestion output: immutable candidate verification,
+explicit stale-downstream acknowledgement, recoverable canonical backup,
+resumable server-side copies, exact destination verification, manifest-last
+activation, and exact stale-image cleanup. The real Batch1 activation replaced
+the earlier L24 canonical identity only after a 3,579-object backup and verified
+133,265 final keyframes. Existing L24 enrichment is retained physically but is
+declared stale and requires rebuild. Synthetic activation regressions and the
+live R2 activation verified this compatibility boundary.
+
 ## Milvus production semantic runtime fix
 
 This approved runtime fix migrates no new lab implementation. It reuses the

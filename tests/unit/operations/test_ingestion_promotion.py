@@ -15,12 +15,15 @@ from mvr.operations.ingestion_promotion import (
     prepare_promotion_bundle,
     upload_prepared_bundle,
 )
+from mvr.operations.ingestion_activation import activate_promotion
 
 
 class FakeR2Client:
     def __init__(self, objects: dict[str, bytes]) -> None:
         self.objects = dict(objects)
         self.upload_order: list[str] = []
+        self.copy_order: list[tuple[str, str]] = []
+        self.delete_order: list[str] = []
 
     def list_objects(self, prefix: str, **_: object) -> list[dict[str, object]]:
         return [
@@ -31,6 +34,13 @@ class FakeR2Client:
 
     def object_exists(self, key: str) -> bool:
         return key in self.objects
+
+    def head_object(self, key: str) -> dict[str, object]:
+        value = self.objects[key]
+        return {
+            "ContentLength": len(value),
+            "ETag": f'"etag-{len(value)}"',
+        }
 
     def download_file(self, key: str, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,6 +55,14 @@ class FakeR2Client:
         self.objects[key] = value
         self.upload_order.append(key)
         return {"key": key, "size": len(value), "sha256": "test"}
+
+    def copy_object(self, src_key: str, dst_key: str) -> None:
+        self.objects[dst_key] = self.objects[src_key]
+        self.copy_order.append((src_key, dst_key))
+
+    def delete_object(self, key: str) -> None:
+        del self.objects[key]
+        self.delete_order.append(key)
 
 
 def _csv_bytes(columns: list[str], rows: list[dict[str, object]]) -> bytes:
@@ -328,3 +346,117 @@ def test_upload_writes_ready_marker_last(tmp_path: Path) -> None:
         "data/staging/ingestion-consolidated/upload-test/"
     )
     assert client.upload_order[-1].endswith("/_READY.json")
+
+
+def _candidate_with_stale_l21(
+    tmp_path: Path,
+) -> tuple[FakeR2Client, object]:
+    client = _complete_client()
+    client.objects["data/corpus/ingest/ingest_manifest.json"] = b"old-ingest"
+    client.objects["data/corpus/ingest/keyframe_mapping.csv"] = _csv_bytes(
+        ["keyframe_id", "video_id", "frame_idx", "timestamp"],
+        [
+            {
+                "keyframe_id": "L21_V001_S0001_K01",
+                "video_id": "L21_V001",
+                "frame_idx": 9,
+                "timestamp": 0.36,
+            }
+        ],
+    )
+    client.objects["data/corpus/dataset_manifest.json"] = json.dumps(
+        {
+            "schema_version": "1.0",
+            "collections": {
+                "L21": {
+                    "coverage": {"objects": 1, "asr": 1},
+                    "embeddings": {"metaclip2": {"count": 1}},
+                }
+            },
+        }
+    ).encode()
+    client.objects[
+        "data/corpus/keyframes/L21/L21_V001/L21_V001_S0001_K01.jpg"
+    ] = b"old-jpeg"
+    client.objects[
+        "data/corpus/keyframes/L21/L21_V001/L21_V001_S9999_K01.jpg"
+    ] = b"stale-jpeg"
+    bundle = prepare_promotion_bundle(
+        client,
+        batch_id="1",
+        sources=[
+            SourceAssignment("local", ("L21",)),
+            SourceAssignment("vm", ("L22",)),
+        ],
+        promotion_id="activation-test",
+        work_root=tmp_path / "prepare",
+        workers=2,
+    )
+    upload_prepared_bundle(client, bundle)
+    return client, bundle
+
+
+def test_activation_requires_stale_acknowledgement_before_remote_writes(
+    tmp_path: Path,
+) -> None:
+    client, bundle = _candidate_with_stale_l21(tmp_path)
+    copies_before = list(client.copy_order)
+    uploads_before = list(client.upload_order)
+
+    with pytest.raises(IngestionPromotionError, match="acknowledgement for: L21"):
+        activate_promotion(
+            client,
+            bundle_root=bundle.root,
+            promotion_id="activation-test",
+            work_root=tmp_path / "activate",
+            workers=2,
+        )
+
+    assert client.copy_order == copies_before
+    assert client.upload_order == uploads_before
+
+
+def test_activation_backs_up_replaces_and_marks_stale_downstream(
+    tmp_path: Path,
+) -> None:
+    client, bundle = _candidate_with_stale_l21(tmp_path)
+
+    result = activate_promotion(
+        client,
+        bundle_root=bundle.root,
+        promotion_id="activation-test",
+        acknowledged_stale_collections=["L21"],
+        work_root=tmp_path / "activate",
+        workers=2,
+    )
+
+    assert result["status"] == "ACTIVATED"
+    assert result["keyframes"] == {
+        "expected": 2,
+        "copied": 2,
+        "skipped_identical": 0,
+        "removed_stale": 1,
+        "final": 2,
+    }
+    backup_prefix = (
+        "data/staging/ingestion-promotion-backups/activation-test/snapshot/"
+    )
+    assert backup_prefix + "data/corpus/ingest/ingest_manifest.json" in client.objects
+    assert (
+        backup_prefix
+        + "data/corpus/keyframes/L21/L21_V001/L21_V001_S9999_K01.jpg"
+        in client.objects
+    )
+    assert (
+        "data/corpus/keyframes/L21/L21_V001/L21_V001_S9999_K01.jpg"
+        not in client.objects
+    )
+    dataset = json.loads(client.objects["data/corpus/dataset_manifest.json"])
+    assert dataset["active_ingestion_promotion"] == "activation-test"
+    assert dataset["collections"]["L21"]["downstream_status"] == (
+        "REBUILD_REQUIRED"
+    )
+    assert dataset["collections"]["L21"]["superseded_downstream_artifacts"][
+        "status"
+    ] == "STALE_RETAINED_ON_R2"
+    assert client.upload_order[-1].endswith("/_ACTIVATED.json")
