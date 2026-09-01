@@ -201,6 +201,75 @@ These objects intentionally remain in `data/staging`. Validation and promotion
 into the single corpus-level `data/corpus/ingest/keyframe_mapping.csv` are a
 separate operation; per-video workers must not overwrite that shared mapping.
 
+### Consolidate multiple ingestion runs
+
+Prepare one fail-closed candidate after every assigned collection has finished:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\operations\prepare_r2_ingestion_promotion.py `
+  --batch-id 1 `
+  --source "ingest-batch1-001:L21,L22,L23,L24,L25" `
+  --source "ingest-batch1-vm1:L26,L27,L28,L29,L30" `
+  --promotion-id "batch1-hybrid-20260901" `
+  --work-root "artifacts\verification\r2-ingestion-promote\preparations" `
+  --upload
+```
+
+The command treats raw MP4 objects as authoritative membership and requires
+one valid `_SUCCESS.json` plus the complete metadata/mapping tree for every
+video. It validates marker counts, per-video manifests, mapping/image
+identity, selector-profile consistency, global keyframe uniqueness, and
+Parquet/CSV consolidation. JPEGs are not downloaded; a server-side copy
+manifest is generated instead.
+
+`--upload` writes only to:
+
+```text
+data/staging/ingestion-consolidated/<promotion-id>/
+```
+
+The `_READY.json` marker is uploaded last. This command deliberately does not
+mutate `data/corpus`. Its report compares the candidate with the active
+canonical mapping and blocks activation when existing embeddings, objects,
+ASR, or indexes would become stale. Resolve that lifecycle decision before
+copying keyframes or replacing the shared corpus mapping.
+
+### Activate a validated ingestion candidate
+
+Activation is an explicit, resumable single-writer operation. If preparation
+reports stale downstream data, acknowledge each affected collection by name:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\operations\activate_r2_ingestion_promotion.py `
+  --promotion-id "batch1-hybrid-20260901" `
+  --bundle-root "artifacts\verification\r2-ingestion-promote\preparations\batch1-hybrid-20260901\bundle" `
+  --acknowledge-stale L24 `
+  --work-root "artifacts\verification\r2-ingestion-activate\activation" `
+  --workers 20
+```
+
+The command revalidates local checksums and the remote `_READY.json`, then
+copies the current canonical ingest metadata, dataset manifest, and affected
+keyframes to:
+
+```text
+data/staging/ingestion-promotion-backups/<promotion-id>/
+```
+
+`_BACKUP_READY.json` is required before any promoted keyframe is copied. The
+operation skips destination objects whose size and ETag already match, so the
+same command safely resumes after interruption. It verifies every expected
+keyframe before uploading canonical metadata, writes
+`data/corpus/dataset_manifest.json` as the final active pointer, and only then
+removes exact stale image keys that are present in the backup. Superseded
+embedding/object/ASR artifacts remain physically on R2 but are marked stale
+and must be rebuilt for the new keyframe identity.
+
+The real Batch1 activation `batch1-hybrid-20260901` completed with 872 videos,
+97,712 shots, and 133,265 canonical keyframes. It replaced the older L24
+identity, removed 251 stale L24 images after backup, and marked downstream data
+`REBUILD_REQUIRED`.
+
 ## Caching
 
 R2 downloads are cached locally under `.cache/mvr/` (configurable via

@@ -80,6 +80,7 @@ class R2Client:
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_delay: float = DEFAULT_RETRY_DELAY,
         retry_backoff: float = DEFAULT_RETRY_BACKOFF,
+        max_pool_connections: int = 10,
     ) -> None:
         self.bucket = bucket or _require_env(R2_BUCKET)
         self._endpoint_url = endpoint_url or _require_env(R2_ENDPOINT)
@@ -88,6 +89,9 @@ class R2Client:
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.retry_backoff = retry_backoff
+        if max_pool_connections < 1:
+            raise R2ConfigError("max_pool_connections must be at least 1")
+        self.max_pool_connections = max_pool_connections
         self._client: Any = None
 
     def _get_client(self) -> Any:
@@ -99,12 +103,15 @@ class R2Client:
                     "boto3 is required for R2 operations; install with: "
                     'pip install boto3'
                 ) from exc
+            from botocore.config import Config
+
             self._client = boto3.client(
                 "s3",
                 endpoint_url=self._endpoint_url,
                 aws_access_key_id=self._access_key_id,
                 aws_secret_access_key=self._secret_access_key,
                 region_name="auto",
+                config=Config(max_pool_connections=self.max_pool_connections),
             )
         return self._client
 

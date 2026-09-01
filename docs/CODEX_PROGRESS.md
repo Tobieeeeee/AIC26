@@ -1803,3 +1803,81 @@ Verification:
   Elasticsearch integration suite: 249 passed, 15 skipped.
 - Full-corpus rebuild remains an explicit operator action with alias/rollback
   planning; it was not started.
+
+---
+
+# 2026-09-01 - Batch1 R2 ingestion consolidated as a guarded candidate
+
+Status: PREPARED AND UPLOADED TO STAGING; CANONICAL ACTIVATION BLOCKED
+
+Branch: `feat/r2-ingestion-promote`
+
+- Audited raw Batch1 against two authoritative ingestion runs: local
+  `ingest-batch1-001` for L21-L25 and VM `ingest-batch1-vm1` for L26-L30.
+  Found and reran the only missing video, `L25_V007`, after moving its
+  incomplete selector cache to a recoverable local backup. Final source
+  coverage is 872/872 videos with valid R2 success markers.
+- Added `mvr.operations.ingestion_promotion` and the standalone preparation
+  command. The workflow validates raw membership, marker identity/count/bytes,
+  required metadata, ingest/selector counts, selector-profile consistency,
+  mapping-to-JPEG identity, and global keyframe uniqueness. It downloads only
+  metadata and creates a server-side JPEG copy manifest.
+- Consolidated the real Batch1 candidate: 872 videos, 97,712 shots, and
+  133,265 unique keyframes. The combined CSV, two Parquets, batch/ingest
+  manifests, copy manifest, and report were uploaded as eight objects under
+  `data/staging/ingestion-consolidated/batch1-hybrid-20260901/`; `_READY.json`
+  was verified last and remote artifact sizes match the report.
+- Canonical activation was intentionally not run. The active corpus contains
+  an older enriched L24 mapping with 3,573 keyframes. The new candidate shares
+  3,322 IDs with it, changes frame/timestamp identity for 1,169 of those IDs,
+  adds 129,943 new IDs, and drops 251 old IDs. Activating now would make the
+  existing L24 three-provider embeddings/object/ASR/index artifacts stale.
+
+Verification:
+
+- New focused unit suite: 6 passed.
+- Python compilation: passed.
+- Real R2 candidate: 8 objects / 57,393,514 bytes; `_READY.status=READY`;
+  6 data checksum entries; no remote size mismatches.
+- Ruff was unavailable in the current venv and was not installed solely for
+  this task.
+
+---
+
+# 2026-09-01 - Batch1 R2 ingestion candidate activated; old L24 superseded
+
+Status: COMPLETE; CANONICAL INGESTION ACTIVE, DOWNSTREAM REBUILD REQUIRED
+
+Branch: `feat/r2-ingestion-promote`
+
+- Added `mvr.operations.ingestion_activation` and a standalone guarded
+  activation command. It verifies local SHA-256/size contracts and remote
+  `_READY` identity/count/bytes, requires explicit stale-collection
+  acknowledgement, snapshots the old canonical state, performs resumable
+  server-side keyframe copies, verifies the complete destination set, writes
+  canonical manifests with the dataset manifest last, and removes only exact
+  stale image keys after backup.
+- Added configurable boto connection-pool sizing to `R2Client`; the activation
+  CLI binds pool size to `--workers`. The interrupted 10-worker copy resumed at
+  20 workers and skipped 7,333 already-identical destinations by size/ETag.
+- Activated `batch1-hybrid-20260901` across L21-L30: 872 videos, 97,712 shots,
+  and 133,265/133,265 final canonical keyframes. The operation copied 125,932
+  remaining images, skipped 7,333 identical images, and removed 251 superseded
+  L24 images.
+- Backed up 3,579 old canonical objects under
+  `data/staging/ingestion-promotion-backups/batch1-hybrid-20260901/` before the
+  first canonical mutation. Old L24 embedding/object/ASR artifacts remain on
+  R2 but the new dataset manifest marks them `STALE_RETAINED_ON_R2` and the
+  collection `REBUILD_REQUIRED`.
+- Published the activation report and `_ACTIVATED.json` under
+  `data/corpus/reports/ingestion/batch1-hybrid-20260901/`.
+
+Verification:
+
+- Activation unit regressions cover fail-before-write acknowledgement,
+  backup-before-replacement, exact stale cleanup, and stale-downstream manifest
+  state.
+- R2 client, ingestion promotion, sync, and operation-default suite: 49 passed.
+- Python compilation and `git diff --check`: passed.
+- Live R2 activation returned `status=ACTIVATED`, final keyframes 133,265, and
+  downstream status `REBUILD_REQUIRED`.
