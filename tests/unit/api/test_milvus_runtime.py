@@ -35,14 +35,14 @@ def _ready_service() -> tuple[MilvusSemanticService, MagicMock, _DeterministicEn
     client = MagicMock(spec=MilvusClient)
     client.health.return_value = {"status": "ok"}
     client.collection_info.return_value = {
-        "fields": ["keyframe_id", *VECTOR_FIELDS],
+        "fields": ["entity_id", "keyframe_id", *VECTOR_FIELDS],
         "dimensions": {
             "beit3_vector": 768,
             "metaclip2_vector": 512,
             "pe_vector": 1024,
         },
         "num_entities": 2,
-        "indexes": [{"field": field, "type": "FLAT"} for field in VECTOR_FIELDS],
+        "indexes": [{"field": field, "type": "HNSW"} for field in VECTOR_FIELDS],
         "loaded": True,
     }
     backend = MagicMock(spec=MilvusProviderBackend)
@@ -83,7 +83,7 @@ def test_default_backend_is_milvus(monkeypatch) -> None:
         return_value=sentinel,
     ) as factory:
         assert _default_semantic_service() is sentinel
-    factory.assert_called_once_with(index_type="FLAT")
+    factory.assert_called_once_with(index_type="HNSW")
 
 
 def test_faiss_reference_requires_explicit_selection(monkeypatch, tmp_path) -> None:

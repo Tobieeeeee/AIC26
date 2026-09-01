@@ -16,6 +16,7 @@ from .milvus_schema import (
     FIELD_BATCH_ID,
     FIELD_BEIT3_VECTOR,
     FIELD_COLLECTION_ID,
+    FIELD_ENTITY_ID,
     FIELD_FRAME_ID,
     FIELD_KEYFRAME_ID,
     FIELD_METACLIP2_VECTOR,
@@ -29,6 +30,7 @@ from .milvus_schema import (
     SUPPORTED_INDEX_TYPES,
     VECTOR_FIELDS,
     build_collection_schema,
+    make_entity_id,
     vector_field_for_provider,
 )
 from .provider_indexes import ProviderIndexContract
@@ -52,7 +54,7 @@ class MilvusProviderBackend:
         self,
         client: MilvusClient | None = None,
         *,
-        index_type: str = "FLAT",
+        index_type: str = "HNSW",
         batch_size: int = DEFAULT_BATCH_SIZE,
         collection_name: str | None = None,
     ) -> None:
@@ -114,9 +116,12 @@ class MilvusProviderBackend:
         vector_field = vector_field_for_provider(contract.model_id)
 
         for i, (vec, meta) in enumerate(zip(vectors, metadata)):
+            video_id = meta.get(FIELD_VIDEO_ID, "")
+            keyframe_id = meta[FIELD_KEYFRAME_ID]
             entity: dict[str, Any] = {
-                FIELD_KEYFRAME_ID: meta[FIELD_KEYFRAME_ID],
-                FIELD_VIDEO_ID: meta.get(FIELD_VIDEO_ID, ""),
+                FIELD_ENTITY_ID: make_entity_id(video_id, keyframe_id),
+                FIELD_KEYFRAME_ID: keyframe_id,
+                FIELD_VIDEO_ID: video_id,
                 FIELD_FRAME_ID: int(meta.get(FIELD_FRAME_ID, 0)),
                 FIELD_SHOT_ID: int(meta.get(FIELD_SHOT_ID, -1)),
                 FIELD_TIMESTAMP: float(meta.get(FIELD_TIMESTAMP, 0.0)),
