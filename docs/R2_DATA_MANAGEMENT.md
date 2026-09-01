@@ -201,6 +201,39 @@ These objects intentionally remain in `data/staging`. Validation and promotion
 into the single corpus-level `data/corpus/ingest/keyframe_mapping.csv` are a
 separate operation; per-video workers must not overwrite that shared mapping.
 
+### Consolidate multiple ingestion runs
+
+Prepare one fail-closed candidate after every assigned collection has finished:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\operations\prepare_r2_ingestion_promotion.py `
+  --batch-id 1 `
+  --source "ingest-batch1-001:L21,L22,L23,L24,L25" `
+  --source "ingest-batch1-vm1:L26,L27,L28,L29,L30" `
+  --promotion-id "batch1-hybrid-20260901" `
+  --work-root "artifacts\verification\r2-ingestion-promote\preparations" `
+  --upload
+```
+
+The command treats raw MP4 objects as authoritative membership and requires
+one valid `_SUCCESS.json` plus the complete metadata/mapping tree for every
+video. It validates marker counts, per-video manifests, mapping/image
+identity, selector-profile consistency, global keyframe uniqueness, and
+Parquet/CSV consolidation. JPEGs are not downloaded; a server-side copy
+manifest is generated instead.
+
+`--upload` writes only to:
+
+```text
+data/staging/ingestion-consolidated/<promotion-id>/
+```
+
+The `_READY.json` marker is uploaded last. This command deliberately does not
+mutate `data/corpus`. Its report compares the candidate with the active
+canonical mapping and blocks activation when existing embeddings, objects,
+ASR, or indexes would become stale. Resolve that lifecycle decision before
+copying keyframes or replacing the shared corpus mapping.
+
 ## Caching
 
 R2 downloads are cached locally under `.cache/mvr/` (configurable via

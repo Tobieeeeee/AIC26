@@ -1803,3 +1803,41 @@ Verification:
   Elasticsearch integration suite: 249 passed, 15 skipped.
 - Full-corpus rebuild remains an explicit operator action with alias/rollback
   planning; it was not started.
+
+---
+
+# 2026-09-01 - Batch1 R2 ingestion consolidated as a guarded candidate
+
+Status: PREPARED AND UPLOADED TO STAGING; CANONICAL ACTIVATION BLOCKED
+
+Branch: `feat/r2-ingestion-promote`
+
+- Audited raw Batch1 against two authoritative ingestion runs: local
+  `ingest-batch1-001` for L21-L25 and VM `ingest-batch1-vm1` for L26-L30.
+  Found and reran the only missing video, `L25_V007`, after moving its
+  incomplete selector cache to a recoverable local backup. Final source
+  coverage is 872/872 videos with valid R2 success markers.
+- Added `mvr.operations.ingestion_promotion` and the standalone preparation
+  command. The workflow validates raw membership, marker identity/count/bytes,
+  required metadata, ingest/selector counts, selector-profile consistency,
+  mapping-to-JPEG identity, and global keyframe uniqueness. It downloads only
+  metadata and creates a server-side JPEG copy manifest.
+- Consolidated the real Batch1 candidate: 872 videos, 97,712 shots, and
+  133,265 unique keyframes. The combined CSV, two Parquets, batch/ingest
+  manifests, copy manifest, and report were uploaded as eight objects under
+  `data/staging/ingestion-consolidated/batch1-hybrid-20260901/`; `_READY.json`
+  was verified last and remote artifact sizes match the report.
+- Canonical activation was intentionally not run. The active corpus contains
+  an older enriched L24 mapping with 3,573 keyframes. The new candidate shares
+  3,322 IDs with it, changes frame/timestamp identity for 1,169 of those IDs,
+  adds 129,943 new IDs, and drops 251 old IDs. Activating now would make the
+  existing L24 three-provider embeddings/object/ASR/index artifacts stale.
+
+Verification:
+
+- New focused unit suite: 6 passed.
+- Python compilation: passed.
+- Real R2 candidate: 8 objects / 57,393,514 bytes; `_READY.status=READY`;
+  6 data checksum entries; no remote size mismatches.
+- Ruff was unavailable in the current venv and was not installed solely for
+  this task.

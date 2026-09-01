@@ -428,6 +428,19 @@ tree-preservation, partial-upload, stage-skipping, and resume-state
 regressions; one live L21_V001 canary preceded the cache-exclusion change, but
 no full Batch1 run was executed.
 
+### R2 ingestion consolidation boundary
+
+No detector, selector, threshold, mapping identity, or extraction behavior is
+changed. `mvr.operations.ingestion_promotion` consumes the run-scoped outputs
+above and adds the missing single-writer boundary: raw/staging completeness
+audit, success-marker verification, per-video schema/identity validation,
+global mapping consolidation, and preparation of a server-side keyframe copy
+manifest. Prepared bundles stay under
+`data/staging/ingestion-consolidated/<promotion-id>/` and publish `_READY.json`
+last. Activation remains separate and fail-closed when the candidate would
+invalidate an already enriched canonical collection. Synthetic unit coverage
+and the real 872-video Batch1 preparation verified the operational contract.
+
 ## Milvus production semantic runtime fix
 
 This approved runtime fix migrates no new lab implementation. It reuses the
