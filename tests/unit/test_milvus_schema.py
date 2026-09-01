@@ -18,7 +18,7 @@ class TestMilvusSchema:
     def test_scalar_fields(self):
         from mvr.indexing.milvus_schema import SCALAR_FIELDS, FIELD_KEYFRAME_ID
         assert FIELD_KEYFRAME_ID in SCALAR_FIELDS
-        for f in ("video_id", "frame_id", "shot_id", "timestamp", "batch_id", "collection_id"):
+        for f in ("entity_id", "video_id", "frame_id", "shot_id", "timestamp", "batch_id", "collection_id"):
             assert f in SCALAR_FIELDS
 
     def test_three_vector_fields(self):
@@ -68,8 +68,103 @@ class TestMilvusSchema:
 
     def test_search_output_fields(self):
         from mvr.indexing.milvus_schema import SEARCH_OUTPUT_FIELDS
-        for f in ("keyframe_id", "video_id", "frame_id", "shot_id", "timestamp"):
+        for f in ("entity_id", "keyframe_id", "video_id", "frame_id", "shot_id", "timestamp"):
             assert f in SEARCH_OUTPUT_FIELDS
+
+    def test_hnsw_index_params(self):
+        from mvr.indexing.milvus_schema import INDEX_TYPE_PARAMS
+        assert INDEX_TYPE_PARAMS["HNSW"] == {"M": 16, "efConstruction": 200}
+
+    def test_hnsw_search_params(self):
+        from mvr.indexing.milvus_schema import SEARCH_PARAMS
+        assert SEARCH_PARAMS["HNSW"] == {"ef": 64}
+
+
+# ---------------------------------------------------------------------------
+# entity_id (composite Milvus primary key) tests
+# ---------------------------------------------------------------------------
+
+class TestEntityId:
+    def test_basic_composition(self):
+        from mvr.indexing.milvus_schema import make_entity_id
+        assert make_entity_id("L21_V001", "K01") == "L21_V001/K01"
+
+    def test_strips_whitespace(self):
+        from mvr.indexing.milvus_schema import make_entity_id
+        assert make_entity_id(" L21_V001 ", " K01 ") == "L21_V001/K01"
+
+    def test_empty_video_id_raises(self):
+        from mvr.indexing.milvus_schema import make_entity_id
+        with pytest.raises(ValueError, match="non-empty"):
+            make_entity_id("", "K01")
+
+    def test_empty_keyframe_id_raises(self):
+        from mvr.indexing.milvus_schema import make_entity_id
+        with pytest.raises(ValueError, match="non-empty"):
+            make_entity_id("L21_V001", "")
+
+    def test_whitespace_only_raises(self):
+        from mvr.indexing.milvus_schema import make_entity_id
+        with pytest.raises(ValueError, match="non-empty"):
+            make_entity_id("   ", "K01")
+
+    def test_two_videos_same_keyframe_id_produce_different_entity_ids(self):
+        """The whole point of entity_id: keyframe_id alone is not globally
+        unique across the organizer's dataset (see task05a.py)."""
+        from mvr.indexing.milvus_schema import make_entity_id
+        entity_a = make_entity_id("L21_V001", "034")
+        entity_b = make_entity_id("L21_V002", "034")
+        assert entity_a != entity_b
+
+
+# ---------------------------------------------------------------------------
+# Collection schema primary key tests (require pymilvus)
+#
+# NOTE: intentionally does NOT use a module-level `pytest.importorskip` --
+# this file also has unconditional tests above and below this class, and a
+# module-level importorskip raising Skipped during exec aborts the entire
+# module import, silently skipping everything in the file, not just the
+# code after that line. Skip per-test instead via an autouse fixture.
+# ---------------------------------------------------------------------------
+
+class TestCollectionSchemaPrimaryKey:
+    @pytest.fixture(autouse=True)
+    def _require_pymilvus(self):
+        pytest.importorskip("pymilvus")
+
+    def test_entity_id_is_primary_key(self):
+        from mvr.indexing.milvus_schema import FIELD_ENTITY_ID, build_collection_schema
+        schema = build_collection_schema()
+        fields_by_name = {f.name: f for f in schema.fields}
+        entity_field = fields_by_name[FIELD_ENTITY_ID]
+        assert entity_field.is_primary is True
+        assert entity_field.auto_id is False
+
+    def test_keyframe_id_is_not_primary_key(self):
+        from mvr.indexing.milvus_schema import FIELD_KEYFRAME_ID, build_collection_schema
+        schema = build_collection_schema()
+        fields_by_name = {f.name: f for f in schema.fields}
+        assert fields_by_name[FIELD_KEYFRAME_ID].is_primary is False
+
+    def test_video_id_and_keyframe_id_are_scalar_fields(self):
+        from mvr.indexing.milvus_schema import (
+            FIELD_KEYFRAME_ID, FIELD_VIDEO_ID, build_collection_schema,
+        )
+        schema = build_collection_schema()
+        field_names = {f.name for f in schema.fields}
+        assert FIELD_KEYFRAME_ID in field_names
+        assert FIELD_VIDEO_ID in field_names
+
+    def test_three_vector_fields_correct_dimensions(self):
+        from mvr.indexing.milvus_schema import (
+            FIELD_BEIT3_VECTOR, FIELD_METACLIP2_VECTOR, FIELD_PE_VECTOR,
+            build_collection_schema,
+        )
+        schema = build_collection_schema()
+        fields_by_name = {f.name: f for f in schema.fields}
+        assert fields_by_name[FIELD_BEIT3_VECTOR].params["dim"] == 768
+        assert fields_by_name[FIELD_METACLIP2_VECTOR].params["dim"] == 512
+        assert fields_by_name[FIELD_PE_VECTOR].params["dim"] == 1024
 
 
 # ---------------------------------------------------------------------------

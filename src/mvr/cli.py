@@ -613,7 +613,7 @@ def _add_milvus_parser(subparsers: "argparse._SubParsersAction") -> None:
     p.add_argument("--pe-mapping", type=Path, default=None)
     p.add_argument("--pe-manifest", type=Path, default=None)
     p.add_argument("--manifest", type=Path, default=Path("data/milvus_index_manifest.json"))
-    p.add_argument("--index-type", choices=["FLAT", "HNSW", "IVF_FLAT"], default="FLAT")
+    p.add_argument("--index-type", choices=["FLAT", "HNSW", "IVF_FLAT"], default="HNSW")
     p.add_argument("--collection", default=None)
     p.add_argument("--batch-size", type=_positive_int, default=1000)
     p.set_defaults(command="milvus", milvus_command="ingest")

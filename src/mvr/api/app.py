@@ -468,7 +468,7 @@ def _default_semantic_service() -> Any:
         from ..retrieval.milvus_semantic import MilvusSemanticService
 
         return MilvusSemanticService.from_env(
-            index_type=os.environ.get("MVR_MILVUS_INDEX_TYPE", "FLAT").strip().upper()
+            index_type=os.environ.get("MVR_MILVUS_INDEX_TYPE", "HNSW").strip().upper()
         )
     if backend_name == "faiss_reference":
         raw_path = os.environ.get("MVR_SEMANTIC_INDEX", "").strip()

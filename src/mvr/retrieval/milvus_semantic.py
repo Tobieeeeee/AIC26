@@ -263,7 +263,7 @@ class MilvusSemanticService:
         backend: MilvusProviderBackend,
         *,
         collection_name: str = COLLECTION_NAME,
-        index_type: str = "FLAT",
+        index_type: str = "HNSW",
         stale_policy: str = "fail",
         manifest_path: str | None = None,
         query_encoders: Any | None = None,
@@ -350,7 +350,7 @@ class MilvusSemanticService:
     def from_env(
         cls,
         *,
-        index_type: str = "FLAT",
+        index_type: str = "HNSW",
         stale_policy: str = "fail",
         manifest_path: str | None = None,
     ) -> "MilvusSemanticService":

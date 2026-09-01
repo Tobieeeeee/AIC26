@@ -186,7 +186,7 @@ class MilvusClient:
         self,
         field_name: str,
         *,
-        index_type: str = "FLAT",
+        index_type: str = "HNSW",
         metric_type: str = CANONICAL_METRIC,
         params: dict[str, Any] | None = None,
         collection_name: str | None = None,
