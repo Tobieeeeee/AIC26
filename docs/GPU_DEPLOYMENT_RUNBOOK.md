@@ -116,8 +116,12 @@ runs objects, three visual embeddings, production OCR, and production ASR:
 ```
 
 The wrapper requires `.env` to point at the pinned RF-DETR, BEiT-3, PE-Core-L,
-and OCR checkpoints. It also requires the two pinned OCR GPU images and native
+and OCR checkpoints. It also requires the `[operations]` extra (boto3,
+python-dotenv, polars), the two pinned OCR GPU images, and native
 Silero/ChunkFormer imports in `.venv`; these are preflighted before execution.
+The `[operations]` check runs first because polars is not needed until the
+first Parquet consolidation, long after the run has downloaded every keyframe
+and raw MP4.
 Because the reused OCR images carry older pinned CUDA/PyTorch stacks, the
 wrapper also executes a real CUDA matrix-operation canary inside each image.
 On an incompatible RTX 5060 Ti it stops before downloading corpus data; do not

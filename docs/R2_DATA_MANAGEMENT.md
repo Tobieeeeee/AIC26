@@ -291,8 +291,9 @@ Before the first run, the VM must have the two pinned OCR images
 `mvr-ocr-deepsolo:task04b` and `mvr-ocr-parseq-vi:task04b`, verified OCR
 weights under `MVR_OCR_WEIGHTS_ROOT` (default `artifacts/_ocr_models`), and the
 pinned ASR dependencies/model cache available in `.venv`. The wrapper checks
-Docker, both OCR images, and the native ChunkFormer/Silero imports before it
-starts an expensive R2 transfer.
+the `[operations]` extra (`pip install -e '.[operations]'`), Docker, both OCR
+images, and the native ChunkFormer/Silero imports before it starts an expensive
+R2 transfer.
 
 One-video canary on Linux/RTX 5060 Ti:
 

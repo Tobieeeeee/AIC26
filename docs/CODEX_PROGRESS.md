@@ -2005,8 +2005,33 @@ Verification:
   extra added by `72d5d1a` (2026-08-27), which postdates this `.venv`
   (2026-08-19). Until it was installed, six `test_ingestion_promotion.py`
   checks failed as `IngestionPromotionError` and the synthetic six-feature
-  runner test skipped silently, hiding both behind non-obvious symptoms. The
-  same extra still lacks `boto3` and `python-dotenv` here, so no R2 call can be
-  made from this machine; `run_enrichment_rtx5060ti.sh` does not preflight any
-  of the three.
+  runner test skipped silently, hiding both behind non-obvious symptoms. At the
+  time of this entry the same extra also lacked `boto3` and `python-dotenv`,
+  and the wrapper preflighted none of the three; both were addressed in the
+  follow-up entry below.
+- No R2 bucket read, write, or activation was performed.
+
+---
+
+# 2026-09-02 - Wrapper preflights the operations extra
+
+Status: IMPLEMENTED; TESTED
+
+Branch: `perf/r2-enrichment-runner`
+
+- `run_enrichment_rtx5060ti.sh` now verifies `import boto3, dotenv, polars`
+  before Docker, the OCR images, and the CUDA canary. polars is not exercised
+  until the first Parquet consolidation, so without this check a fresh VM
+  passes every existing preflight, downloads the full keyframe and raw-MP4
+  working set, and only then fails.
+- Added `tests/unit/scripts/test_run_enrichment_wrapper.py`, which executes the
+  wrapper under bash against a temporary tree with a stubbed `.venv/bin/python`
+  and asserts both the refusal and the pass-through.
+- Installed the missing extra locally: polars 1.43.2, boto3 1.43.86,
+  python-dotenv 1.2.3.
+
+Verification:
+
+- Full `tests/unit` regression: 1,469 passed, 5 skipped (`pymilvus` gates).
+- `bash -n scripts/operations/run_enrichment_rtx5060ti.sh`: passed.
 - No R2 bucket read, write, or activation was performed.

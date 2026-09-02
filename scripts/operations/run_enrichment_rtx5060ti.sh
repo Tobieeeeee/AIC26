@@ -21,6 +21,13 @@ if [[ ! -f ".env" ]]; then
   echo "Missing .env with R2 credentials and pinned model paths." >&2
   exit 2
 fi
+if ! .venv/bin/python -c 'import boto3, dotenv, polars' >/dev/null 2>&1; then
+  echo "Missing the [operations] extra (boto3, python-dotenv, polars)." >&2
+  echo "  Install it before starting: pip install -e '.[operations]'" >&2
+  echo "  Without polars the run dies at the first Parquet consolidation," >&2
+  echo "  after every keyframe and raw MP4 has already been downloaded." >&2
+  exit 2
+fi
 if ! command -v docker >/dev/null 2>&1; then
   echo "Missing Docker; production DeepSolo/PARSeq OCR runs in GPU containers." >&2
   exit 2
