@@ -186,3 +186,39 @@ def test_the_runtime_check_installs_the_torch_six_shim_before_unilm() -> None:
         'import_module("modeling_finetune")'
     )
 
+# torch._six is probed inside _install_torch_six_inf_compat's own try/except,
+# which supplies the module when it is absent. It is the one name the check
+# must not import directly.
+_SHIMMED = {"torch._six"}
+_LOADERS = (
+    "src/mvr/enrichment/embeddings/beit3.py",
+    "src/mvr/enrichment/embeddings/perception_encoder.py",
+)
+
+
+def test_the_runtime_check_covers_every_module_the_loaders_import() -> None:
+    """The check must not know a smaller set of modules than the loaders do.
+
+    Both encoders import their runtime lazily, so a missing dependency stays
+    invisible until inference begins -- after the run has downloaded a video,
+    detected its objects and OCR'd its keyframes. The check earned its keep
+    only if it imports everything they do; when it listed
+    ``core.vision_encoder.pe`` but not ``core.vision_encoder.transforms``, a
+    missing ftfy passed setup and failed the canary.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+
+    required: set[str] = set()
+    for loader in _LOADERS:
+        source = (REPOSITORY_ROOT / loader).read_text(encoding="utf-8")
+        required |= set(re.findall(r'import_module\("([^"]+)"\)', source))
+    required -= _SHIMMED
+    assert required, "the loaders must import their runtime through importlib"
+
+    missing = sorted(module for module in required if f'"{module}"' not in script)
+
+    assert missing == [], (
+        "the runtime check never imports these, so a machine missing them "
+        f"passes setup and fails mid-run: {missing}"
+    )
+

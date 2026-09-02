@@ -156,7 +156,9 @@ import importlib
 
 for module in (
     "boto3", "dotenv", "polars", "torch", "timm", "torchscale",
-    "rfdetr", "chunkformer", "silero_vad", "core.vision_encoder.pe",
+    "rfdetr", "chunkformer", "silero_vad", "PIL.Image",
+    "torchvision.transforms", "core.vision_encoder.pe",
+    "core.vision_encoder.transforms",
 ):
     importlib.import_module(module)
     print(f"  import {module}: OK")

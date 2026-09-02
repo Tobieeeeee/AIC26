@@ -98,9 +98,15 @@ metaclip2 = [
     "torchvision==0.20.1",
     "transformers==4.57.1",
 ]
+# core.vision_encoder.transforms reaches the upstream SimpleTokenizer, which
+# imports ftfy and regex. Neither appears anywhere in this project's own code,
+# so both are easy to miss until PerceptionEncoder builds its image transform
+# -- by which point the run has already detected objects and OCR'd keyframes.
 perception-encoder = [
     "einops==0.8.1",
+    "ftfy>=6,<7",
     "huggingface-hub>=0.28,<2",
+    "regex>=2023,<2027",
     "numpy==2.1.2",
     "Pillow==11.0.0",
     "timm==1.0.15",
