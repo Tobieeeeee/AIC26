@@ -79,8 +79,10 @@ def test_index_recreates_bulk_inserts_and_refreshes_lab6_documents() -> None:
     assert calls[1][1]["index"] == "keyframes"
     assert calls[1][1]["mappings"]["properties"]["clip_vector"]["dims"] == 2
     assert calls[2][0] == "bulk"
+    # _id is the (video_id, keyframe_id) pair: keyframe ids repeat across
+    # videos, so a frame_id-only _id overwrites another video's document.
     assert calls[2][2] == [
-        {"_index": "keyframes", "_id": "frame-a", **document.to_source()}
+        {"_index": "keyframes", "_id": "video-a/frame-a", **document.to_source()}
     ]
     assert calls[2][3] == {"chunk_size": 50, "request_timeout": 120}
     assert calls[3:] == [

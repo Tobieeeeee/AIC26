@@ -2144,3 +2144,40 @@ Verification:
   upsert, index creation and manifest steps of `ingest_to_milvus` remain
   unverified by this change. Only entity construction is covered.
 
+---
+
+# 2026-09-03 - Milvus and Elasticsearch built from an enrichment version
+
+Status: IMPLEMENTED; UNIT TESTED; NO LIVE MILVUS OR ELASTICSEARCH RUN
+
+Branch: `perf/r2-enrichment-runner`
+
+- Added `mvr.indexing.version_ingest.ingest_version_to_milvus`: validate the
+  version, read its catalog, download each referenced vector file exactly once,
+  build pair-keyed entities, upsert in batches, and write a manifest whose
+  `dataset_version` names the version the index came from.
+- Added `mvr.indexing.version_documents.build_documents_from_version`, joining
+  the version's OCR, ASR and object Parquets on `(video_id, keyframe_id)`. A
+  keyframe with no text still yields a document, so the lexical index cannot
+  silently shrink relative to the vector index built from the same version.
+- Fixed the same identity flaw on the lexical side: `ElasticsearchIndex` used
+  `frame_id` as the document `_id`, so two videos sharing an organizer keyframe
+  id overwrote each other. `_id` is now the pair, derived through the shared
+  `make_entity_id` helper so both indexes resolve a keyframe identically, and a
+  document that cannot name its video is refused. The existing unit test that
+  asserted the old `_id` was updated, since the behaviour changed deliberately.
+- Installed the `[milvus]` extra and found `pymilvus==2.4.15` cannot import at
+  all on a current environment: it uses `pkg_resources`, which setuptools
+  removed in 81.0. Added a `setuptools<81` bound to the extra so the declared
+  pin is actually installable. The proper long-term fix is upgrading pymilvus.
+
+Verification:
+
+- Full `tests/unit` regression: 1,508 passed, 0 skipped. The five `pymilvus`
+  skips reported in earlier entries are gone now that the extra is installed.
+- New: `test_version_ingest.py` (5), `test_version_documents.py` (5),
+  `test_elasticsearch_document_id.py` (4).
+- Milvus and Elasticsearch were exercised through recording doubles. No live
+  Milvus or Elasticsearch instance was available, and no enrichment version
+  exists on R2 yet, so none of this has run against real infrastructure.
+

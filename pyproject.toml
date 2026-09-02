@@ -31,7 +31,9 @@ semantic = [
     "torchvision>=0.17,<1",
 ]
 search = ["elasticsearch>=8,<9"]
-milvus = ["pymilvus==2.4.15"]
+# pymilvus 2.4.15 imports pkg_resources, which setuptools removed in 81.0.
+# Without this bound "import pymilvus" fails outright on a fresh environment.
+milvus = ["pymilvus==2.4.15", "setuptools<81"]
 operations = [
     "boto3>=1.34,<2",
     "polars==1.43.2",

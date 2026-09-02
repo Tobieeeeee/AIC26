@@ -5,6 +5,9 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from .documents import SearchDocument
+# Shared with the vector side on purpose: both indexes must derive a document
+# identity the same way, or a keyframe resolves differently in each.
+from .milvus_schema import make_entity_id
 
 
 DEFAULT_INDEX_NAME = "keyframes"
@@ -44,6 +47,31 @@ def build_mappings(embedding_dimension: int) -> dict[str, Any]:
             },
         }
     }
+
+
+def document_id(source: Mapping[str, Any]) -> str:
+    """Return a collision-safe Elasticsearch ``_id`` for one document.
+
+    Keyframe ids are not globally unique: the organizer's ids are per-video
+    ordinals, so 177,321 of their keyframes share only 632 distinct id strings.
+    An ``_id`` taken from ``frame_id`` alone therefore lets one video's
+    document overwrite another's. A document that cannot name its video is
+    refused rather than indexed under an ambiguous id.
+    """
+    explicit = str(source.get("document_id") or "").strip()
+    if explicit:
+        return explicit
+    frame_id = str(source.get("frame_id") or "").strip()
+    if not frame_id:
+        raise ValueError("search document is missing frame_id")
+    video_id = str(source.get("video_id") or "").strip()
+    if not video_id:
+        raise ValueError(
+            f"search document {frame_id!r} is missing video_id: keyframe ids are "
+            "not globally unique, so an _id built from frame_id alone would "
+            "overwrite another video's keyframe"
+        )
+    return make_entity_id(video_id, frame_id)
 
 
 class ElasticsearchIndex:
@@ -86,7 +114,7 @@ class ElasticsearchIndex:
                 )
                 yield {
                     "_index": self.index_name,
-                    "_id": source["frame_id"],
+                    "_id": document_id(source),
                     **source,
                 }
 

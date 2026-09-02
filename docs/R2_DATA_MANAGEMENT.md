@@ -442,6 +442,21 @@ the mapping names but nobody published, a duplicate identity, or an unusable
 row index stops the read instead of yielding an index that silently omits or
 misaligns entries.
 
+Two builders consume that catalog:
+
+- `mvr.indexing.version_ingest.ingest_version_to_milvus` downloads each
+  referenced `.npy` once, builds entities whose primary key is the pair, upserts
+  them, and records the version id in the semantic-index manifest as
+  `dataset_version`, so an index can always be traced back to the version it
+  came from.
+- `mvr.indexing.version_documents.build_documents_from_version` joins the
+  version's `metadata/{ocr,asr,objects}` Parquets on the same pair and returns
+  lexical documents carrying a `document_id`. Elasticsearch uses that as `_id`;
+  a document that cannot name its video is refused rather than indexed under an
+  ambiguous id.
+
+Both refuse to fall back to `keyframe_id` alone.
+
 ## Caching
 
 R2 downloads are cached locally under `.cache/mvr/` (configurable via
