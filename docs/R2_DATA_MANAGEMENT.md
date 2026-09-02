@@ -390,12 +390,28 @@ and swaps one pointer:
   --version "enrich-batch1-5060ti-v1"
 ```
 
-The command lists the version prefix once, requires `_READY.json` plus a
-`_SUCCESS.json` for every collection that marker declares, backs up the current
-`dataset_manifest.json` under `data/versions/manifest-backups/<activated_at>/`,
-and then writes the manifest with `active_enrichment_version` set. It copies no
-artifact, so activation costs one listing and two PUTs regardless of corpus
-size.
+Validation runs first and is fail-closed. From one prefix listing plus the
+version's own markers it requires: `_READY.json` with `status=READY`, a
+`_SUCCESS.json` per declared collection, every artifact each `_SUCCESS.json`
+declares (`object_metadata`, `object_transport`, the OCR/ASR equivalents, and
+the OCR/ASR manifests) present and non-empty, `manifest.json`,
+`feature_mapping.csv` plus at least one non-empty `.npy` for every declared
+provider, and per-collection `video_count`/`keyframe_count` that sum to the
+totals in `_READY.json`. Expected keys are read from the markers rather than
+hard-coded, and every problem is reported at once so a broken run can be fixed
+in one pass.
+
+Only then does it back up the current `dataset_manifest.json` under
+`data/versions/manifest-backups/<activated_at>/` and write the manifest with
+`active_enrichment_version` set. No artifact is copied, so activation costs one
+listing and two PUTs regardless of corpus size.
+
+To run the check on its own, before building indexes or activating anything:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\operations\activate_enrichment_version.py `
+  --version "enrich-batch1-5060ti-v1" --validate-only
+```
 
 Roll back by running the same command with the previous version id; the report
 of every activation names the version it replaced under `previous_version`.

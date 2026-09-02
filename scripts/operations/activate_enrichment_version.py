@@ -25,6 +25,7 @@ if str(SOURCE_ROOT) not in sys.path:
 from mvr.operations.enrichment_version import (
     EnrichmentVersionError,
     activate_enrichment_version,
+    validate_enrichment_version,
 )
 from mvr.operations.r2_client import R2Client, R2OperationError
 
@@ -44,6 +45,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--work-root",
         type=Path,
         default=Path("artifacts/operations/enrichment_activation"),
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Check the version and report, without touching dataset_manifest.json",
     )
     parser.add_argument(
         "--activated-at",
@@ -68,12 +74,22 @@ def main(argv: list[str] | None = None) -> int:
         pass
 
     try:
-        result = activate_enrichment_version(
-            client=R2Client(),
-            version=args.version,
-            work_root=args.work_root,
-            activated_at=args.activated_at,
-        )
+        if args.validate_only:
+            result = validate_enrichment_version(
+                client=R2Client(),
+                version=args.version,
+                work_root=args.work_root,
+            )
+            result = {"status": "VALIDATED", **{
+                key: value for key, value in result.items() if key != "ready"
+            }}
+        else:
+            result = activate_enrichment_version(
+                client=R2Client(),
+                version=args.version,
+                work_root=args.work_root,
+                activated_at=args.activated_at,
+            )
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     except (EnrichmentVersionError, R2OperationError, KeyError) as exc:

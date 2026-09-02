@@ -10,6 +10,7 @@ from mvr.operations.enrichment_version import (
     activate_enrichment_version,
     apply_enrichment_pointer,
     resolve_active_enrichment_version,
+    validate_enrichment_version,
 )
 from mvr.operations.r2_layout import (
     VERSIONS_PREFIX,
@@ -124,23 +125,68 @@ class _FakeClient:
         return {"key": key, "size": len(payload), "sha256": "unused"}
 
 
-def _version_objects(version: str, collections: tuple[str, ...]) -> dict[str, bytes]:
+PROVIDERS = ("beit3", "metaclip2", "perception_encoder")
+
+
+def _collection_objects(prefix: str, collection: str, *, videos: int, keyframes: int) -> dict:
+    root = f"{prefix}/batch=1/collection={collection}"
+    marker = {
+        "schema_version": "2.0",
+        "status": "DONE",
+        "run_id": prefix.rsplit("/", maxsplit=1)[-1],
+        "batch_id": "batch1",
+        "collection_id": collection,
+        "video_count": videos,
+        "keyframe_count": keyframes,
+        "providers": list(PROVIDERS),
+        "features": ["objects", *PROVIDERS, "ocr", "asr"],
+        "object_transport": "task05a/objects.tar.gz",
+        "object_metadata": "metadata/objects/part-000.parquet",
+        "ocr_transport": "task05a/ocr.tar.gz",
+        "ocr_metadata": "metadata/ocr/part-000.parquet",
+        "asr_transport": "task05a/asr.tar.gz",
+        "asr_metadata": "metadata/asr/part-000.parquet",
+    }
+    objects = {f"{root}/_SUCCESS.json": json.dumps(marker).encode()}
+    for feature in ("objects", "ocr", "asr"):
+        objects[f"{root}/task05a/{feature}.tar.gz"] = b"archive"
+        objects[f"{root}/metadata/{feature}/part-000.parquet"] = b"parquet"
+    for provider in PROVIDERS:
+        objects[f"{root}/embeddings/{provider}/manifest.json"] = b"{}"
+        objects[f"{root}/embeddings/{provider}/feature_mapping.csv"] = b"keyframe_id"
+        objects[f"{root}/embeddings/{provider}/L21_V001.npy"] = b"vectors"
+    objects[f"{root}/ocr/manifest.json"] = b"{}"
+    objects[f"{root}/asr/manifest.json"] = b"{}"
+    return objects
+
+
+def _version_objects(
+    version: str,
+    collections: tuple[str, ...],
+    *,
+    videos: int = 2,
+    keyframes: int = 7,
+) -> dict[str, bytes]:
+    """A structurally complete, publishable version."""
     prefix = f"data/versions/enrichment/{version}"
     objects = {
         f"{prefix}/_READY.json": json.dumps(
             {
+                "schema_version": "2.0",
                 "status": "READY",
                 "run_id": version,
                 "batch_id": "batch1",
                 "collections": list(collections),
+                "providers": list(PROVIDERS),
+                "video_count": videos * len(collections),
+                "keyframe_count": keyframes * len(collections),
             }
         ).encode()
     }
     for collection in collections:
-        objects[f"{prefix}/batch=1/collection={collection}/_SUCCESS.json"] = (
-            json.dumps({"status": "DONE"}).encode()
+        objects.update(
+            _collection_objects(prefix, collection, videos=videos, keyframes=keyframes)
         )
-        objects[f"{prefix}/batch=1/collection={collection}/task05a/objects.tar.gz"] = b"x"
     return objects
 
 
@@ -236,3 +282,94 @@ def test_activation_copies_no_artifact_and_rolls_back_with_one_manifest_put(
         for key in unchanged
         if key.startswith("data/versions/enrichment/")
     )
+
+
+def test_validation_refuses_a_declared_artifact_that_was_never_uploaded(tmp_path) -> None:
+    objects = _bucket()
+    del objects[
+        "data/versions/enrichment/enrich-v1/batch=1/collection=L21"
+        "/metadata/objects/part-000.parquet"
+    ]
+    client = _FakeClient(objects)
+
+    with pytest.raises(EnrichmentVersionError, match="part-000.parquet"):
+        validate_enrichment_version(
+            client=client, version="enrich-v1", work_root=tmp_path
+        )
+
+
+def test_validation_refuses_an_empty_artifact(tmp_path) -> None:
+    objects = _bucket()
+    objects[
+        "data/versions/enrichment/enrich-v1/batch=1/collection=L21"
+        "/task05a/objects.tar.gz"
+    ] = b""
+    client = _FakeClient(objects)
+
+    with pytest.raises(EnrichmentVersionError, match="empty"):
+        validate_enrichment_version(
+            client=client, version="enrich-v1", work_root=tmp_path
+        )
+
+
+def test_validation_refuses_a_provider_with_no_vector_file(tmp_path) -> None:
+    objects = _bucket()
+    del objects[
+        "data/versions/enrichment/enrich-v1/batch=1/collection=L21"
+        "/embeddings/beit3/L21_V001.npy"
+    ]
+    client = _FakeClient(objects)
+
+    with pytest.raises(EnrichmentVersionError, match="beit3"):
+        validate_enrichment_version(
+            client=client, version="enrich-v1", work_root=tmp_path
+        )
+
+
+def test_validation_refuses_when_collection_counts_do_not_sum_to_the_run_total(
+    tmp_path,
+) -> None:
+    objects = _bucket(collections=("L21", "L22"))
+    ready_key = "data/versions/enrichment/enrich-v1/_READY.json"
+    ready = json.loads(objects[ready_key])
+    ready["keyframe_count"] += 1
+    objects[ready_key] = json.dumps(ready).encode()
+    client = _FakeClient(objects)
+
+    with pytest.raises(EnrichmentVersionError, match="keyframe_count"):
+        validate_enrichment_version(
+            client=client, version="enrich-v1", work_root=tmp_path
+        )
+
+
+def test_validation_reports_every_problem_at_once(tmp_path) -> None:
+    objects = _bucket()
+    root = "data/versions/enrichment/enrich-v1/batch=1/collection=L21"
+    del objects[f"{root}/metadata/asr/part-000.parquet"]
+    objects[f"{root}/task05a/ocr.tar.gz"] = b""
+    client = _FakeClient(objects)
+
+    with pytest.raises(EnrichmentVersionError) as excinfo:
+        validate_enrichment_version(
+            client=client, version="enrich-v1", work_root=tmp_path
+        )
+
+    message = str(excinfo.value)
+    assert "metadata/asr/part-000.parquet" in message
+    assert "task05a/ocr.tar.gz" in message
+
+
+def test_activation_refuses_a_version_that_fails_artifact_validation(tmp_path) -> None:
+    objects = _bucket()
+    del objects[
+        "data/versions/enrichment/enrich-v1/batch=1/collection=L21"
+        "/embeddings/perception_encoder/manifest.json"
+    ]
+    client = _FakeClient(objects)
+
+    with pytest.raises(EnrichmentVersionError):
+        activate_enrichment_version(
+            client=client, version="enrich-v1", work_root=tmp_path
+        )
+
+    assert client.uploaded == []

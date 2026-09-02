@@ -111,34 +111,11 @@ def activate_enrichment_version(
     work_root = Path(work_root)
     work_root.mkdir(parents=True, exist_ok=True)
 
-    remote_keys = {str(obj["Key"]) for obj in client.list_objects(f"{prefix}/")}
-    ready_key = f"{prefix}/_READY.json"
-    if ready_key not in remote_keys:
-        raise EnrichmentVersionError(
-            f"version is not publishable; missing _READY marker: {ready_key}"
-        )
-
-    ready_path = work_root / "_READY.json"
-    client.download_file(ready_key, ready_path)
-    ready = json.loads(ready_path.read_text(encoding="utf-8"))
-    if ready.get("status") != "READY":
-        raise EnrichmentVersionError(
-            f"version _READY marker is not READY: {ready.get('status')!r}"
-        )
-    collections = ready.get("collections")
-    if not isinstance(collections, list) or not collections:
-        raise EnrichmentVersionError("version _READY marker declares no collections")
-    batch = raw_batch_segment(str(ready.get("batch_id", "1")))[len("batch"):]
-    missing = [
-        collection
-        for collection in collections
-        if f"{prefix}/batch={batch}/collection={collection}/_SUCCESS.json"
-        not in remote_keys
-    ]
-    if missing:
-        raise EnrichmentVersionError(
-            f"version is incomplete; missing collection _SUCCESS markers: {missing}"
-        )
+    validation = validate_enrichment_version(
+        client=client, version=version, work_root=work_root
+    )
+    ready = validation["ready"]
+    collections = validation["collections"]
 
     manifest_path = work_root / "dataset_manifest.json"
     client.download_file(DATASET_MANIFEST_KEY, manifest_path)
@@ -170,4 +147,137 @@ def activate_enrichment_version(
         "activated_at": stamp,
         "dataset_manifest_backup": backup_key,
         "artifacts_copied": 0,
+    }
+
+
+_BULLET = chr(10) + "  - "
+_DECLARED_ARTIFACT_FIELDS = (
+    "object_metadata",
+    "object_transport",
+    "ocr_metadata",
+    "ocr_transport",
+    "asr_metadata",
+    "asr_transport",
+)
+
+
+def _check_object(listing: Mapping[str, int], key: str, label: str) -> str | None:
+    if key not in listing:
+        return f"missing {label}"
+    if listing[key] <= 0:
+        return f"empty {label}"
+    return None
+
+
+def validate_enrichment_version(
+    *, client: Any, version: str, work_root: Path
+) -> dict[str, Any]:
+    """Check that a published version is structurally complete.
+
+    Uses one prefix listing plus the version's own markers: the run
+    ``_READY.json`` and each collection ``_SUCCESS.json`` declare which
+    artifacts they published, so the expected keys are never hard-coded here.
+    Every problem is collected before raising, because an operator fixing a
+    broken run needs the whole list, not the first entry.
+    """
+    prefix = enrichment_version_prefix(version)
+    work_root = Path(work_root)
+    work_root.mkdir(parents=True, exist_ok=True)
+
+    listing = {
+        str(obj["Key"]): int(obj.get("Size", -1))
+        for obj in client.list_objects(f"{prefix}/")
+    }
+    ready_key = f"{prefix}/_READY.json"
+    if ready_key not in listing:
+        raise EnrichmentVersionError(
+            f"version is not publishable; missing _READY marker: {ready_key}"
+        )
+
+    ready_path = work_root / "_READY.json"
+    client.download_file(ready_key, ready_path)
+    ready = json.loads(ready_path.read_text(encoding="utf-8"))
+    if ready.get("status") != "READY":
+        raise EnrichmentVersionError(
+            f"version _READY marker is not READY: {ready.get('status')!r}"
+        )
+    collections = ready.get("collections")
+    if not isinstance(collections, list) or not collections:
+        raise EnrichmentVersionError("version _READY marker declares no collections")
+    batch = raw_batch_segment(str(ready.get("batch_id", "1")))[len("batch"):]
+
+    problems: list[str] = []
+    totals = {"video_count": 0, "keyframe_count": 0}
+    for collection in collections:
+        root = f"{prefix}/batch={batch}/collection={collection}"
+        marker_key = f"{root}/_SUCCESS.json"
+        if marker_key not in listing:
+            problems.append(f"{collection}: missing _SUCCESS.json")
+            continue
+        marker_path = work_root / f"_SUCCESS.{collection}.json"
+        client.download_file(marker_key, marker_path)
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        if marker.get("status") != "DONE":
+            problems.append(f"{collection}: _SUCCESS status is {marker.get('status')!r}")
+
+        relatives = [f"{feature}/manifest.json" for feature in ("ocr", "asr")]
+        for field in _DECLARED_ARTIFACT_FIELDS:
+            declared = marker.get(field)
+            if not isinstance(declared, str) or not declared.strip():
+                problems.append(f"{collection}: _SUCCESS does not declare {field}")
+                continue
+            relatives.append(declared.strip())
+        for relative in relatives:
+            issue = _check_object(listing, f"{root}/{relative}", relative)
+            if issue:
+                problems.append(f"{collection}: {issue}")
+
+        for provider in marker.get("providers", []):
+            base = f"{root}/embeddings/{provider}"
+            for relative in ("manifest.json", "feature_mapping.csv"):
+                issue = _check_object(
+                    listing, f"{base}/{relative}", f"embeddings/{provider}/{relative}"
+                )
+                if issue:
+                    problems.append(f"{collection}: {issue}")
+            vectors = [
+                key
+                for key, size in listing.items()
+                if key.startswith(f"{base}/") and key.endswith(".npy") and size > 0
+            ]
+            if not vectors:
+                problems.append(
+                    f"{collection}: provider {provider} published no non-empty .npy vectors"
+                )
+
+        for field in totals:
+            value = marker.get(field)
+            if isinstance(value, int):
+                totals[field] += value
+            else:
+                problems.append(f"{collection}: _SUCCESS has no integer {field}")
+
+    for field, actual in totals.items():
+        declared = ready.get(field)
+        if isinstance(declared, int) and declared != actual:
+            problems.append(
+                f"{field} mismatch: _READY declares {declared}, "
+                f"collections sum to {actual}"
+            )
+
+    if problems:
+        raise EnrichmentVersionError(
+            f"version {version} failed validation:{_BULLET}"
+            + _BULLET.join(problems)
+        )
+
+    return {
+        "version": version,
+        "prefix": prefix,
+        "batch": batch,
+        "collections": list(collections),
+        "video_count": totals["video_count"],
+        "keyframe_count": totals["keyframe_count"],
+        "objects_listed": len(listing),
+        "ready": ready,
     }

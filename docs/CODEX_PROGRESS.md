@@ -2035,3 +2035,39 @@ Verification:
 - Full `tests/unit` regression: 1,469 passed, 5 skipped (`pymilvus` gates).
 - `bash -n scripts/operations/run_enrichment_rtx5060ti.sh`: passed.
 - No R2 bucket read, write, or activation was performed.
+
+---
+
+# 2026-09-02 - Artifact-level validation before an enrichment version is activated
+
+Status: IMPLEMENTED; UNIT TESTED
+
+Branch: `perf/r2-enrichment-runner`
+
+- Activation previously accepted a version on marker presence alone, so a run
+  whose `_SUCCESS.json` was written over an incomplete upload could become the
+  active pointer.
+- Added `validate_enrichment_version`, which derives the expected object set
+  from the version's own markers: the artifact keys each `_SUCCESS.json`
+  declares, `manifest.json`/`feature_mapping.csv`/at least one non-empty `.npy`
+  per declared provider, the OCR and ASR manifests, and per-collection counts
+  that must sum to the `_READY.json` totals. Zero-byte objects are rejected as
+  failed uploads. Nothing is hard-coded, so the check follows the runner's
+  contract instead of duplicating it.
+- Every problem is collected before raising. An operator repairing a broken run
+  sees the full list rather than one entry per rerun.
+- `activate_enrichment_version` now delegates to it and refuses before any
+  upload, and the script gained `--validate-only` for running the check alone,
+  which is the separate validation step in the target flow.
+- Cost is unchanged for Class A: still one listing and two PUTs. Reads grow by
+  one GET per collection marker, roughly 22 Class B operations for Batch1.
+
+Verification:
+
+- `tests/unit/operations/test_enrichment_versioning.py` and
+  `tests/unit/scripts/test_activate_enrichment_version.py`: 39 passed.
+- `scripts/operations/activate_enrichment_version.py --help`: passed.
+- R2 connectivity confirmed with a narrow `r2 list data/corpus/ingest`
+  (read-only, one Class A operation). No version exists on R2 yet, so no
+  validation or activation was run against real data.
+
