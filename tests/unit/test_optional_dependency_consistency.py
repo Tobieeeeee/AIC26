@@ -113,3 +113,55 @@ def test_the_beit3_group_covers_the_unilm_import_chain() -> None:
     declared = _requirement_names(_optional_dependencies()["beit3"])
 
     assert {"torchmetrics", "tensorboardx", "fairscale"} <= declared
+
+
+# rfdetr 1.9.3, the version configs/rfdetr_model.lock.json pins the production
+# detector to, declares "transformers>=5.1.0,<6.0.0".
+RFDETR_NEEDS_TRANSFORMERS = (5, 1)
+
+
+def _setup_script_groups() -> set[str]:
+    """The extras scripts/operations/setup_vm.sh installs in one command."""
+    script = (
+        Path(__file__).resolve().parents[2]
+        / "scripts" / "operations" / "setup_vm.sh"
+    ).read_text(encoding="utf-8")
+    match = re.search(r"pip install -e '\.\[([^\]]+)\]'", script)
+    assert match, "the setup script must install the project with extras"
+    return {group.strip() for group in match.group(1).split(",")}
+
+
+def _upper_bounds(requirement: str) -> list[tuple[int, ...]]:
+    return [
+        tuple(int(part) for part in raw.split(".") if part.isdigit())
+        for raw in re.findall(r"<\s*([0-9][0-9.]*)", requirement)
+    ]
+
+
+def test_the_setup_groups_leave_room_for_the_pinned_detector() -> None:
+    """A ceiling in one group must not exclude what another group's package needs.
+
+    The enrichment runner detects objects and embeds images in one process, so
+    rfdetr and BEiT-3 share an environment. BEiT-3's own image path never
+    imports transformers -- only Beit3TextEncoder does, for the online query
+    side -- so a ``<5`` ceiling inherited from a 2023 README bought nothing and
+    made the whole install unresolvable::
+
+        ERROR: ResolutionImpossible
+        mvr-competition[...] depends on transformers<5 and >=4.39
+        rfdetr 1.9.3 depends on transformers<6.0.0 and >=5.1.0
+    """
+    groups = _optional_dependencies()
+    offenders: dict[str, str] = {}
+    for group_name in _setup_script_groups():
+        for requirement in groups.get(group_name, []):
+            if _normalize(re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", requirement).group(1)) != "transformers":
+                continue
+            if any(bound <= RFDETR_NEEDS_TRANSFORMERS for bound in _upper_bounds(requirement)):
+                offenders[group_name] = requirement
+
+    assert offenders == {}, (
+        "these groups cap transformers below the "
+        f"{'.'.join(str(part) for part in RFDETR_NEEDS_TRANSFORMERS)} that the "
+        f"pinned rfdetr requires, so the setup install cannot resolve: {offenders}"
+    )

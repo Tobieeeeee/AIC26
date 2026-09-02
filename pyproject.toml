@@ -84,7 +84,11 @@ beit3 = [
     "torch>=2.2,<3",
     "torchmetrics>=1,<2",
     "torchvision>=0.17,<1",
-    "transformers>=4.39,<5",
+    # Only Beit3TextEncoder imports transformers, for the online query side;
+    # the image path this project runs offline never touches it. A <5 ceiling
+    # therefore bought nothing and made the install unresolvable against the
+    # pinned rfdetr, which requires 5.x.
+    "transformers>=4.39,<6",
 ]
 metaclip2 = [
     "numpy>=1.26,<3",
