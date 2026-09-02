@@ -2111,3 +2111,36 @@ Verification:
 - Canonical mapping identity measured against the live R2 corpus with one
   read-only GET. No bucket mutation.
 
+---
+
+# 2026-09-02 - Milvus entities built from the enrichment catalog
+
+Status: IMPLEMENTED; UNIT TESTED; NOT RUN AGAINST A LIVE MILVUS
+
+Branch: `perf/r2-enrichment-runner`
+
+- Added `build_entities_from_catalog` to `mvr.indexing.milvus_ingest`. It
+  consumes `CatalogEntry` values and produces Milvus entities whose primary key
+  is built from the `(video_id, keyframe_id)` pair, closing the identity gap at
+  the layer where it originally caused damage.
+- The vector row is taken from `feature_index`, never from iteration order, and
+  vector files are memory-mapped once per provider file and reused.
+- Failure handling is split deliberately. A vector file that was never
+  downloaded raises, because skipping it would silently drop a whole video. A
+  bad individual keyframe - row index past the end of the file, wrong
+  dimension, non-finite vector, missing provider - is counted in the
+  eligibility report so one bad row does not discard the run.
+- Documented in the module docstring that the `extraction_status` route is
+  legacy and currently unusable, and that the catalog path supersedes it.
+
+Verification:
+
+- `tests/unit/test_milvus_ingest_catalog.py`: 7 passed, including a check that
+  the vector comes from `feature_index` rather than order, and a regression
+  test that two videos sharing keyframe id 034 build two distinct entities
+  carrying their own vectors.
+- Full `tests/unit` regression: 1,489 passed, 5 skipped.
+- `pymilvus` is not installed here and no Milvus instance was available, so the
+  upsert, index creation and manifest steps of `ingest_to_milvus` remain
+  unverified by this change. Only entity construction is covered.
+
