@@ -12,6 +12,7 @@ from mvr.operations.enrichment_version import (
     resolve_active_enrichment_version,
     validate_enrichment_version,
 )
+from mvr.operations.enrichment_catalog import read_enrichment_catalog
 from mvr.operations.r2_layout import (
     VERSIONS_PREFIX,
     enrichment_version_prefix,
@@ -125,7 +126,40 @@ class _FakeClient:
         return {"key": key, "size": len(payload), "sha256": "unused"}
 
 
+NEWLINE = chr(10)
 PROVIDERS = ("beit3", "metaclip2", "perception_encoder")
+
+
+def _mapping_rows(collection: str, videos: int, keyframes: int) -> list[dict]:
+    """Keyframe rows spread evenly across a collection's videos."""
+    per_video = keyframes // videos
+    rows = []
+    for v in range(1, videos + 1):
+        video_id = f"{collection}_V{v:03d}"
+        for i in range(per_video):
+            rows.append(
+                {
+                    "keyframe_id": f"{video_id}_S{i + 1:04d}_K01",
+                    "video_id": video_id,
+                    "feature_file": f"{video_id}.npy",
+                    "feature_index": str(i),
+                    "frame_id": str(i * 10),
+                    "shot_id": str(i + 1),
+                    "timestamp": f"{i}.5",
+                    "image_path": f"data/corpus/keyframes/{collection}/{video_id}/k{i}.jpg",
+                }
+            )
+    return rows
+
+
+def _mapping_csv(rows: list[dict]) -> bytes:
+    columns = [
+        "keyframe_id", "video_id", "feature_file", "feature_index",
+        "frame_id", "shot_id", "timestamp", "image_path",
+    ]
+    lines = [",".join(columns)]
+    lines.extend(",".join(str(row[c]) for c in columns) for row in rows)
+    return (NEWLINE.join(lines) + NEWLINE).encode()
 
 
 def _collection_objects(prefix: str, collection: str, *, videos: int, keyframes: int) -> dict:
@@ -151,10 +185,13 @@ def _collection_objects(prefix: str, collection: str, *, videos: int, keyframes:
     for feature in ("objects", "ocr", "asr"):
         objects[f"{root}/task05a/{feature}.tar.gz"] = b"archive"
         objects[f"{root}/metadata/{feature}/part-000.parquet"] = b"parquet"
+    rows = _mapping_rows(collection, videos, keyframes)
     for provider in PROVIDERS:
-        objects[f"{root}/embeddings/{provider}/manifest.json"] = b"{}"
-        objects[f"{root}/embeddings/{provider}/feature_mapping.csv"] = b"keyframe_id"
-        objects[f"{root}/embeddings/{provider}/L21_V001.npy"] = b"vectors"
+        base = f"{root}/embeddings/{provider}"
+        objects[f"{base}/manifest.json"] = b"{}"
+        objects[f"{base}/feature_mapping.csv"] = _mapping_csv(rows)
+        for video_id in sorted({row["video_id"] for row in rows}):
+            objects[f"{base}/{video_id}.npy"] = b"vectors"
     objects[f"{root}/ocr/manifest.json"] = b"{}"
     objects[f"{root}/asr/manifest.json"] = b"{}"
     return objects
@@ -165,7 +202,7 @@ def _version_objects(
     collections: tuple[str, ...],
     *,
     videos: int = 2,
-    keyframes: int = 7,
+    keyframes: int = 4,
 ) -> dict[str, bytes]:
     """A structurally complete, publishable version."""
     prefix = f"data/versions/enrichment/{version}"
@@ -314,10 +351,8 @@ def test_validation_refuses_an_empty_artifact(tmp_path) -> None:
 
 def test_validation_refuses_a_provider_with_no_vector_file(tmp_path) -> None:
     objects = _bucket()
-    del objects[
-        "data/versions/enrichment/enrich-v1/batch=1/collection=L21"
-        "/embeddings/beit3/L21_V001.npy"
-    ]
+    for key in [k for k in objects if "/embeddings/beit3/" in k and k.endswith(".npy")]:
+        del objects[key]
     client = _FakeClient(objects)
 
     with pytest.raises(EnrichmentVersionError, match="beit3"):
@@ -373,3 +408,105 @@ def test_activation_refuses_a_version_that_fails_artifact_validation(tmp_path) -
         )
 
     assert client.uploaded == []
+
+
+def _rewrite_mappings(objects: dict, rows: list[dict]) -> None:
+    """Replace every provider mapping in the bucket with the given rows."""
+    for key in [k for k in objects if k.endswith("/feature_mapping.csv")]:
+        objects[key] = _mapping_csv(rows)
+
+
+def test_catalog_returns_one_entry_per_keyframe_carrying_every_provider_vector(
+    tmp_path,
+) -> None:
+    client = _FakeClient(_bucket())
+
+    catalog = read_enrichment_catalog(
+        client=client, version="enrich-v1", work_root=tmp_path
+    )
+
+    assert len(catalog["entries"]) == 4
+    entry = catalog["entries"][0]
+    assert entry.video_id == "L21_V001"
+    assert entry.collection_id == "L21"
+    assert set(entry.vectors) == {"beit3", "metaclip2", "perception_encoder"}
+    assert entry.vectors["beit3"] == ("L21_V001.npy", 0)
+
+
+def test_catalog_identity_is_the_video_and_keyframe_pair(tmp_path) -> None:
+    """Organizer ids repeat across videos; the pair must stay distinct."""
+    objects = _bucket()
+    shared = [
+        {
+            "keyframe_id": "034",
+            "video_id": video_id,
+            "feature_file": f"{video_id}.npy",
+            "feature_index": "0",
+            "frame_id": "10",
+            "shot_id": "1",
+            "timestamp": "1.0",
+            "image_path": f"data/corpus/keyframes/L21/{video_id}/034.jpg",
+        }
+        for video_id in ("L21_V001", "L21_V002")
+    ]
+    _rewrite_mappings(objects, shared)
+    ready_key = "data/versions/enrichment/enrich-v1/_READY.json"
+    ready = json.loads(objects[ready_key])
+    ready["keyframe_count"] = 2
+    objects[ready_key] = json.dumps(ready).encode()
+    marker_key = (
+        "data/versions/enrichment/enrich-v1/batch=1/collection=L21/_SUCCESS.json"
+    )
+    marker = json.loads(objects[marker_key])
+    marker["keyframe_count"] = 2
+    objects[marker_key] = json.dumps(marker).encode()
+
+    catalog = read_enrichment_catalog(
+        client=_FakeClient(objects), version="enrich-v1", work_root=tmp_path
+    )
+
+    identities = {(e.video_id, e.keyframe_id) for e in catalog["entries"]}
+    assert identities == {("L21_V001", "034"), ("L21_V002", "034")}
+    assert len(catalog["entries"]) == 2
+
+
+def test_catalog_refuses_a_keyframe_that_one_provider_never_embedded(tmp_path) -> None:
+    objects = _bucket()
+    key = (
+        "data/versions/enrichment/enrich-v1/batch=1/collection=L21"
+        "/embeddings/metaclip2/feature_mapping.csv"
+    )
+    rows = _mapping_rows("L21", 2, 4)
+    objects[key] = _mapping_csv(rows[:-1])
+
+    with pytest.raises(EnrichmentVersionError, match="metaclip2"):
+        read_enrichment_catalog(
+            client=_FakeClient(objects), version="enrich-v1", work_root=tmp_path
+        )
+
+
+def test_catalog_refuses_a_vector_file_the_mapping_declares_but_nobody_published(
+    tmp_path,
+) -> None:
+    objects = _bucket()
+    del objects[
+        "data/versions/enrichment/enrich-v1/batch=1/collection=L21"
+        "/embeddings/beit3/L21_V002.npy"
+    ]
+
+    with pytest.raises(EnrichmentVersionError, match="L21_V002.npy"):
+        read_enrichment_catalog(
+            client=_FakeClient(objects), version="enrich-v1", work_root=tmp_path
+        )
+
+
+def test_catalog_refuses_a_feature_index_that_is_not_a_row_number(tmp_path) -> None:
+    objects = _bucket()
+    rows = _mapping_rows("L21", 2, 4)
+    rows[1]["feature_index"] = "not-a-number"
+    _rewrite_mappings(objects, rows)
+
+    with pytest.raises(EnrichmentVersionError, match="feature_index"):
+        read_enrichment_catalog(
+            client=_FakeClient(objects), version="enrich-v1", work_root=tmp_path
+        )

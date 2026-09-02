@@ -420,6 +420,28 @@ Consumers must resolve `active_enrichment_version` from the manifest rather
 than scanning `data/versions/`, because an unreleased or failed version can be
 present under that prefix by design.
 
+### Building indexes from a version
+
+Index builders read the version itself, not `extraction_status.parquet`. That
+schema has no `video_id` column and no pipeline writes it, while a version
+already publishes a stronger source: each collection `_SUCCESS.json` proves all
+six features completed, and each provider `feature_mapping.csv` carries
+`video_id` next to `keyframe_id` plus `feature_index`, the row number of that
+keyframe inside the provider `.npy`.
+
+`mvr.operations.enrichment_catalog.read_enrichment_catalog` validates the
+version and returns one `CatalogEntry` per keyframe, holding
+`(feature_file, feature_index)` for every declared provider. Identity is always
+the `(video_id, keyframe_id)` pair, never `keyframe_id` alone: the organizer's
+keyframe ids are per-video ordinals, so their 177,321 keyframes carry only 632
+distinct id strings and a keyframe-id-only join attaches one video's vector to
+another video's keyframe.
+
+The read is fail-closed. A keyframe any provider did not embed, a vector file
+the mapping names but nobody published, a duplicate identity, or an unusable
+row index stops the read instead of yielding an index that silently omits or
+misaligns entries.
+
 ## Caching
 
 R2 downloads are cached locally under `.cache/mvr/` (configurable via

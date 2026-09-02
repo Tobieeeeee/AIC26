@@ -2071,3 +2071,43 @@ Verification:
   (read-only, one Class A operation). No version exists on R2 yet, so no
   validation or activation was run against real data.
 
+---
+
+# 2026-09-02 - Index building reads the enrichment version, not extraction status
+
+Status: IMPLEMENTED; UNIT TESTED
+
+Branch: `perf/r2-enrichment-runner`
+
+- Investigated the documented extraction-status blocker rather than assuming
+  it. Measured both corpora: the organizer mapping has 632 distinct
+  `keyframe_id` strings across 177,321 rows, while the activated canonical
+  mapping on R2 has 133,265 distinct ids for 133,265 rows, all carrying
+  `video_id` as a prefix. Two id conventions coexist, so `video_id` must never
+  be parsed out of `keyframe_id`.
+- Enumerated every reference to `extraction_status`: the only production caller
+  of the module is `cli.py` calling `summary()`; `initialize_status`,
+  `update_status`, `find_todo` and `find_failed` are used by tests only; and no
+  code anywhere writes status records, so `consolidate_feature` skips the
+  feature and the Parquet is never produced. The review doc's concern about a
+  large caller surface across the OCR/ASR/embedding pipelines does not hold.
+- Chose to bypass the status table instead of building it. Added
+  `mvr.operations.enrichment_catalog`, which validates a version and returns
+  one `CatalogEntry` per keyframe with `(feature_file, feature_index)` for every
+  declared provider, keyed on the `(video_id, keyframe_id)` pair.
+- The read is fail-closed on cross-provider gaps, unpublished vector files,
+  duplicate identities, missing mapping columns, and unusable row indexes.
+- Not done here: rewiring `milvus_ingest` onto the catalog. Its `_load_mapping`
+  still expects a Parquet with `keyframe_id`/`row_idx` columns and keys on
+  `keyframe_id` alone, while the runner emits a CSV with
+  `keyframe_id`/`video_id`/`feature_file`/`feature_index`. That adapter is the
+  next step and is required by any route to Milvus, not just this one.
+
+Verification:
+
+- `tests/unit/operations/test_enrichment_versioning.py`: 36 passed, including a
+  regression test that two videos sharing keyframe id 034 produce two distinct
+  catalog entries.
+- Canonical mapping identity measured against the live R2 corpus with one
+  read-only GET. No bucket mutation.
+
