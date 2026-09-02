@@ -124,8 +124,11 @@ On an incompatible RTX 5060 Ti it stops before downloading corpus data; do not
 replace those pins without a separate OCR behavior verification.
 Reuse the same run ID/work root after a disconnect. Results are complete on R2
 only when all six features are present and
-`data/staging/enrichment/<run-id>/_READY.json` exists. See
-`R2_DATA_MANAGEMENT.md` for the artifact layout and promotion boundary.
+`data/versions/enrichment/<run-id>/_READY.json` exists. That marker means the
+output is present, not active; run
+`scripts/operations/activate_enrichment_version.py --version <run-id>` to point
+`dataset_manifest.json` at it. See `R2_DATA_MANAGEMENT.md` for the artifact
+layout and the activation boundary.
 
 ### Feature extraction (embeddings + objects)
 

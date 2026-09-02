@@ -3,6 +3,7 @@
     data/
     ├── raw/batchN/videos/Lxx/video.mp4
     ├── staging/{feature}/{run_id}/...
+    ├── versions/{feature}/{version}/...
     └── corpus/
         ├── dataset_manifest.json
         ├── ingest/
@@ -20,6 +21,7 @@ from pathlib import PurePosixPath
 # Top-level prefixes
 RAW_PREFIX = "data/raw"
 STAGING_PREFIX = "data/staging"
+VERSIONS_PREFIX = "data/versions"
 CORPUS_PREFIX = "data/corpus"
 
 
@@ -54,6 +56,38 @@ def staging_key(feature: str, run_id: str, *parts: str) -> str:
     """
     segments = [STAGING_PREFIX, feature, run_id] + list(parts)
     return "/".join(segments)
+
+
+def _require_segment(value: str, name: str) -> str:
+    """Return a value that is safe to use as exactly one object-key segment."""
+    segment = str(value).strip()
+    if not segment:
+        raise ValueError(f"{name} must be non-empty")
+    if "/" in segment or segment in {".", ".."}:
+        raise ValueError(f"{name} must be a single path segment: {value!r}")
+    return segment
+
+
+def version_key(feature: str, version: str, *parts: str) -> str:
+    """Object key inside an immutable, run-scoped version tree.
+
+    Versions live outside ``data/corpus`` on purpose: ``R2Sync.pull_corpus``
+    pulls the corpus prefix blindly, so an unreleased version stored under it
+    would be downloaded by every ``r2 pull --corpus``.  Only the pointer in
+    ``dataset_manifest.json`` decides which version is active.
+    """
+    segments = [
+        VERSIONS_PREFIX,
+        _require_segment(feature, "feature"),
+        _require_segment(version, "version"),
+    ]
+    segments.extend(parts)
+    return "/".join(segments)
+
+
+def enrichment_version_prefix(version: str) -> str:
+    """Run-scoped root holding one immutable enrichment version."""
+    return version_key("enrichment", version)
 
 
 def corpus_key(*parts: str) -> str:

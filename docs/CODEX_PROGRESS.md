@@ -1960,3 +1960,53 @@ Verification:
 - Python compilation, shell syntax, CLI `--help`, and `git diff --check`: passed.
 - No real model inference, R2 upload, canonical promotion, or RTX 5060 Ti OCR
   compatibility claim was made by this change.
+
+---
+
+# 2026-09-02 - Enrichment output moved to immutable versions with an active pointer
+
+Status: IMPLEMENTED; UNIT TESTED; NO REAL R2 MUTATION
+
+Branch: `perf/r2-enrichment-runner`
+
+- Replaced the enrichment staging destination with an immutable, run-scoped
+  version tree at `data/versions/enrichment/<version>/`. Versions deliberately
+  live outside `data/corpus` because `R2Sync.pull_corpus` pulls that prefix
+  blindly and would download every unreleased version.
+- Added `version_key()`, `enrichment_version_prefix()`, and `VERSIONS_PREFIX`
+  to `mvr.operations.r2_layout`, with single-segment validation for the feature
+  and version ids.
+- Added `mvr.operations.enrichment_version` holding the manifest pointer
+  schema (`active_enrichment_version` plus an `enrichment` block recording the
+  prefix, activation time, and the version it replaced) and the fail-closed
+  activation operation.
+- Added `scripts/operations/activate_enrichment_version.py`. Activation lists
+  the version prefix once, requires `_READY.json` and one `_SUCCESS.json` per
+  declared collection, backs up the current `dataset_manifest.json` under
+  `data/versions/manifest-backups/<activated_at>/`, and then writes the pointer.
+  No artifact is copied; rollback is the same command with the previous id.
+- Added the destination prefix to the runner's resume fingerprint. Without it a
+  state file written under the old staging layout would resume as "uploaded",
+  skip every upload, and still publish `_SUCCESS.json` into an empty version.
+- Estimated cost for a full Batch1 run over the activated corpus: ~273,500
+  Class B and ~3,000 Class A operations, plus 3 Class A to activate. The
+  superseded staging-plus-copy promotion would have added ~2,800 Class A on
+  first activation and ~5,600 on every re-activation.
+
+Verification:
+
+- `tests/unit/operations/test_enrichment_versioning.py` (new, 25 checks),
+  `tests/unit/scripts/test_activate_enrichment_version.py` (new),
+  `tests/unit/operations/test_r2_enrichment.py`: passed.
+- `scripts/operations/activate_enrichment_version.py --help`: passed.
+- Full `tests/unit` regression: 1,467 passed, 5 skipped. The five skips are the
+  `pymilvus` gates from the uninstalled `[milvus]` extra.
+- Environment note: `polars==1.43.2` belongs to the optional `[operations]`
+  extra added by `72d5d1a` (2026-08-27), which postdates this `.venv`
+  (2026-08-19). Until it was installed, six `test_ingestion_promotion.py`
+  checks failed as `IngestionPromotionError` and the synthetic six-feature
+  runner test skipped silently, hiding both behind non-obvious symptoms. The
+  same extra still lacks `boto3` and `python-dotenv` here, so no R2 call can be
+  made from this machine; `run_enrichment_rtx5060ti.sh` does not preflight any
+  of the three.
+- No R2 bucket read, write, or activation was performed.

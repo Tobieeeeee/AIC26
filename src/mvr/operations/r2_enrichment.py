@@ -35,7 +35,12 @@ from mvr.enrichment.embeddings.offline import (
 from mvr.enrichment.embeddings.provider_specs import ProviderSpec, ProviderSpecRegistry
 from mvr.enrichment.feature_extraction import extract_objects
 from mvr.operations.consolidate import consolidate_to_parquet
-from mvr.operations.r2_layout import raw_video_key, staging_key
+from mvr.operations.r2_layout import (
+    enrichment_version_prefix,
+    raw_video_key,
+    staging_key,
+    version_key,
+)
 from mvr.operations.r2_sync import R2Sync, SyncStats
 
 
@@ -769,6 +774,7 @@ class R2EnrichmentRunner:
             "video_ids": sorted(self.video_ids) if self.video_ids is not None else None,
             "ocr_model_lock_sha256": self.config.ocr_model_lock_sha256,
             "asr": self._asr_config_identity(),
+            "destination_prefix": self._run_prefix(),
         }
         if self.state_path.is_file():
             state = _read_json(self.state_path)
@@ -800,8 +806,12 @@ class R2EnrichmentRunner:
             completed.sort(key=_collection_sort)
             self._save_state()
 
+    def _run_prefix(self) -> str:
+        """Root of this run's immutable version tree."""
+        return enrichment_version_prefix(self.config.run_id)
+
     def _stage_prefix(self, collection: str) -> str:
-        return staging_key(
+        return version_key(
             "enrichment",
             self.config.run_id,
             f"batch={_canonical_batch_id(self.config.batch_id)}",
@@ -1328,7 +1338,7 @@ class R2EnrichmentRunner:
             "completed_at": _utc_now(),
         }
         _atomic_json(self.report_path, report)
-        run_prefix = staging_key("enrichment", self.config.run_id)
+        run_prefix = self._run_prefix()
         if not self.sync.push_file(
             self.report_path,
             f"{run_prefix}/enrichment_report.json",

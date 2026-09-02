@@ -382,7 +382,7 @@ def test_synthetic_runner_stages_ready_bundle_without_per_keyframe_object_puts(
     assert encoder_loads == ["beit3", "perception_encoder"]
     assert ocr_runs == [(row["keyframe_id"],)]
     assert asr_loads == ["asr"]
-    prefix = "data/staging/enrichment/enrich-test/"
+    prefix = "data/versions/enrichment/enrich-test/"
     remote_keys = {key for key in fake_client.objects if key.startswith(prefix)}
     assert f"{prefix}_READY.json" in remote_keys
     ready = json.loads(fake_client.objects[f"{prefix}_READY.json"])
@@ -414,3 +414,86 @@ def test_synthetic_runner_stages_ready_bundle_without_per_keyframe_object_puts(
             asr_stage_factory=FakeASRStage,
             duration_resolver=lambda _: 10.0,
         ).run()
+
+
+def test_resume_state_from_a_different_destination_prefix_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """A state file written before the versioned layout must not be resumed.
+
+    Its stage markers claim uploads are done, so resuming it would skip every
+    upload and still write _SUCCESS.json into an otherwise empty version.
+    """
+    config = EnrichmentRunConfig(
+        run_id="enrich-test",
+        batch_id="1",
+        collections=("L21",),
+        work_root=tmp_path,
+        ocr_model_lock_sha256="0" * 64,
+    )
+    runner = R2EnrichmentRunner(
+        sync=R2Sync(client=object(), local_root=tmp_path),
+        config=config,
+        provider_specs=load_provider_specs(Path("configs/embedding_providers.json")),
+        detector_factory=lambda: None,
+        encoder_factory=lambda provider_id, spec: None,
+        ocr_runner=lambda mapping, videos, output, temp: {},
+        asr_stage_factory=lambda: None,
+    )
+    runner._load_state("a" * 64)
+    assert (
+        runner.state["fingerprint"]["destination_prefix"]
+        == "data/versions/enrichment/enrich-test"
+    )
+
+    legacy = json.loads((tmp_path / "enrichment_state.json").read_text(encoding="utf-8"))
+    legacy["fingerprint"]["destination_prefix"] = "data/staging/enrichment/enrich-test"
+    legacy["completed"] = {"objects_uploaded": ["L21"]}
+    (tmp_path / "enrichment_state.json").write_text(
+        json.dumps(legacy), encoding="utf-8"
+    )
+
+    with pytest.raises(R2EnrichmentError, match="resume state does not match"):
+        R2EnrichmentRunner(
+            sync=R2Sync(client=object(), local_root=tmp_path),
+            config=config,
+            provider_specs=load_provider_specs(
+                Path("configs/embedding_providers.json")
+            ),
+            detector_factory=lambda: None,
+            encoder_factory=lambda provider_id, spec: None,
+            ocr_runner=lambda mapping, videos, output, temp: {},
+            asr_stage_factory=lambda: None,
+        )._load_state("a" * 64)
+
+
+def _runner(tmp_path: Path, run_id: str = "enrich-test") -> R2EnrichmentRunner:
+    return R2EnrichmentRunner(
+        sync=R2Sync(client=object(), local_root=tmp_path),
+        config=EnrichmentRunConfig(
+            run_id=run_id,
+            batch_id="1",
+            collections=("L21",),
+            work_root=tmp_path,
+            ocr_model_lock_sha256="0" * 64,
+        ),
+        provider_specs=load_provider_specs(Path("configs/embedding_providers.json")),
+        detector_factory=lambda: None,
+        encoder_factory=lambda provider_id, spec: None,
+        ocr_runner=lambda mapping, videos, output, temp: {},
+        asr_stage_factory=lambda: None,
+    )
+
+
+def test_collection_output_goes_to_an_immutable_version_outside_the_corpus_tree(
+    tmp_path: Path,
+) -> None:
+    prefix = _runner(tmp_path)._stage_prefix("L21")
+
+    assert prefix == "data/versions/enrichment/enrich-test/batch=1/collection=L21"
+    assert not prefix.startswith("data/corpus/")
+    assert not prefix.startswith("data/staging/")
+
+
+def test_run_level_markers_go_to_the_version_root(tmp_path: Path) -> None:
+    assert _runner(tmp_path)._run_prefix() == "data/versions/enrichment/enrich-test"

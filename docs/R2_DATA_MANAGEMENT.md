@@ -16,6 +16,9 @@ data/
     batch{batch_id}/videos/{collection_id}/{video_id}.mp4
   staging/
     {feature}/{run_id}/{filename}
+  versions/
+    enrichment/{version}/batch={batch_id}/collection={collection_id}/...
+    manifest-backups/{activated_at}/dataset_manifest.json
   corpus/
     dataset_manifest.json
     ingest/
@@ -30,6 +33,11 @@ data/
 
 - **`data/raw/`** — original competition videos (read-only source of truth).
 - **`data/staging/`** — per-run extraction outputs before consolidation.
+- **`data/versions/`** — immutable, run-scoped enrichment outputs. A version is
+  never edited after `_READY.json`; `dataset_manifest.json` holds the pointer
+  that decides which one is active. Kept outside `data/corpus` on purpose:
+  `r2 pull --corpus` pulls that prefix blindly and would otherwise download
+  every unreleased version.
 - **`data/corpus/`** — canonical, consolidated artifacts (keyframes, metadata
   Parquets, embedding vectors, indexes, reports).
 
@@ -334,7 +342,7 @@ cache instead of spawning FFmpeg for every keyframe.
 The result layout is:
 
 ```text
-data/staging/enrichment/<run-id>/
+data/versions/enrichment/<run-id>/
   batch=1/collection=<Lxx>/
     embeddings/{beit3,metaclip2,perception_encoder}/
     metadata/{objects,ocr,asr}/part-000.parquet
@@ -352,9 +360,9 @@ and ASR are consolidated once per collection into typed Parquet. A collection
 `_SUCCESS.json` now requires all six branches: objects, BEiT-3, MetaCLIP-2,
 PE-Core-L, OCR, and ASR. `_READY.json` is written last only after every selected
 collection satisfies that contract. These markers mean the VM output is safely
-present on R2. They do **not** mean the artifacts are canonical: this runner
-never overwrites `data/corpus`, and a separate validation/promotion step is
-still required. Extraction-status Parquet is also deliberately not fabricated
+present on R2. They do **not** mean the artifacts are active: this runner
+never overwrites `data/corpus`, and the pointer swap below is a separate,
+explicit step. Extraction-status Parquet is also deliberately not fabricated
 here because its current shared schema lacks `video_id`; that identity gap must
 be resolved before status or Milvus ingest can be safely promoted.
 
@@ -371,6 +379,30 @@ canary inside both OCR images before any R2 input download; a failure stops the
 run and requires a separately validated pinned-image rebuild rather than an
 implicit dependency upgrade.
 
+### Activate an enrichment version
+
+Publishing a version does not make it active. Activation validates the version
+and swaps one pointer:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\operations\activate_enrichment_version.py `
+  --version "enrich-batch1-5060ti-v1"
+```
+
+The command lists the version prefix once, requires `_READY.json` plus a
+`_SUCCESS.json` for every collection that marker declares, backs up the current
+`dataset_manifest.json` under `data/versions/manifest-backups/<activated_at>/`,
+and then writes the manifest with `active_enrichment_version` set. It copies no
+artifact, so activation costs one listing and two PUTs regardless of corpus
+size.
+
+Roll back by running the same command with the previous version id; the report
+of every activation names the version it replaced under `previous_version`.
+
+Consumers must resolve `active_enrichment_version` from the manifest rather
+than scanning `data/versions/`, because an unreleased or failed version can be
+present under that prefix by design.
+
 ## Caching
 
 R2 downloads are cached locally under `.cache/mvr/` (configurable via
@@ -383,3 +415,8 @@ already cached unless `--force` is passed.
 Cloudflare R2 has **zero egress fees**, so pulling data to any machine
 (local or cloud GPU) is free. You pay only for storage ($0.015/GB-month)
 and operations ($4.50/million Class A, $0.36/million Class B).
+
+A full Batch1 enrichment run over the activated corpus (872 videos, 133,265
+keyframes) costs roughly 273,500 Class B operations (~$0.10) and ~3,000 Class A
+operations (~$0.014); activating the resulting version adds three more Class A
+operations. Both stay inside the free monthly allowance.
