@@ -1,5 +1,6 @@
 import sys
 import os
+import time
 import cv2
 import json
 import argparse
@@ -9,6 +10,7 @@ from pathlib import Path
 REPOSITORY_SRC = Path(__file__).resolve().parents[3] / "src"
 sys.path.insert(0, str(REPOSITORY_SRC))
 from mvr.enrichment.ocr.model_integrity import ModelIntegrityError, verify_model_file
+from mvr.enrichment.ocr.worker_timing import format_stage_timing
 import cv2
 import json
 import argparse
@@ -86,6 +88,9 @@ def main():
             print(f"ERROR: DeepSolo initialization failed: {e}", file=sys.stderr)
             sys.exit(1)
 
+    started = time.perf_counter()
+    processed = 0
+    skipped = 0
     for req_file in sorted(requests_dir.rglob("*.json")):
         req = read_json_file(req_file, OcrRequest)
         out_file = output_dir / req_file.relative_to(requests_dir)
@@ -100,6 +105,7 @@ def main():
                     and existing.source_frame_idx == req.source_frame_idx
                     and existing.image_path == req.image_path
                 ):
+                    skipped += 1
                     continue
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 pass
@@ -129,6 +135,7 @@ def main():
                     continue
 
                 outputs = predictor(img)
+                processed += 1
                 instances = outputs["instances"]
 
                 # DeepSolo returns polygons, pred_boxes, and scores
@@ -177,6 +184,15 @@ def main():
         )
         write_json_file(det_result, out_file)
 
+    print(
+        format_stage_timing(
+            "deepsolo",
+            processed=processed,
+            skipped=skipped,
+            seconds=time.perf_counter() - started,
+        ),
+        flush=True,
+    )
     print("DeepSolo worker finished.")
 
 if __name__ == "__main__":
