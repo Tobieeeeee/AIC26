@@ -106,10 +106,11 @@ marker before recording the video as complete locally. See
 
 For an already-activated ingestion corpus, use
 `scripts/operations/run_enrichment_r2.py` (or the RTX 5060 Ti wrapper
-`scripts/operations/run_enrichment_rtx5060ti.sh`). It stages RF-DETR objects
-and the three canonical embedding-provider artifacts without downloading raw
-videos or rerunning ingestion. Canonical promotion remains a separate guarded
-operation.
+`scripts/operations/run_enrichment_rtx5060ti.sh`). It stages RF-DETR objects,
+the three canonical embedding-provider artifacts, production DeepSolo/PARSeq
+OCR, and Silero/ChunkFormer ASR without rerunning ingestion. Canonical JPEGs
+feed the visual branches; each raw MP4 is downloaded once and shared by OCR
+and ASR. Canonical promotion remains a separate guarded operation.
 
 ## Verified semantic retrieval commands
 

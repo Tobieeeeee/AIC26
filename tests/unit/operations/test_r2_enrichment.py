@@ -15,6 +15,7 @@ from mvr.operations.r2_enrichment import (
     R2EnrichmentError,
     R2EnrichmentRunner,
     build_input_transfers,
+    build_raw_video_transfers,
     prepare_collection_work,
 )
 from mvr.operations.r2_sync import R2Sync
@@ -72,6 +73,15 @@ def test_collection_plan_uses_active_ingestion_run_and_exact_r2_keys(tmp_path: P
         "L21_V001/selector_embeddings/metaclip2/L21_V001.npy"
     ) in keys
     assert len(transfers) == 8  # 2 keyframes + 3 selector files per video
+    assert [
+        key
+        for key, _ in build_raw_video_transfers(
+            plans, local_r2_root=tmp_path / "r2"
+        )
+    ] == [
+        "data/raw/batch1/videos/L21/L21_V001.mp4",
+        "data/raw/batch1/videos/L21/L21_V002.mp4",
+    ]
 
 
 def test_collection_plan_rejects_image_key_outside_canonical_video(tmp_path: Path) -> None:
@@ -114,6 +124,25 @@ def test_synthetic_runner_stages_ready_bundle_without_per_keyframe_object_puts(
         writer = csv.DictWriter(stream, fieldnames=mapping_columns)
         writer.writeheader()
         writer.writerow(row)
+    shots_path = tmp_path / "shots.parquet"
+    pytest.importorskip("polars").DataFrame(
+        [
+            {
+                "video_id": row["video_id"],
+                "collection_id": "L21",
+                "batch_id": "batch1",
+                "method": "transnetv2",
+                "shot_id": 1,
+                "start_frame": 0,
+                "end_frame": 100,
+                "fps": 10.0,
+                "start_time": 0.0,
+                "end_time": 10.1,
+                "duration": 10.1,
+                "frame_count": 101,
+            }
+        ]
+    ).write_parquet(shots_path)
 
     specs = load_provider_specs(Path("configs/embedding_providers.json"))
     metaclip_spec = specs.get("metaclip2")
@@ -144,7 +173,9 @@ def test_synthetic_runner_stages_ready_bundle_without_per_keyframe_object_puts(
                     {"collections": {"L21": {"run_id": "ingest-local"}}}
                 ).encode(),
                 "data/corpus/ingest/keyframe_mapping.csv": mapping_path.read_bytes(),
+                "data/corpus/ingest/shots.parquet": shots_path.read_bytes(),
                 row["image_path"]: b"synthetic-jpeg",
+                row["video_object_key"]: b"synthetic-mp4",
             }
             selector_prefix = (
                 "data/staging/ingestion/ingest-local/batch=1/collection=L21/"
@@ -213,6 +244,8 @@ def test_synthetic_runner_stages_ready_bundle_without_per_keyframe_object_puts(
     fake_client = FakeClient()
     detector_loads = []
     encoder_loads = []
+    ocr_runs = []
+    asr_loads = []
 
     def detector_factory():
         detector_loads.append("rfdetr")
@@ -222,6 +255,98 @@ def test_synthetic_runner_stages_ready_bundle_without_per_keyframe_object_puts(
         encoder_loads.append(provider_id)
         return FakeEncoder(spec.embedding_dimension)
 
+    def ocr_runner(mapping, videos, output, temp):
+        del videos, temp
+        with Path(mapping).open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+        for item in rows:
+            target = Path(output) / item["video_id"] / f"{item['keyframe_id']}.json"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(
+                json.dumps(
+                    {
+                        "keyframe_id": item["keyframe_id"],
+                        "video_id": item["video_id"],
+                        "shot_id": int(item["shot_id"]),
+                        "anchor_frame_idx": int(item["frame_idx"]),
+                        "anchor_timestamp": float(item["timestamp"]),
+                        "texts": [
+                            {
+                                "text": "TIN CHÍNH",
+                                "conf": 0.9,
+                                "support_count": 2,
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        manifest = {
+            "schema_version": "2.0",
+            "keyframe_count": len(rows),
+            "json_file_count": len(rows),
+            "canonical_text_count": len(rows),
+        }
+        (Path(output) / "manifest.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        ocr_runs.append(tuple(item["keyframe_id"] for item in rows))
+        return manifest
+
+    class FakeASRStage:
+        def __init__(self):
+            asr_loads.append("asr")
+
+        def __call__(self, dataset_root, output_root):
+            with (Path(dataset_root) / "keyframe_mapping.csv").open(
+                newline="", encoding="utf-8"
+            ) as stream:
+                rows = list(csv.DictReader(stream))
+            for item in rows:
+                target = (
+                    Path(output_root)
+                    / item["video_id"]
+                    / f"{item['keyframe_id']}.json"
+                )
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(
+                    json.dumps(
+                        {
+                            "video_id": item["video_id"],
+                            "keyframe_id": item["keyframe_id"],
+                            "frame_idx": int(item["frame_idx"]),
+                            "timestamp": float(item["timestamp"]),
+                            "shot_id": int(item["shot_id"]),
+                            "text": "xin chào",
+                            "segments": [],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+            manifest = {
+                "format": "mvr-asr-keyframe-v1",
+                "audio": {
+                    "sample_rate": 16000,
+                    "pre_seconds": 3.0,
+                    "post_seconds": 3.0,
+                },
+                "vad": {"merge_gap_ms": 250},
+                "counts": {"keyframes_total": len(rows), "keyframes_failed": 0},
+            }
+            Path(output_root).mkdir(parents=True, exist_ok=True)
+            (Path(output_root) / "manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            (Path(output_root) / "errors.json").write_text(
+                '{"errors": [], "warnings": []}', encoding="utf-8"
+            )
+            return manifest
+
+        def close(self):
+            return None
+
     work = tmp_path / "work"
     report = R2EnrichmentRunner(
         sync=R2Sync(client=fake_client, local_root=work),
@@ -230,6 +355,7 @@ def test_synthetic_runner_stages_ready_bundle_without_per_keyframe_object_puts(
             batch_id="1",
             collections=("L21",),
             work_root=work,
+            ocr_model_lock_sha256="0" * 64,
             keyframe_download_workers=2,
             upload_workers=2,
             embedding_batch_size=1,
@@ -237,15 +363,54 @@ def test_synthetic_runner_stages_ready_bundle_without_per_keyframe_object_puts(
         provider_specs=specs,
         detector_factory=detector_factory,
         encoder_factory=encoder_factory,
+        ocr_runner=ocr_runner,
+        asr_stage_factory=FakeASRStage,
+        duration_resolver=lambda _: 10.0,
     ).run()
 
     assert report["status"] == "READY"
+    assert report["schema_version"] == "2.0"
+    assert report["features"] == [
+        "objects",
+        "beit3",
+        "metaclip2",
+        "perception_encoder",
+        "ocr",
+        "asr",
+    ]
     assert detector_loads == ["rfdetr"]
     assert encoder_loads == ["beit3", "perception_encoder"]
+    assert ocr_runs == [(row["keyframe_id"],)]
+    assert asr_loads == ["asr"]
     prefix = "data/staging/enrichment/enrich-test/"
     remote_keys = {key for key in fake_client.objects if key.startswith(prefix)}
     assert f"{prefix}_READY.json" in remote_keys
+    ready = json.loads(fake_client.objects[f"{prefix}_READY.json"])
+    assert ready["features"][-2:] == ["ocr", "asr"]
     assert any(key.endswith("/task05a/objects.tar.gz") for key in remote_keys)
     assert any(key.endswith("/metadata/objects/part-000.parquet") for key in remote_keys)
+    assert any(key.endswith("/metadata/ocr/part-000.parquet") for key in remote_keys)
+    assert any(key.endswith("/metadata/asr/part-000.parquet") for key in remote_keys)
+    assert any(key.endswith("/task05a/ocr.tar.gz") for key in remote_keys)
+    assert any(key.endswith("/task05a/asr.tar.gz") for key in remote_keys)
     assert any(key.endswith("/embeddings/metaclip2/L21_V001.npy") for key in remote_keys)
     assert not any(key.endswith(f"/{row['keyframe_id']}.json") for key in remote_keys)
+
+    with pytest.raises(R2EnrichmentError, match="resume state does not match"):
+        R2EnrichmentRunner(
+            sync=R2Sync(client=fake_client, local_root=work),
+            config=EnrichmentRunConfig(
+                run_id="enrich-test",
+                batch_id="1",
+                collections=("L21",),
+                work_root=work,
+                ocr_model_lock_sha256="0" * 64,
+                asr_pre_seconds=4.0,
+            ),
+            provider_specs=specs,
+            detector_factory=detector_factory,
+            encoder_factory=encoder_factory,
+            ocr_runner=ocr_runner,
+            asr_stage_factory=FakeASRStage,
+            duration_resolver=lambda _: 10.0,
+        ).run()

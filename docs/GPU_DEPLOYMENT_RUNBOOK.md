@@ -100,8 +100,9 @@ python -m mvr.cli milvus status
 
 ### Activated R2 Batch1 on RTX 5060 Ti
 
-When canonical ingestion already exists on R2, use the enrichment-only wrapper
-instead of pulling the complete corpus or rerunning raw-video ingestion:
+When canonical ingestion already exists on R2, use the full enrichment wrapper
+instead of pulling the complete corpus or rerunning raw-video ingestion. It
+runs objects, three visual embeddings, production OCR, and production ASR:
 
 ```bash
 ./scripts/operations/run_enrichment_rtx5060ti.sh \
@@ -114,9 +115,15 @@ instead of pulling the complete corpus or rerunning raw-video ingestion:
   /home/ezycloudx-admin/aic26_enrichment
 ```
 
-The wrapper requires `.env` to point at the pinned RF-DETR, BEiT-3, and
-PE-Core-L checkpoints. Reuse the same run ID/work root after a disconnect.
-Results are complete on R2 only when
+The wrapper requires `.env` to point at the pinned RF-DETR, BEiT-3, PE-Core-L,
+and OCR checkpoints. It also requires the two pinned OCR GPU images and native
+Silero/ChunkFormer imports in `.venv`; these are preflighted before execution.
+Because the reused OCR images carry older pinned CUDA/PyTorch stacks, the
+wrapper also executes a real CUDA matrix-operation canary inside each image.
+On an incompatible RTX 5060 Ti it stops before downloading corpus data; do not
+replace those pins without a separate OCR behavior verification.
+Reuse the same run ID/work root after a disconnect. Results are complete on R2
+only when all six features are present and
 `data/staging/enrichment/<run-id>/_READY.json` exists. See
 `R2_DATA_MANAGEMENT.md` for the artifact layout and promotion boundary.
 

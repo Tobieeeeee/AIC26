@@ -270,13 +270,21 @@ The real Batch1 activation `batch1-hybrid-20260901` completed with 872 videos,
 identity, removed 251 stale L24 images after backup, and marked downstream data
 `REBUILD_REQUIRED`.
 
-## Optimized enrichment-only run from canonical keyframes
+## Optimized full enrichment run from canonical ingestion
 
 After ingestion activation, do **not** use the old full mode of
 `run_pipeline_local.py`: that mode downloads raw videos and runs ingestion
-again. Use the dedicated enrichment runner. It downloads the canonical JPEGs
-once, shares that local tree across every feature, and publishes only to a
-run-scoped staging prefix.
+again. Use the dedicated enrichment runner. It downloads canonical JPEGs once
+for RF-DETR and the three visual providers. It separately downloads each raw
+MP4 once and shares that file between production OCR and ASR. It publishes
+only to a run-scoped staging prefix.
+
+Before the first run, the VM must have the two pinned OCR images
+`mvr-ocr-deepsolo:task04b` and `mvr-ocr-parseq-vi:task04b`, verified OCR
+weights under `MVR_OCR_WEIGHTS_ROOT` (default `artifacts/_ocr_models`), and the
+pinned ASR dependencies/model cache available in `.venv`. The wrapper checks
+Docker, both OCR images, and the native ChunkFormer/Silero imports before it
+starts an expensive R2 transfer.
 
 One-video canary on Linux/RTX 5060 Ti:
 
@@ -305,6 +313,7 @@ The equivalent direct command is:
   --work-root /home/ezycloudx-admin/aic26_enrichment \
   --device cuda \
   --download-workers 24 \
+  --raw-download-workers 4 \
   --upload-workers 12 \
   --embedding-batch-size 8
 ```
@@ -313,9 +322,14 @@ Use the same `--run-id` and `--work-root` to resume. Exact R2 downloads are
 atomic and existing local files are skipped. Upload retries list the collection
 prefix once and skip remote objects with the same size, avoiding duplicate
 PUTs. Model execution is provider-major: RF-DETR, BEiT-3, and PE-Core-L are
-each loaded once and reused across all selected collections; only one GPU model
-is resident at a time. MetaCLIP-2 is not loaded because the runner validates
-and merges the selected-vector artifacts already produced during ingestion.
+each loaded once and reused across all selected collections; only one in-process
+GPU model is resident at a time. MetaCLIP-2 is not loaded because the runner
+validates and merges the selected-vector artifacts already produced during
+ingestion. OCR creates one combined resumable Docker job for every still-
+currently pending collection, so DeepSolo and PARSeq each load once. ASR constructs
+Silero and ChunkFormer once, keeps the independent +/-3 second keyframe
+contract, but decodes a video's 16 kHz mono audio once into a one-video PCM
+cache instead of spawning FFmpeg for every keyframe.
 
 The result layout is:
 
@@ -323,23 +337,39 @@ The result layout is:
 data/staging/enrichment/<run-id>/
   batch=1/collection=<Lxx>/
     embeddings/{beit3,metaclip2,perception_encoder}/
-    metadata/objects/part-000.parquet
-    task05a/objects.tar.gz
+    metadata/{objects,ocr,asr}/part-000.parquet
+    task05a/{objects,ocr,asr}.tar.gz
+    ocr/manifest.json
+    asr/manifest.json
     collection_report.json
     _SUCCESS.json
   enrichment_report.json
   _READY.json
 ```
 
-`objects.tar.gz` replaces one PUT per keyframe object envelope; the flat object
-rows are consolidated once per collection into Parquet. `_SUCCESS.json` is
-written last for each collection and `_READY.json` last for the run. These
-markers mean the VM output is safely present on R2. They do **not** mean the
-artifacts are canonical: this runner never overwrites `data/corpus`, and a
-separate validation/promotion step is still required. Extraction-status
-Parquet is also deliberately not fabricated here because its current shared
-schema lacks `video_id`; that identity gap must be resolved before status or
-Milvus ingest can be safely promoted.
+The three archives replace one PUT per keyframe JSON envelope. Objects, OCR,
+and ASR are consolidated once per collection into typed Parquet. A collection
+`_SUCCESS.json` now requires all six branches: objects, BEiT-3, MetaCLIP-2,
+PE-Core-L, OCR, and ASR. `_READY.json` is written last only after every selected
+collection satisfies that contract. These markers mean the VM output is safely
+present on R2. They do **not** mean the artifacts are canonical: this runner
+never overwrites `data/corpus`, and a separate validation/promotion step is
+still required. Extraction-status Parquet is also deliberately not fabricated
+here because its current shared schema lacks `video_id`; that identity gap must
+be resolved before status or Milvus ingest can be safely promoted.
+
+With a complete Batch1 run, raw-video R2 reads are bounded at roughly one GET
+per selected video (872 for the current activated corpus), not one GET per OCR
+frame or ASR window. `--evict-after-push` removes a collection's JPEGs, raw
+MP4s, selector inputs, and local artifacts only after the six-feature success
+marker has been uploaded.
+
+The current production OCR images retain their reuse-baseline CUDA/PyTorch
+pins. On newer GPUs such as RTX 5060 Ti, image presence alone does not prove
+kernel compatibility. The wrapper therefore runs a CUDA matrix-operation
+canary inside both OCR images before any R2 input download; a failure stops the
+run and requires a separately validated pinned-image rebuild rather than an
+implicit dependency upgrade.
 
 ## Caching
 

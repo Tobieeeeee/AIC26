@@ -460,14 +460,27 @@ No model, checkpoint, threshold, preprocessing, normalization, embedding
 dimension, RF-DETR detection behavior, or Task05A projection changes here.
 The optimized runner reuses the existing RF-DETR Large adapter, BEiT-3 and
 PE-Core-L image encoders, provider-neutral artifact writer, selector-produced
-MetaCLIP-2 artifacts, and flat object-staging schema. Scheduling changes from
+MetaCLIP-2 artifacts, production DeepSolo/PARSeq OCR, per-keyframe Silero VAD
++ ChunkFormer ASR, and existing Parquet schemas. Scheduling changes from
 constructing BEiT-3/PE once per video to retaining one provider runtime across
 all selected collections. Canonical keyframes are prefetched once and shared
-by all providers. Object staging rows are consolidated once per collection;
-the unchanged Task05A JSON envelopes are packaged into a transport archive to
-avoid one R2 PUT per keyframe. Run-scoped success/ready markers do not promote
-or mutate canonical data. Synthetic exact-key download/upload-resume,
-collection planning, provider merge, and identity/audit tests verify this
+by all visual providers. Each raw MP4 is downloaded once and shared by OCR and
+ASR. OCR keeps the F-1/F/F+1 temporal consolidation and runs one combined
+resumable Docker job for all pending collections. ASR keeps an independent
+clamped +/-3 second window, one VAD call per keyframe, the same merge rule, and
+the same ChunkFormer provider; only its audio transport changes from one
+FFmpeg subprocess per keyframe to one full-video 16 kHz mono decode backed by
+a one-video memory-mapped PCM cache. The PCM is sliced at the requested window
+boundaries and evicted when the next video starts. This is an explicitly
+approved performance change, not a model/threshold change.
+
+Object, OCR, and ASR staging rows are consolidated once per collection; their
+unchanged per-keyframe Task05A envelopes are packaged into three transport
+archives to avoid one R2 PUT per JSON. Collection success and run readiness
+require objects, all three embeddings, OCR, and ASR. Run-scoped markers do not
+promote or mutate canonical data. Synthetic exact-key keyframe/raw-video
+download, compact upload/resume, collection planning, provider merge,
+six-feature readiness, identity/audit, and cached-audio tests verify this
 operational boundary; a real Batch1 GPU run remains pending.
 
 ## Milvus production semantic runtime fix

@@ -9,6 +9,7 @@ import sys
 import time
 from pathlib import Path
 
+from mvr.enrichment.embeddings.artifacts import sha256_file
 from mvr.enrichment.embeddings.provider_specs import load_provider_specs
 from mvr.operations.r2_client import R2Client
 from mvr.operations.r2_enrichment import (
@@ -32,6 +33,10 @@ def _env_path(name: str) -> Path | None:
     return Path(value).expanduser() if value else None
 
 
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _default_pe_checkpoint() -> Path | None:
     configured = _env_path("MVR_PE_CHECKPOINT")
     if configured is not None:
@@ -50,7 +55,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "R2 canonical keyframes -> RF-DETR + BEiT-3 + selector MetaCLIP-2 "
-            "+ PE-Core-L -> run-scoped R2 staging"
+            "+ PE-Core-L; raw videos -> DeepSolo/PARSeq OCR + Silero/ChunkFormer "
+            "ASR -> run-scoped R2 staging"
         )
     )
     parser.add_argument(
@@ -64,6 +70,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--work-root", type=Path, default=Path("_enrichment_work"))
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--download-workers", type=int, default=24)
+    parser.add_argument("--raw-download-workers", type=int, default=4)
     parser.add_argument("--upload-workers", type=int, default=12)
     parser.add_argument("--embedding-batch-size", type=int, default=8)
     parser.add_argument(
@@ -76,16 +83,111 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--pe-checkpoint", type=Path, default=None)
     parser.add_argument("--detector-threshold", type=float, default=0.4)
     parser.add_argument(
+        "--ocr-model-lock",
+        type=Path,
+        default=Path("docker/ocr/model_sources.lock.json"),
+    )
+    parser.add_argument("--ocr-weights-root", type=Path, default=None)
+    parser.add_argument("--asr-device", default=None)
+    parser.add_argument("--asr-sample-rate", type=int, default=16000)
+    parser.add_argument("--asr-pre-seconds", type=float, default=3.0)
+    parser.add_argument("--asr-post-seconds", type=float, default=3.0)
+    parser.add_argument("--asr-merge-gap-ms", type=int, default=250)
+    parser.add_argument(
+        "--asr-allow-download",
+        action="store_true",
+        help="Allow the pinned ChunkFormer revision to enter the Hugging Face cache",
+    )
+    parser.add_argument(
         "--evict-after-push",
         action="store_true",
         help="Remove local collection artifacts/keyframes only after its R2 success marker",
     )
     args = parser.parse_args(argv)
-    if args.download_workers < 1 or args.upload_workers < 1:
+    if (
+        args.download_workers < 1
+        or args.raw_download_workers < 1
+        or args.upload_workers < 1
+    ):
         parser.error("worker counts must be positive")
     if args.embedding_batch_size < 1:
         parser.error("--embedding-batch-size must be positive")
+    if args.asr_sample_rate < 1:
+        parser.error("--asr-sample-rate must be positive")
+    if args.asr_pre_seconds < 0 or args.asr_post_seconds < 0:
+        parser.error("ASR window sizes must be non-negative")
+    if args.asr_merge_gap_ms < 0:
+        parser.error("--asr-merge-gap-ms must be non-negative")
     return args
+
+
+def _run_ocr_stage(
+    mapping: Path,
+    videos: Path,
+    output: Path,
+    temp: Path,
+    *,
+    model_lock: Path,
+    weights_root: Path,
+):
+    from mvr.enrichment.ocr.docker_ocr import process_dataset_docker_ocr
+
+    return process_dataset_docker_ocr(
+        mapping,
+        videos,
+        output,
+        temp,
+        model_lock,
+        weights_root,
+    )
+
+
+class _NativeASRStage:
+    """One model lifetime shared by every selected collection."""
+
+    def __init__(
+        self,
+        *,
+        cache_dir: Path,
+        device: str,
+        allow_download: bool,
+        sample_rate: int,
+        pre_seconds: float,
+        post_seconds: float,
+        merge_gap_ms: int,
+    ) -> None:
+        from mvr.enrichment.asr.audio import FfmpegCachedAudioWindowProvider
+        from mvr.enrichment.asr.chunkformer import ChunkFormerASRProvider
+        from mvr.enrichment.asr.pipeline import ASRPipelineConfig
+        from mvr.enrichment.asr.vad import SileroVADProvider
+
+        self.audio = FfmpegCachedAudioWindowProvider(cache_dir)
+        self.vad = SileroVADProvider()
+        self.asr = ChunkFormerASRProvider(
+            device=device,
+            allow_download=allow_download,
+        )
+        self.config = ASRPipelineConfig(
+            sample_rate=sample_rate,
+            pre_seconds=pre_seconds,
+            post_seconds=post_seconds,
+            merge_gap_ms=merge_gap_ms,
+        )
+
+    def __call__(self, dataset_root: Path, output_root: Path):
+        from mvr.enrichment.asr.pipeline import build_asr_features
+
+        return build_asr_features(
+            dataset_root,
+            output_root,
+            audio_provider=self.audio,
+            vad_provider=self.vad,
+            asr_provider=self.asr,
+            config=self.config,
+        )
+
+    def close(self) -> None:
+        self.audio.close()
 
 
 def _build_detector(checkpoint: Path, device: str, threshold: float):
@@ -160,6 +262,16 @@ def main(argv: list[str] | None = None) -> int:
             "PE-Core-L14-336 checkpoint not found; set MVR_PE_CHECKPOINT or pass --pe-checkpoint"
         )
         return 2
+    ocr_weights_root = (
+        args.ocr_weights_root
+        or _env_path("MVR_OCR_WEIGHTS_ROOT")
+        or Path("artifacts/_ocr_models")
+    )
+    asr_device = args.asr_device or args.device
+    asr_allow_download = args.asr_allow_download or _env_flag(
+        "MVR_ASR_ALLOW_MODEL_DOWNLOAD"
+    )
+    asr_cache_dir = args.work_root / "asr_audio_cache"
 
     try:
         client = R2Client(
@@ -175,8 +287,14 @@ def main(argv: list[str] | None = None) -> int:
                 collections=collections,
                 work_root=args.work_root,
                 keyframe_download_workers=args.download_workers,
+                raw_video_download_workers=args.raw_download_workers,
                 upload_workers=args.upload_workers,
                 embedding_batch_size=args.embedding_batch_size,
+                ocr_model_lock_sha256=sha256_file(args.ocr_model_lock),
+                asr_sample_rate=args.asr_sample_rate,
+                asr_pre_seconds=args.asr_pre_seconds,
+                asr_post_seconds=args.asr_post_seconds,
+                asr_merge_gap_ms=args.asr_merge_gap_ms,
                 evict_after_push=args.evict_after_push,
             ),
             provider_specs=specs,
@@ -189,6 +307,23 @@ def main(argv: list[str] | None = None) -> int:
                 device=args.device,
                 beit3=beit3_checkpoint,
                 pe=pe_checkpoint,
+            ),
+            ocr_runner=lambda mapping, videos, output, temp: _run_ocr_stage(
+                mapping,
+                videos,
+                output,
+                temp,
+                model_lock=args.ocr_model_lock,
+                weights_root=ocr_weights_root,
+            ),
+            asr_stage_factory=lambda: _NativeASRStage(
+                cache_dir=asr_cache_dir,
+                device=asr_device,
+                allow_download=asr_allow_download,
+                sample_rate=args.asr_sample_rate,
+                pre_seconds=args.asr_pre_seconds,
+                post_seconds=args.asr_post_seconds,
+                merge_gap_ms=args.asr_merge_gap_ms,
             ),
             video_ids=videos,
         )

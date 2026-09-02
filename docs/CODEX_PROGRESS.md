@@ -1918,3 +1918,45 @@ Verification:
 - Python compilation, shell syntax, CLI `--help`, and `git diff --check`: passed.
 - No real Batch1 model run or R2 staging mutation was performed by this code
   change.
+
+---
+
+# 2026-09-02 - R2 enrichment runner extended with OCR and ASR
+
+Status: IMPLEMENTED; SYNTHETIC SIX-FEATURE CONTRACT TESTED; REAL GPU CANARY PENDING
+
+Branch: `perf/r2-enrichment-runner`
+
+- Expanded the run contract from four visual branches to all six canonical
+  enrichment branches: RF-DETR objects, BEiT-3, selector-produced MetaCLIP-2,
+  PE-Core-L, production DeepSolo/PARSeq OCR, and Silero/ChunkFormer ASR.
+- The visual branches still share canonical JPEGs. OCR and ASR now share one
+  exact raw-MP4 download per video; ingestion, TransNetV2, and keyframe
+  selection are not rerun.
+- OCR runs one combined resumable Docker job across every pending collection,
+  preserving the F-1/F/F+1 frame contract and then splitting audited artifacts
+  back into collection-scoped outputs.
+- ASR creates Silero and ChunkFormer once per run. A new cached FFmpeg provider
+  decodes one video's mono 16 kHz PCM once, memory-maps independent keyframe
+  windows, and evicts the prior video's PCM. The +/-3 second clamp, per-window
+  VAD, merge gap, and transcript schema are unchanged.
+- OCR/ASR per-keyframe envelopes are packaged into one archive per feature and
+  collection, while typed Parquets and manifests remain separately available.
+  Six-feature collection success and run readiness are required; canonical R2
+  paths are not mutated and promotion remains separate.
+- Resume state now fingerprints the OCR model lock and semantic ASR window
+  configuration. The all-null OCR confidence case is explicitly consolidated
+  as nullable Float64, and audio/input caches are removed only after successful
+  upload when eviction is enabled.
+- The RTX 5060 Ti wrapper now checks both OCR image presence and an actual CUDA
+  matrix operation inside each pinned image before downloading R2 data. This
+  catches incompatibility between the reused CUDA 11-era OCR images and newer
+  GPU architectures without silently changing model/runtime pins.
+
+Verification:
+
+- Focused cached-audio, six-feature runner, and Parquet regressions: 32 passed.
+- Full repository regression: 1,473 passed, 15 skipped.
+- Python compilation, shell syntax, CLI `--help`, and `git diff --check`: passed.
+- No real model inference, R2 upload, canonical promotion, or RTX 5060 Ti OCR
+  compatibility claim was made by this change.
