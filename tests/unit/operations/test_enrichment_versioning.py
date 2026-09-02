@@ -8,6 +8,7 @@ import pytest
 from mvr.operations.enrichment_version import (
     EnrichmentVersionError,
     activate_enrichment_version,
+    merge_enrichment_versions,
     apply_enrichment_pointer,
     resolve_active_enrichment_version,
     validate_enrichment_version,
@@ -103,6 +104,7 @@ class _FakeClient:
     def __init__(self, objects: dict[str, bytes]) -> None:
         self.objects = dict(objects)
         self.uploaded: list[str] = []
+        self.copied: list[tuple[str, str]] = []
         self.listings = 0
 
     def list_objects(self, prefix, **kwargs):
@@ -124,6 +126,10 @@ class _FakeClient:
         self.objects[key] = payload
         self.uploaded.append(key)
         return {"key": key, "size": len(payload), "sha256": "unused"}
+
+    def copy_object(self, src_key, dst_key):
+        self.objects[dst_key] = self.objects[src_key]
+        self.copied.append((src_key, dst_key))
 
 
 NEWLINE = chr(10)
@@ -510,3 +516,130 @@ def test_catalog_refuses_a_feature_index_that_is_not_a_row_number(tmp_path) -> N
         read_enrichment_catalog(
             client=_FakeClient(objects), version="enrich-v1", work_root=tmp_path
         )
+
+
+def _sourced(
+    version: str,
+    collections: tuple[str, ...],
+    *,
+    videos: int = 2,
+    keyframes: int = 4,
+    batch_id: str = "batch1",
+    ocr_lock: str = "lock-a",
+) -> dict[str, bytes]:
+    """One machine's finished version, ready to be merged with others."""
+    objects = _version_objects(version, collections, videos=videos, keyframes=keyframes)
+    ready_key = f"data/versions/enrichment/{version}/_READY.json"
+    ready = json.loads(objects[ready_key])
+    ready["batch_id"] = batch_id
+    ready["features"] = ["objects", *PROVIDERS, "ocr", "asr"]
+    ready["feature_configuration"] = {"ocr_model_lock_sha256": ocr_lock}
+    objects[ready_key] = json.dumps(ready).encode()
+    return objects
+
+
+def test_merging_unions_the_collections_and_sums_the_counts(tmp_path) -> None:
+    client = _FakeClient({**_sourced("m1", ("L21", "L22")), **_sourced("m2", ("L23",))})
+
+    report = merge_enrichment_versions(
+        client=client, sources=("m1", "m2"), target="batch1-v1", work_root=tmp_path
+    )
+
+    assert report["collections"] == ["L21", "L22", "L23"]
+    assert report["video_count"] == 6
+    assert report["keyframe_count"] == 12
+    assert report["run_id"] == "batch1-v1"
+    assert report["status"] == "READY"
+
+
+def test_the_merged_version_validates_like_one_the_runner_produced(tmp_path) -> None:
+    """The merge is only useful if the validator cannot tell it apart.
+
+    Splitting a batch across machines is pointless if the result then fails the
+    gate that guards activation, so the merged marker has to satisfy the same
+    per-collection accounting a single-machine run does.
+    """
+    client = _FakeClient(
+        {
+            "data/corpus/dataset_manifest.json": json.dumps({"schema_version": "1.0"}).encode(),
+            **_sourced("m1", ("L21",)),
+            **_sourced("m2", ("L22",)),
+            **_sourced("m3", ("L23",)),
+        }
+    )
+    merge_enrichment_versions(
+        client=client, sources=("m1", "m2", "m3"), target="batch1-v1", work_root=tmp_path
+    )
+
+    # validate_enrichment_version raises on any defect, so returning at all is
+    # the pass; the counts prove it accounted for all three machines' work.
+    validation = validate_enrichment_version(
+        client=client, version="batch1-v1", work_root=tmp_path
+    )
+
+    assert validation["collections"] == ["L21", "L22", "L23"]
+    assert validation["video_count"] == 6
+    assert validation["keyframe_count"] == 12
+
+
+def test_a_single_source_merges_like_any_other_number(tmp_path) -> None:
+    """Nothing in the merge counts machines; one is not a special case."""
+    client = _FakeClient(_sourced("m1", ("L21",)))
+
+    report = merge_enrichment_versions(
+        client=client, sources=("m1",), target="batch1-v1", work_root=tmp_path
+    )
+
+    assert report["collections"] == ["L21"]
+    assert report["sources"] == ["m1"]
+
+
+def test_a_collection_claimed_by_two_sources_is_refused(tmp_path) -> None:
+    """Overlap means one machine's work would silently overwrite another's.
+
+    Handing out collections by hand across many machines makes this the most
+    likely operator mistake, and it is invisible afterwards: the surviving
+    artifacts are internally consistent, just missing half the run.
+    """
+    client = _FakeClient({**_sourced("m1", ("L21", "L22")), **_sourced("m2", ("L22",))})
+
+    with pytest.raises(EnrichmentVersionError, match="L22"):
+        merge_enrichment_versions(
+            client=client, sources=("m1", "m2"), target="batch1-v1", work_root=tmp_path
+        )
+
+    assert client.copied == []
+    assert client.uploaded == []
+
+
+def test_sources_that_used_different_ocr_weights_are_refused(tmp_path) -> None:
+    """A corpus half-read by one OCR model and half by another is not one corpus."""
+    client = _FakeClient(
+        {
+            **_sourced("m1", ("L21",), ocr_lock="lock-a"),
+            **_sourced("m2", ("L22",), ocr_lock="lock-b"),
+        }
+    )
+
+    with pytest.raises(EnrichmentVersionError, match="feature_configuration"):
+        merge_enrichment_versions(
+            client=client, sources=("m1", "m2"), target="batch1-v1", work_root=tmp_path
+        )
+
+    assert client.copied == []
+
+
+def test_sources_from_different_batches_are_refused(tmp_path) -> None:
+    client = _FakeClient(
+        {
+            **_sourced("m1", ("L21",), batch_id="batch1"),
+            **_sourced("m2", ("L22",), batch_id="batch2"),
+        }
+    )
+
+    with pytest.raises(EnrichmentVersionError, match="batch"):
+        merge_enrichment_versions(
+            client=client, sources=("m1", "m2"), target="batch1-v1", work_root=tmp_path
+        )
+
+    assert client.copied == []

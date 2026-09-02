@@ -8,7 +8,7 @@ version and rolling back to the previous one are each one PUT.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -281,3 +281,133 @@ def validate_enrichment_version(
         "objects_listed": len(listing),
         "ready": ready,
     }
+
+
+# Splitting a batch across machines is only safe if the pieces agree on what
+# they are. Two halves read by different OCR weights are not one corpus, and
+# two halves of different batches are not one batch.
+_MERGE_MUST_AGREE = ("batch_id", "providers", "features", "feature_configuration")
+
+
+def _read_ready_marker(client: Any, version: str, work_root: Path) -> dict[str, Any]:
+    ready_key = f"{enrichment_version_prefix(version)}/_READY.json"
+    local = work_root / f"_READY.{version}.json"
+    try:
+        client.download_file(ready_key, local)
+        marker = json.loads(local.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - any read failure is the same refusal
+        raise EnrichmentVersionError(
+            f"{version}: cannot read its _READY marker at {ready_key}: {exc}"
+        ) from exc
+    if marker.get("status") != "READY":
+        raise EnrichmentVersionError(
+            f"{version}: _READY marker is not READY: {marker.get('status')!r}"
+        )
+    collections = marker.get("collections")
+    if not isinstance(collections, list) or not collections:
+        raise EnrichmentVersionError(f"{version}: _READY declares no collections")
+    return marker
+
+
+def merge_enrichment_versions(
+    *,
+    client: Any,
+    sources: Sequence[str],
+    target: str,
+    work_root: str | Path,
+    merged_at: str | None = None,
+) -> dict[str, Any]:
+    """Combine per-machine enrichment versions into one publishable version.
+
+    Machines that split a batch by collection each publish their own version,
+    because ``_READY.json`` lives at the version root and the last writer would
+    otherwise leave a marker describing only its own share. This walks any
+    number of such versions -- nothing here counts machines -- and republishes
+    their collections under one target, with a marker whose totals cover all of
+    them.
+
+    Copies are server-side, so the artifacts never travel through this process.
+    Every refusal happens before the first copy: a half-merged target would be
+    indistinguishable from a complete one to everything downstream.
+    """
+    work_root = Path(work_root)
+    work_root.mkdir(parents=True, exist_ok=True)
+    ordered = list(dict.fromkeys(sources))
+    if not ordered:
+        raise EnrichmentVersionError("merging needs at least one source version")
+    if target in ordered:
+        raise EnrichmentVersionError(
+            f"target {target!r} is also a source; merging a version into itself "
+            "would overwrite the marker being read"
+        )
+
+    markers = {version: _read_ready_marker(client, version, work_root) for version in ordered}
+
+    problems: list[str] = []
+    reference = markers[ordered[0]]
+    for field in _MERGE_MUST_AGREE:
+        expected = reference.get(field)
+        for version in ordered[1:]:
+            observed = markers[version].get(field)
+            if observed != expected:
+                problems.append(
+                    f"{field} differs: {ordered[0]} declares {expected!r}, "
+                    f"{version} declares {observed!r}"
+                )
+
+    owners: dict[str, list[str]] = {}
+    for version in ordered:
+        for collection in markers[version]["collections"]:
+            owners.setdefault(str(collection), []).append(version)
+    for collection, claimants in sorted(owners.items()):
+        if len(claimants) > 1:
+            problems.append(
+                f"{collection} is claimed by {', '.join(claimants)}; one machine's "
+                "artifacts would overwrite another's"
+            )
+
+    if problems:
+        raise EnrichmentVersionError(
+            "sources cannot be merged:" + _BULLET + _BULLET.join(problems)
+        )
+
+    batch = raw_batch_segment(str(reference.get("batch_id", "1")))[len("batch"):]
+    target_prefix = enrichment_version_prefix(target)
+    copied = 0
+    for version in ordered:
+        source_prefix = enrichment_version_prefix(version)
+        for collection in markers[version]["collections"]:
+            root = f"batch={batch}/collection={collection}"
+            for obj in client.list_objects(f"{source_prefix}/{root}/"):
+                key = str(obj["Key"])
+                client.copy_object(key, f"{target_prefix}/{key[len(source_prefix) + 1:]}")
+                copied += 1
+
+    stamp = merged_at or datetime.now(timezone.utc).isoformat()
+    report = deepcopy(reference)
+    report.update(
+        {
+            "run_id": target,
+            "collections": sorted(owners),
+            "video_count": sum(int(m.get("video_count", 0)) for m in markers.values()),
+            "keyframe_count": sum(int(m.get("keyframe_count", 0)) for m in markers.values()),
+            "sources": ordered,
+            "merged_at": stamp,
+            "timings_seconds": {
+                version: markers[version].get("timings_seconds", {}) for version in ordered
+            },
+            "total_seconds": sum(
+                float(markers[version].get("total_seconds", 0.0)) for version in ordered
+            ),
+            "artifacts_copied": copied,
+        }
+    )
+
+    report_path = work_root / f"_READY.{target}.merged.json"
+    report_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    for key in (f"{target_prefix}/_READY.json", f"{target_prefix}/enrichment_report.json"):
+        client.upload_file(report_path, key, content_type="application/json")
+
+    return report
