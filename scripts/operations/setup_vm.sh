@@ -86,21 +86,30 @@ stage_deps() {
   .venv/bin/pip install --no-deps "torchscale==${TORCHSCALE_VERSION}"
 }
 
+fetch_revision() {
+  # Only one commit is ever needed, and microsoft/unilm carries dozens of
+  # unrelated subprojects across years of history. Cloning it in full would
+  # spend gigabytes of transfer to reach a directory worth a few hundred
+  # kilobytes, on every machine that gets rented.
+  local url="$1" directory="$2" revision="$3"
+  mkdir -p "$directory"
+  if [[ ! -d "${directory}/.git" ]]; then
+    git -C "$directory" init -q
+    git -C "$directory" remote add origin "$url"
+  fi
+  git -C "$directory" fetch -q --depth 1 origin "$revision"
+  git -C "$directory" checkout -q --detach FETCH_HEAD
+  printf '  %s at %s\n' "$directory" "${revision:0:12}"
+}
+
 stage_sources() {
   log "Upstream sources"
   mkdir -p "$SOURCES_ROOT"
 
-  if [[ ! -d "${SOURCES_ROOT}/unilm/.git" ]]; then
-    git clone https://github.com/microsoft/unilm.git "${SOURCES_ROOT}/unilm"
-  fi
-  git -C "${SOURCES_ROOT}/unilm" checkout --detach "$UNILM_REVISION"
-
-  if [[ ! -d "${SOURCES_ROOT}/perception_models/.git" ]]; then
-    git clone https://github.com/facebookresearch/perception_models.git \
-      "${SOURCES_ROOT}/perception_models"
-  fi
-  git -C "${SOURCES_ROOT}/perception_models" checkout --detach \
-    "$PERCEPTION_MODELS_REVISION"
+  fetch_revision https://github.com/microsoft/unilm.git \
+    "${SOURCES_ROOT}/unilm" "$UNILM_REVISION"
+  fetch_revision https://github.com/facebookresearch/perception_models.git \
+    "${SOURCES_ROOT}/perception_models" "$PERCEPTION_MODELS_REVISION"
 
   # A .pth file puts both checkouts on sys.path for every process that uses the
   # venv. PYTHONPATH would have to be re-exported in each shell, tmux pane and
