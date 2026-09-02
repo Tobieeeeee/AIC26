@@ -164,3 +164,25 @@ def test_the_pinned_checkpoints_match_the_repository_lock_files() -> None:
     perception_encoder = providers["perception_encoder"]
     assert table["perception_encoder"][1] == perception_encoder["checkpoint_sha256"]
     assert perception_encoder["model_revision"] in table["perception_encoder"][0]
+
+
+def test_the_runtime_check_installs_the_torch_six_shim_before_unilm() -> None:
+    """The check has to follow the loader it is checking.
+
+    ``utils.py`` in the pinned unilm checkout still does ``from torch._six
+    import inf``, a module torch removed in 2.x. ``Beit3ImageEncoder`` handles
+    that by calling ``_install_torch_six_inf_compat()`` before it imports
+    modeling_finetune. A check that imports it bare raises ModuleNotFoundError
+    on a machine where BEiT-3 would in fact load, which is worse than having no
+    check at all: it sends someone debugging a healthy install.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+
+    assert "_install_torch_six_inf_compat" in script, (
+        "the runtime check must install the shim rather than reimplement or "
+        "skip it"
+    )
+    assert script.index("_install_torch_six_inf_compat") < script.index(
+        'import_module("modeling_finetune")'
+    )
+

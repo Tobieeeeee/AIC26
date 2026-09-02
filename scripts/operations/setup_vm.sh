@@ -156,11 +156,20 @@ import importlib
 
 for module in (
     "boto3", "dotenv", "polars", "torch", "timm", "torchscale",
-    "rfdetr", "chunkformer", "silero_vad", "modeling_finetune",
-    "core.vision_encoder.pe",
+    "rfdetr", "chunkformer", "silero_vad", "core.vision_encoder.pe",
 ):
     importlib.import_module(module)
     print(f"  import {module}: OK")
+
+# The pinned unilm checkout still reaches for torch._six, which torch removed
+# in 2.x. Beit3ImageEncoder installs a shim before importing modeling_finetune,
+# and this check calls that same function rather than repeating it: a bare
+# import fails on a machine where BEiT-3 would in fact load.
+from mvr.enrichment.embeddings.beit3 import _install_torch_six_inf_compat
+
+_install_torch_six_inf_compat()
+importlib.import_module("modeling_finetune")
+print("  import modeling_finetune: OK")
 
 import torch
 
