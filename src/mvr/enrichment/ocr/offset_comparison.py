@@ -18,6 +18,41 @@ from pathlib import Path
 from typing import Any
 
 
+# The OCR pipeline's own manifest declares normalized_levenshtein at 0.80 for
+# merging candidate readings of one sign. Comparing two runs with a different
+# rule would call the pipeline's own merges "lost text".
+TEXT_SIMILARITY_THRESHOLD = 0.80
+
+
+def normalized_levenshtein(left: str, right: str) -> float:
+    """1.0 for identical strings, 0.0 for wholly different ones."""
+    if left == right:
+        return 1.0
+    if not left or not right:
+        return 0.0
+
+    previous = list(range(len(right) + 1))
+    for i, source_char in enumerate(left, start=1):
+        current = [i]
+        for j, target_char in enumerate(right, start=1):
+            current.append(
+                min(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + (source_char != target_char),
+                )
+            )
+        previous = current
+    return round(1 - previous[-1] / max(len(left), len(right)), 4)
+
+
+def _has_close_reading(text: str, candidates: set[str]) -> bool:
+    return any(
+        normalized_levenshtein(text, other) >= TEXT_SIMILARITY_THRESHOLD
+        for other in candidates
+    )
+
+
 def _normalise(text: str) -> str:
     """Two readings of one sign are one finding.
 
@@ -89,6 +124,13 @@ def compare_offset_runs(baseline: Path, candidate: Path) -> dict[str, Any]:
 
     missing = baseline_texts - candidate_texts
     extra = candidate_texts - baseline_texts
+    # Most of what an anchor-only run "loses" is a variant reading of text it
+    # still carries. Reporting only exact matches would price the trade far
+    # above what lexical search actually gives up.
+    unique_missing = {
+        text for text in missing if not _has_close_reading(text, candidate_texts)
+    }
+    recovered = len(baseline_texts) - len(unique_missing)
 
     return {
         "baseline_keyframes": len(baseline_by_keyframe),
@@ -99,7 +141,11 @@ def compare_offset_runs(baseline: Path, candidate: Path) -> dict[str, Any]:
         "recall": round(len(baseline_texts & candidate_texts) / len(baseline_texts), 4)
         if baseline_texts
         else None,
+        "effective_recall": round(recovered / len(baseline_texts), 4)
+        if baseline_texts
+        else None,
         "missing_texts": sorted(originals[key] for key in missing),
+        "unique_missing_texts": sorted(originals[key] for key in unique_missing),
         "extra_texts": sorted(candidate_originals[key] for key in extra),
         "keyframes_that_lost_all_text": sorted(lost_everything),
     }
