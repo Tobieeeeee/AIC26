@@ -10,6 +10,7 @@ from __future__ import annotations
 
 
 PREFIX = "OCR_TIMING"
+PROGRESS_EVERY = 500
 
 
 def format_stage_timing(
@@ -18,6 +19,7 @@ def format_stage_timing(
     processed: int,
     seconds: float,
     skipped: int = 0,
+    final: bool = True,
 ) -> str:
     """Return the summary line a worker prints as it exits.
 
@@ -38,5 +40,15 @@ def format_stage_timing(
     rate = f"{seconds / processed:.6f}" if processed else "none"
     return (
         f"{PREFIX} stage={stage} processed={processed} skipped={skipped} "
-        f"seconds={seconds:.3f} per_item={rate}"
+        f"seconds={seconds:.3f} per_item={rate} final={'yes' if final else 'no'}"
     )
+
+
+def should_report_progress(processed: int, every: int = PROGRESS_EVERY) -> bool:
+    """Whether this item count lands on a reporting interval.
+
+    A stage over the full corpus runs for tens of hours, and its closing line
+    arrives far too late to decide anything. Zero is excluded because a rate
+    printed before any work was measured says nothing.
+    """
+    return processed > 0 and every > 0 and processed % every == 0

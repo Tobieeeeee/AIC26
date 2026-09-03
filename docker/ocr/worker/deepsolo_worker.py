@@ -10,7 +10,10 @@ from pathlib import Path
 REPOSITORY_SRC = Path(__file__).resolve().parents[3] / "src"
 sys.path.insert(0, str(REPOSITORY_SRC))
 from mvr.enrichment.ocr.model_integrity import ModelIntegrityError, verify_model_file
-from mvr.enrichment.ocr.worker_timing import format_stage_timing
+from mvr.enrichment.ocr.worker_timing import (
+    format_stage_timing,
+    should_report_progress,
+)
 import cv2
 import json
 import argparse
@@ -136,6 +139,17 @@ def main():
 
                 outputs = predictor(img)
                 processed += 1
+                if should_report_progress(processed):
+                    print(
+                        format_stage_timing(
+                            "deepsolo",
+                            processed=processed,
+                            skipped=skipped,
+                            seconds=time.perf_counter() - started,
+                            final=False,
+                        ),
+                        flush=True,
+                    )
                 instances = outputs["instances"]
 
                 # DeepSolo returns polygons, pred_boxes, and scores

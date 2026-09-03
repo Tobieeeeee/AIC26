@@ -19,7 +19,10 @@ from pathlib import Path
 # Add the worker directory to sys.path so we can import local files
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from mvr.enrichment.ocr.worker_timing import format_stage_timing
+from mvr.enrichment.ocr.worker_timing import (
+    PROGRESS_EVERY,
+    format_stage_timing,
+)
 
 from json_file_contract import read_json_file, write_json_file, OcrDetectionFile, CandidateObject, OcrCandidateFile
 from rectify import rectify_crop
@@ -89,6 +92,7 @@ def main():
     started = time.perf_counter()
     processed = 0
     skipped = 0
+    reported = 0
     for det_file in sorted(detections_dir.rglob("*.json")):
         det_result = read_json_file(det_file, OcrDetectionFile)
         out_file = output_dir / det_file.relative_to(detections_dir)
@@ -109,6 +113,18 @@ def main():
 
         candidates = []
         processed += len(det_result.detections)
+        if processed - reported >= PROGRESS_EVERY:
+            reported = processed
+            print(
+                format_stage_timing(
+                    "parseq_vi",
+                    processed=processed,
+                    skipped=skipped,
+                    seconds=time.perf_counter() - started,
+                    final=False,
+                ),
+                flush=True,
+            )
         for det in det_result.detections:
             if is_dummy:
                 cand = CandidateObject(

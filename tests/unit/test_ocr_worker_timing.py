@@ -17,7 +17,7 @@ def test_the_line_carries_the_stage_the_count_and_the_rate() -> None:
 
     assert line == (
         "OCR_TIMING stage=deepsolo processed=200 skipped=181 "
-        "seconds=392.000 per_item=1.960000"
+        "seconds=392.000 per_item=1.960000 final=yes"
     )
 
 
@@ -50,3 +50,36 @@ def test_an_unnamed_stage_is_refused(stage: str) -> None:
 def test_negative_work_is_refused_rather_than_reported() -> None:
     with pytest.raises(ValueError):
         format_stage_timing("deepsolo", processed=-1, seconds=1.0)
+
+
+def test_a_progress_line_is_marked_as_not_final() -> None:
+    """A mid-run reading must not be mistaken for the stage's total.
+
+    The stage this measures runs for tens of hours, so the only useful reading
+    arrives long before it ends. Someone grepping the log then would otherwise
+    read a partial count as the finished one and plan against it.
+    """
+    line = format_stage_timing("deepsolo", processed=500, seconds=980.0, final=False)
+
+    assert "final=no" in line
+    assert "per_item=1.960000" in line
+
+
+def test_the_closing_line_says_so() -> None:
+    line = format_stage_timing("deepsolo", processed=500, seconds=980.0)
+
+    assert "final=yes" in line
+
+
+@pytest.mark.parametrize(
+    ("processed", "every", "expected"),
+    [(0, 500, False), (1, 500, False), (500, 500, True), (999, 500, False), (1000, 500, True)],
+)
+def test_progress_is_reported_on_the_interval_and_not_at_zero(
+    processed: int, every: int, expected: bool
+) -> None:
+    """Reporting at zero would print a rate before any work was measured."""
+    from mvr.enrichment.ocr.worker_timing import should_report_progress
+
+    assert should_report_progress(processed, every) is expected
+
