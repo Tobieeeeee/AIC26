@@ -7,9 +7,11 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from mvr.enrichment.embeddings.artifacts import sha256_file
+from mvr.enrichment.ocr.scene_text import DEFAULT_TEMPORAL_OFFSETS
 from mvr.enrichment.embeddings.provider_specs import load_provider_specs
 from mvr.operations.r2_client import R2Client
 from mvr.operations.r2_enrichment import (
@@ -31,6 +33,17 @@ DEFAULT_BEIT3_CHECKPOINT = Path(
 def _env_path(name: str) -> Path | None:
     value = os.environ.get(name, "").strip()
     return Path(value).expanduser() if value else None
+
+
+def _parse_offsets(raw: str) -> tuple[int, ...]:
+    """Frames read around each keyframe, the anchor always among them."""
+    values = tuple(int(part) for part in str(raw).replace(" ", "").split(",") if part)
+    if 0 not in values:
+        raise ValueError(
+            "--ocr-temporal-offsets must include 0, the keyframe itself: "
+            f"{values}"
+        )
+    return values
 
 
 def _env_flag(name: str) -> bool:
@@ -88,6 +101,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=Path("docker/ocr/model_sources.lock.json"),
     )
     parser.add_argument("--ocr-weights-root", type=Path, default=None)
+    parser.add_argument(
+        "--ocr-temporal-offsets",
+        default=",".join(str(value) for value in DEFAULT_TEMPORAL_OFFSETS),
+        help=(
+            "Frames OCR reads around each keyframe, comma separated. Its cost "
+            "is a direct multiple of how many; measure_ocr_offsets.py reports "
+            "what a cheaper sampling gives up."
+        ),
+    )
     parser.add_argument("--asr-device", default=None)
     parser.add_argument("--asr-sample-rate", type=int, default=16000)
     parser.add_argument("--asr-pre-seconds", type=float, default=3.0)
@@ -104,6 +126,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Remove local collection artifacts/keyframes only after its R2 success marker",
     )
     args = parser.parse_args(argv)
+    try:
+        args.ocr_temporal_offsets = _parse_offsets(args.ocr_temporal_offsets)
+    except ValueError as exc:
+        parser.error(str(exc))
     if (
         args.download_workers < 1
         or args.raw_download_workers < 1
@@ -129,6 +155,7 @@ def _run_ocr_stage(
     *,
     model_lock: Path,
     weights_root: Path,
+    temporal_offsets: Sequence[int] = DEFAULT_TEMPORAL_OFFSETS,
 ):
     from mvr.enrichment.ocr.docker_ocr import process_dataset_docker_ocr
 
@@ -139,6 +166,7 @@ def _run_ocr_stage(
         temp,
         model_lock,
         weights_root,
+        temporal_offsets=temporal_offsets,
     )
 
 
@@ -291,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
                 upload_workers=args.upload_workers,
                 embedding_batch_size=args.embedding_batch_size,
                 ocr_model_lock_sha256=sha256_file(args.ocr_model_lock),
+                ocr_temporal_offsets=args.ocr_temporal_offsets,
                 asr_sample_rate=args.asr_sample_rate,
                 asr_pre_seconds=args.asr_pre_seconds,
                 asr_post_seconds=args.asr_post_seconds,
@@ -315,6 +344,7 @@ def main(argv: list[str] | None = None) -> int:
                 temp,
                 model_lock=args.ocr_model_lock,
                 weights_root=ocr_weights_root,
+                temporal_offsets=args.ocr_temporal_offsets,
             ),
             asr_stage_factory=lambda: _NativeASRStage(
                 cache_dir=asr_cache_dir,

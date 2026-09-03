@@ -35,6 +35,7 @@ from mvr.enrichment.embeddings.offline import (
 from mvr.enrichment.embeddings.provider_specs import ProviderSpec, ProviderSpecRegistry
 from mvr.enrichment.feature_extraction import extract_objects
 from mvr.operations.consolidate import consolidate_to_parquet
+from mvr.enrichment.ocr.scene_text import DEFAULT_TEMPORAL_OFFSETS
 from mvr.operations.r2_layout import (
     enrichment_version_prefix,
     raw_video_key,
@@ -85,6 +86,10 @@ class EnrichmentRunConfig:
     asr_pre_seconds: float = 3.0
     asr_post_seconds: float = 3.0
     asr_merge_gap_ms: int = 250
+    # How many frames OCR reads around each keyframe. This sets both the
+    # cost of the run and how much scene text it finds, so it belongs to
+    # the run's identity rather than to one invocation of it.
+    ocr_temporal_offsets: tuple[int, ...] = DEFAULT_TEMPORAL_OFFSETS
     evict_after_push: bool = False
 
     def __post_init__(self) -> None:
@@ -114,6 +119,15 @@ class EnrichmentRunConfig:
             value not in "0123456789abcdef" for value in digest
         ):
             raise ValueError("ocr_model_lock_sha256 must be a SHA-256 hex digest")
+        offsets = tuple(self.ocr_temporal_offsets)
+        if len(offsets) != len(set(offsets)):
+            raise ValueError(f"ocr_temporal_offsets repeats a frame: {offsets}")
+        if 0 not in offsets:
+            raise ValueError(
+                "ocr_temporal_offsets must include 0, the keyframe itself: "
+                f"{offsets}"
+            )
+        object.__setattr__(self, "ocr_temporal_offsets", offsets)
 
 
 def _utc_now() -> str:
@@ -773,6 +787,7 @@ class R2EnrichmentRunner:
             "features": list(CANONICAL_FEATURES),
             "video_ids": sorted(self.video_ids) if self.video_ids is not None else None,
             "ocr_model_lock_sha256": self.config.ocr_model_lock_sha256,
+            "ocr_temporal_offsets": list(self.config.ocr_temporal_offsets),
             "asr": self._asr_config_identity(),
             "destination_prefix": self._run_prefix(),
         }
