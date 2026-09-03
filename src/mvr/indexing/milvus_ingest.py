@@ -13,6 +13,14 @@ Flow:
     Milvus upsert batches
             ↓
     manifest write
+
+That ``extraction_status`` route is legacy and currently unusable: nothing in
+the repository writes that Parquet, and its schema carries no ``video_id``, so
+``_build_entity_row`` refuses rather than write a colliding primary key.
+``build_entities_from_catalog`` is the supported path. It takes the entries
+produced by ``mvr.operations.enrichment_catalog.read_enrichment_catalog``,
+which carry ``video_id`` and the vector row index straight from an enrichment
+version.
 """
 from __future__ import annotations
 
@@ -20,12 +28,15 @@ import hashlib
 import json
 import logging
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from mvr.operations.enrichment_catalog import CatalogEntry
 
 from .milvus_backend import MilvusProviderBackend
 from .milvus_client import MilvusClient, MilvusConfig
@@ -425,3 +436,100 @@ def ingest_to_milvus(
         manifest_path=str(manifest_path),
         index_type=index_type,
     )
+
+
+def build_entities_from_catalog(
+    *,
+    entries: Sequence["CatalogEntry"],
+    vectors_root: Path,
+    batch_id: str,
+    dimensions: Mapping[str, int] | None = None,
+) -> tuple[list[dict[str, Any]], EligibilityReport]:
+    """Turn an enrichment catalog into Milvus entities.
+
+    This is the supported path for building an index from an enrichment
+    version. Unlike the ``extraction_status`` route it never keys on
+    ``keyframe_id`` alone: the catalog carries ``video_id``, so two videos
+    sharing a keyframe id stay distinct entities instead of overwriting one
+    another.
+
+    ``vectors_root`` mirrors the version layout, so a provider's file is
+    ``<vectors_root>/embeddings/<provider>/<feature_file>``. A vector file that
+    was never downloaded stops the build, because skipping it would produce an
+    index quietly missing a whole video. Per-keyframe defects are counted in
+    the report instead, so one bad row does not discard the run.
+    """
+    dims = dict(dimensions or EXPECTED_DIMENSIONS)
+    report = EligibilityReport()
+    report.total_keyframes = len(entries)
+    root = Path(vectors_root)
+    loaded: dict[tuple[str, str], np.ndarray] = {}
+    built: list[dict[str, Any]] = []
+
+    for entry in entries:
+        identity = f"{entry.video_id}/{entry.keyframe_id}"
+        provider_vecs: dict[str, np.ndarray] = {}
+        rejected = False
+        for provider, (feature_file, feature_index) in sorted(entry.vectors.items()):
+            cache_key = (provider, feature_file)
+            block = loaded.get(cache_key)
+            if block is None:
+                path = root / "embeddings" / provider / feature_file
+                if not path.is_file():
+                    raise MilvusIngestError(
+                        f"vector file for {provider} was not downloaded: {path}"
+                    )
+                block = _load_vectors(path)
+                loaded[cache_key] = block
+            if feature_index >= len(block):
+                report.rejected_missing_provider += 1
+                report.errors.append(
+                    f"{identity}/{provider}: feature_index {feature_index} is past "
+                    f"the end of {feature_file} ({len(block)} rows)"
+                )
+                rejected = True
+                break
+            vector = np.asarray(block[feature_index]).astype(np.float32)
+            expected = dims.get(provider)
+            if expected is not None and vector.shape[0] != expected:
+                report.rejected_dim_mismatch += 1
+                report.errors.append(
+                    f"{identity}/{provider}: dim {vector.shape[0]} != {expected}"
+                )
+                rejected = True
+                break
+            if not _is_finite_vector(vector):
+                report.rejected_invalid_vector += 1
+                report.errors.append(f"{identity}/{provider}: non-finite vector")
+                rejected = True
+                break
+            provider_vecs[provider] = vector
+
+        if rejected:
+            continue
+        absent = [pid for pid in REQUIRED_PROVIDERS if pid not in provider_vecs]
+        if absent:
+            report.rejected_missing_provider += 1
+            report.errors.append(f"{identity}: catalog has no vector for {absent}")
+            continue
+
+        built.append(
+            _build_entity_row(
+                entry.keyframe_id,
+                {
+                    FIELD_VIDEO_ID: entry.video_id,
+                    FIELD_FRAME_ID: entry.frame_id if entry.frame_id is not None else 0,
+                    FIELD_SHOT_ID: entry.shot_id if entry.shot_id is not None else -1,
+                    FIELD_TIMESTAMP: (
+                        entry.timestamp if entry.timestamp is not None else 0.0
+                    ),
+                    FIELD_BATCH_ID: batch_id,
+                    FIELD_COLLECTION_ID: entry.collection_id,
+                },
+                provider_vecs,
+            )
+        )
+
+    report.eligible = len(built)
+    report.ineligible = report.total_keyframes - report.eligible
+    return built, report

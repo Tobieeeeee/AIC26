@@ -111,6 +111,31 @@ class TestConsolidation:
         assert result["duplicates_removed"] == 1
         assert result["total_records"] == 1
 
+    def test_consolidate_preserves_nullable_float_type_when_all_values_are_null(
+        self, tmp_path
+    ):
+        from mvr.operations.consolidate import consolidate_to_parquet
+
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        (staging / "kf001.json").write_text(
+            json.dumps(
+                {
+                    "keyframe_id": "kf001",
+                    "video_id": "V01",
+                    "frame_idx": 100,
+                    "text": "",
+                    "confidence": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        output = tmp_path / "nullable.parquet"
+
+        consolidate_to_parquet(staging, output, "ocr")
+
+        assert polars.read_parquet(output).schema["confidence"] == polars.Float64
+
     def test_objects_preserve_multiple_detections_per_keyframe(self, tmp_path):
         import json
         import polars as pl

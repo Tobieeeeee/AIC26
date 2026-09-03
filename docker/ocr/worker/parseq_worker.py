@@ -1,4 +1,5 @@
 import sys
+import time
 import os
 import cv2
 import json
@@ -17,6 +18,11 @@ from pathlib import Path
 
 # Add the worker directory to sys.path so we can import local files
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from mvr.enrichment.ocr.worker_timing import (
+    PROGRESS_EVERY,
+    format_stage_timing,
+)
 
 from json_file_contract import read_json_file, write_json_file, OcrDetectionFile, CandidateObject, OcrCandidateFile
 from rectify import rectify_crop
@@ -83,6 +89,10 @@ def main():
             print(f"ERROR: PARSeq initialization failed: {e}", file=sys.stderr)
             sys.exit(1)
 
+    started = time.perf_counter()
+    processed = 0
+    skipped = 0
+    reported = 0
     for det_file in sorted(detections_dir.rglob("*.json")):
         det_result = read_json_file(det_file, OcrDetectionFile)
         out_file = output_dir / det_file.relative_to(detections_dir)
@@ -96,11 +106,25 @@ def main():
                     and existing.keyframe_id == det_result.keyframe_id
                     and existing.source_frame_idx == det_result.source_frame_idx
                 ):
+                    skipped += len(existing.candidates)
                     continue
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 pass
 
         candidates = []
+        processed += len(det_result.detections)
+        if processed - reported >= PROGRESS_EVERY:
+            reported = processed
+            print(
+                format_stage_timing(
+                    "parseq_vi",
+                    processed=processed,
+                    skipped=skipped,
+                    seconds=time.perf_counter() - started,
+                    final=False,
+                ),
+                flush=True,
+            )
         for det in det_result.detections:
             if is_dummy:
                 cand = CandidateObject(
@@ -171,6 +195,15 @@ def main():
         )
         write_json_file(cand_result, out_file)
 
+    print(
+        format_stage_timing(
+            "parseq_vi",
+            processed=processed,
+            skipped=skipped,
+            seconds=time.perf_counter() - started,
+        ),
+        flush=True,
+    )
     print("PARSeq worker finished.")
 
 if __name__ == "__main__":

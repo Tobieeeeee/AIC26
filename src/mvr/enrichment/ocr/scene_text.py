@@ -230,10 +230,18 @@ def load_keyframes(mapping_csv: Path) -> list[dict]:
     return keyframes
 
 
+# Every keyframe is read at each offset, so OCR's cost -- and the frame
+# extraction that feeds it -- is a direct multiple of how many there are. The
+# neighbours catch text that motion blur smears in the anchor frame. A tuple,
+# because a shared mutable default would let one caller change every later run
+# in the process.
+DEFAULT_TEMPORAL_OFFSETS = (-1, 0, 1)
+
+
 def generate_sampling_frames(
     keyframes: list[dict],
     shot_boundaries: dict[tuple[str, int], tuple[int, int]],
-    offsets: list[int] = [-1, 0, 1]
+    offsets: Sequence[int] = DEFAULT_TEMPORAL_OFFSETS,
 ) -> tuple[list[Keyframe], dict[tuple[str, str], list[Keyframe]]]:
     """Frames to extract, and the samples belonging to each keyframe.
 

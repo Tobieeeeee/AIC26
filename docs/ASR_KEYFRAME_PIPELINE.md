@@ -16,6 +16,14 @@ The VAD and ASR models are instantiated once for the CLI job. Each keyframe
 still has its own audio window and its own VAD call. A window without detected
 speech produces `text: ""` and `segments: []`; ASR is not called.
 
+The activated-R2 full enrichment runner uses
+`FfmpegCachedAudioWindowProvider`: it decodes one video's complete mono 16 kHz
+audio to a memory-mapped PCM file, slices the same independent windows locally,
+and evicts that PCM when advancing to the next video. This preserves the
+per-keyframe +/-3 second, VAD, and ChunkFormer contract while removing one
+FFmpeg process launch per keyframe. The original independent-window provider
+remains available for the standalone CLI and compatibility tests.
+
 ## Authoritative input mappings
 
 Two existing repository layouts are supported:

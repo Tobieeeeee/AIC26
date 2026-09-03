@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Dict, Tuple
 from collections import defaultdict
+from collections.abc import Sequence
 from statistics import median
 import tempfile
 import sys
@@ -12,7 +13,9 @@ from mvr.enrichment.ocr.model_integrity import (
     model_manifest_provenance,
     verify_model_directory,
 )
+from mvr.enrichment.ocr.frame_extraction import extract_sampling_frames
 from mvr.enrichment.ocr.scene_text import (
+    DEFAULT_TEMPORAL_OFFSETS,
     OcrCandidate,
     group_candidates,
     load_keyframes,
@@ -415,6 +418,8 @@ def process_dataset_docker_ocr(
     temp_dir: Path,
     model_lock_path: Path | None = None,
     weights_root: Path | None = None,
+    temporal_offsets: Sequence[int] = DEFAULT_TEMPORAL_OFFSETS,
+    extract_workers: int | None = None,
 ) -> dict:
     repository_root = Path(__file__).resolve().parents[4]
     model_lock_path = model_lock_path or repository_root / "docker" / "ocr" / "model_sources.lock.json"
@@ -424,45 +429,25 @@ def process_dataset_docker_ocr(
     shots_json = mapping_csv.with_name("shots.json")
     shot_boundaries = get_shot_boundaries(shots_json)
 
-    frames_to_extract, samples_by_keyframe = generate_sampling_frames(keyframes, shot_boundaries)
+    frames_to_extract, samples_by_keyframe = generate_sampling_frames(
+        keyframes, shot_boundaries, temporal_offsets
+    )
 
-    # Extract
     temp_dir.mkdir(parents=True, exist_ok=True)
     frames_dir = temp_dir / "frames"
     frames_dir.mkdir(exist_ok=True)
 
-    # Group extraction requests by video
     by_video = defaultdict(list)
-
     for kf in frames_to_extract:
         by_video[kf.video_id].append(kf)
 
-    for video_id, v_frames in by_video.items():
-        # Searches the raw organizer layout too, where videos are nested as
-        # Videos_L21_a/video/<video_id>.mp4 across 14 directories. Raising
-        # here was already right -- unlike scene_text, which warned and
-        # continued -- but the flat-only lookup meant it raised on the real
-        # download for every video.
-        video_path = resolve_video_path(video_root, video_id)
+    extract_sampling_frames(
+        by_video,
+        video_root=video_root,
+        frames_dir=frames_dir,
+        workers=extract_workers,
+    )
 
-        if video_path is None:
-            raise FileNotFoundError(
-                f"Missing source video: {video_id}.mp4 under {video_root}"
-            )
-
-        video_frames_dir = frames_dir / video_id
-        video_frames_dir.mkdir(parents=True, exist_ok=True)
-
-        missing_frames = [
-            frame
-            for frame in v_frames
-            if not (video_frames_dir / frame.image_path).is_file()
-        ]
-        extract_keyframes(
-            video_path,
-            missing_frames,
-            video_frames_dir,
-        )
     # # Group extraction by video
     # by_video = defaultdict(list)
     # for kf in frames_to_extract:
@@ -520,7 +505,7 @@ def process_dataset_docker_ocr(
       },
       "ocr_pipeline_version": "docker-ocr-2.1",
       "ocr_conf_threshold": 0.0, # Handled by worker logic if any
-      "temporal_offsets": [-1, 0, 1],
+      "temporal_offsets": list(temporal_offsets),
       "text_similarity": "normalized_levenshtein",
       "text_similarity_threshold": 0.80,
       "spatial_similarity": "bbox_iou",

@@ -98,6 +98,42 @@ python -m mvr.cli milvus status
 
 ## 7. Run extraction (GPU)
 
+### Activated R2 Batch1 on RTX 5060 Ti
+
+When canonical ingestion already exists on R2, use the full enrichment wrapper
+instead of pulling the complete corpus or rerunning raw-video ingestion. It
+runs objects, three visual embeddings, production OCR, and production ASR:
+
+```bash
+./scripts/operations/run_enrichment_rtx5060ti.sh \
+  L21 enrich-batch1-5060ti-canary /home/ezycloudx-admin/aic26_enrichment \
+  --videos L21_V001
+
+./scripts/operations/run_enrichment_rtx5060ti.sh \
+  L21,L22,L23,L24,L25,L26,L27,L28,L29,L30 \
+  enrich-batch1-5060ti-v1 \
+  /home/ezycloudx-admin/aic26_enrichment
+```
+
+The wrapper requires `.env` to point at the pinned RF-DETR, BEiT-3, PE-Core-L,
+and OCR checkpoints. It also requires the `[operations]` extra (boto3,
+python-dotenv, polars), the two pinned OCR GPU images, and native
+Silero/ChunkFormer imports in `.venv`; these are preflighted before execution.
+The `[operations]` check runs first because polars is not needed until the
+first Parquet consolidation, long after the run has downloaded every keyframe
+and raw MP4.
+Because the reused OCR images carry older pinned CUDA/PyTorch stacks, the
+wrapper also executes a real CUDA matrix-operation canary inside each image.
+On an incompatible RTX 5060 Ti it stops before downloading corpus data; do not
+replace those pins without a separate OCR behavior verification.
+Reuse the same run ID/work root after a disconnect. Results are complete on R2
+only when all six features are present and
+`data/versions/enrichment/<run-id>/_READY.json` exists. That marker means the
+output is present, not active; run
+`scripts/operations/activate_enrichment_version.py --version <run-id>` to point
+`dataset_manifest.json` at it. See `R2_DATA_MANAGEMENT.md` for the artifact
+layout and the activation boundary.
+
 ### Feature extraction (embeddings + objects)
 
 ```bash

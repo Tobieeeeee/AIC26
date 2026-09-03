@@ -25,6 +25,7 @@ from typing import Any
 from .parquet_schemas import (
     SCHEMAS,
     SchemaField,
+    polars_schema,
     validate_columns,
 )
 
@@ -151,7 +152,15 @@ def consolidate_to_parquet(
             clean["collection_id"] = collection_id
         clean_records.append(clean)
 
-    df = pl.DataFrame(clean_records)
+    # Construct with the declared schema so an all-empty nullable column (for
+    # example OCR confidence on a text-free collection) remains Float64 rather
+    # than becoming Polars Null.  This is the enforcement the public contract
+    # promises and keeps every partition type-compatible.
+    df = pl.DataFrame(
+        clean_records,
+        schema=polars_schema(schema_name),
+        strict=False,
+    )
 
     # Write Parquet
     output_path = Path(output_path)

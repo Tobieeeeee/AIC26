@@ -10,6 +10,7 @@ from mvr.enrichment.embeddings.offline import (
     OfflineEmbeddingError,
     audit_embedding_artifact,
     reuse_embedding_artifact,
+    reuse_embedding_artifacts,
 )
 from mvr.enrichment.embeddings.provider_specs import load_provider_specs
 from mvr.ingestion.models import Keyframe
@@ -100,3 +101,72 @@ def test_selector_embedding_reuse_rejects_canonical_identity_mismatch(tmp_path: 
             rows=[{"keyframe_id": "other", "video_id": "V"}],
             spec=spec,
         )
+
+
+def test_collection_reuse_merges_per_video_selector_artifacts(tmp_path: Path) -> None:
+    spec = load_provider_specs(Path("configs/embedding_providers.json")).get("metaclip2")
+    keyframes = [
+        Keyframe(
+            "L21_V001_S0001_K01",
+            "L21_V001",
+            1,
+            1,
+            10,
+            1.0,
+            "data/corpus/keyframes/L21/L21_V001/L21_V001_S0001_K01.jpg",
+        ),
+        Keyframe(
+            "L21_V002_S0001_K01",
+            "L21_V002",
+            1,
+            1,
+            20,
+            2.0,
+            "data/corpus/keyframes/L21/L21_V002/L21_V002_S0001_K01.jpg",
+        ),
+    ]
+    sources = []
+    rows = []
+    for index, keyframe in enumerate(keyframes):
+        vector = np.zeros(512, dtype=np.float32)
+        vector[index] = 1.0
+        sources.append(
+            _write_selected_embedding_artifact(
+                output_root=tmp_path / f"ingest-{index}",
+                keyframes=[keyframe],
+                vectors_by_identity={
+                    (keyframe.video_id, keyframe.shot_id, keyframe.frame_idx): vector
+                },
+                spec=spec,
+            )
+        )
+        rows.append(
+            {
+                "keyframe_id": keyframe.keyframe_id,
+                "video_id": keyframe.video_id,
+                "frame_idx": str(keyframe.frame_idx),
+                "shot_id": str(keyframe.shot_id),
+                "timestamp": str(keyframe.timestamp),
+                "image_path": keyframe.image_path,
+            }
+        )
+
+    target = reuse_embedding_artifacts(
+        sources,
+        embeddings_root=tmp_path / "features/embeddings",
+        rows=rows,
+        spec=spec,
+    )
+
+    assert sorted(path.name for path in target.glob("*.npy")) == [
+        "L21_V001.npy",
+        "L21_V002.npy",
+    ]
+    assert audit_embedding_artifact(target) == {
+        "expected_keyframes": 2,
+        "vectors": 2,
+        "unique_ids": 2,
+        "missing_ids": 0,
+        "extra_ids": 0,
+        "invalid_vectors": 0,
+    }

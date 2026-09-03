@@ -31,7 +31,9 @@ semantic = [
     "torchvision>=0.17,<1",
 ]
 search = ["elasticsearch>=8,<9"]
-milvus = ["pymilvus==2.4.15"]
+# pymilvus 2.4.15 imports pkg_resources, which setuptools removed in 81.0.
+# Without this bound "import pymilvus" fails outright on a fresh environment.
+milvus = ["pymilvus==2.4.15", "setuptools<81"]
 operations = [
     "boto3>=1.34,<2",
     "polars==1.43.2",
@@ -44,25 +46,49 @@ ocr = [
 ]
 objects = ["rfdetr==1.9.3"]
 objects-legacy = ["ultralytics>=8,<9"]
+# torchaudio ships a native extension linked against one CUDA runtime, so it
+# follows the exact torch the vision providers already pin. Left as a range,
+# pip resolves a build for a newer CUDA than that torch supplies and the only
+# symptom is "import chunkformer" dying on OSError: libcudart.so.13.
 asr = [
     "chunkformer==1.2.2",
     "huggingface-hub>=0.28,<2",
     "numpy>=1.26,<3",
     "silero-vad==6.2.1",
-    "torch>=2.5.1,<3",
-    "torchaudio>=2.5.1,<3",
+    "torch==2.5.1",
+    "torchaudio==2.5.1",
 ]
 # sentencepiece is required by the Marian tokenizer used for Vietnamese
 # query translation; transformers raises at load time without it.
 qna = ["transformers>=4.40,<5", "torch>=2.2,<3", "sentencepiece>=0.2,<1"]
+# The provider runs microsoft/unilm's beit3 sources, so this group covers that
+# checkout's import chain rather than only the adapter's own imports:
+#   modeling_finetune -> utils          -> torchmetrics, tensorboardX
+#   modeling_finetune -> modeling_utils -> torchscale.model.BEiT3
+#                                       -> torchscale.architecture.encoder
+#                                       -> fairscale.nn
+# timm follows the Perception Encoder's pin because both encoders are built in
+# one process. UniLM needs only register_model, trunc_normal_ and
+# get_state_dict from timm, all still exported by 1.x; the upstream 0.4.12 pin
+# is copied from a 2022 README, not a real constraint.
+# torchscale is absent on purpose: its metadata pins timm==0.6.13, which no
+# resolver can reconcile with the 1.x above, and it never imports timm on this
+# code path. scripts/operations/setup_vm.sh installs it with --no-deps.
 beit3 = [
+    "fairscale>=0.4,<1",
     "numpy>=1.26,<3",
     "Pillow>=10,<13",
     "sentencepiece>=0.1.99,<1",
-    "timm==0.4.12",
+    "tensorboardX>=2.6,<3",
+    "timm==1.0.15",
     "torch>=2.2,<3",
+    "torchmetrics>=1,<2",
     "torchvision>=0.17,<1",
-    "transformers>=4.39,<5",
+    # Only Beit3TextEncoder imports transformers, for the online query side;
+    # the image path this project runs offline never touches it. A <5 ceiling
+    # therefore bought nothing and made the install unresolvable against the
+    # pinned rfdetr, which requires 5.x.
+    "transformers>=4.39,<6",
 ]
 metaclip2 = [
     "numpy>=1.26,<3",
@@ -72,9 +98,15 @@ metaclip2 = [
     "torchvision==0.20.1",
     "transformers==4.57.1",
 ]
+# core.vision_encoder.transforms reaches the upstream SimpleTokenizer, which
+# imports ftfy and regex. Neither appears anywhere in this project's own code,
+# so both are easy to miss until PerceptionEncoder builds its image transform
+# -- by which point the run has already detected objects and OCR'd keyframes.
 perception-encoder = [
     "einops==0.8.1",
+    "ftfy>=6,<7",
     "huggingface-hub>=0.28,<2",
+    "regex>=2023,<2027",
     "numpy==2.1.2",
     "Pillow==11.0.0",
     "timm==1.0.15",

@@ -1881,3 +1881,303 @@ Verification:
 - Python compilation and `git diff --check`: passed.
 - Live R2 activation returned `status=ACTIVATED`, final keyframes 133,265, and
   downstream status `REBUILD_REQUIRED`.
+
+---
+
+# 2026-09-01 - Optimized R2 enrichment-only runner
+
+Status: IMPLEMENTED; SYNTHETIC CONTRACT TESTED; REAL GPU RUN PENDING
+
+Branch: `perf/r2-enrichment-runner`
+
+- Added a dedicated enrichment-only path over the activated canonical mapping
+  and JPEGs. It does not download raw MP4s or rerun TransNetV2/keyframe
+  selection.
+- Added exact-key parallel R2 downloads without a second cache copy and
+  concurrent uploads with prefix-size resume, backed by a thread-safe lazy
+  boto3 client initialization.
+- Changed scheduling from per-video model construction to provider-major
+  execution: one RF-DETR, one BEiT-3 encoder, and one PE-Core-L encoder are
+  reused across every selected collection, with only one GPU model resident at
+  a time. MetaCLIP-2 is merged from validated per-video selector artifacts and
+  is not inferred again.
+- Corrected the object consolidation boundary to consume
+  `objects_staging/` once per collection. Task05A per-keyframe envelopes are
+  uploaded as one low-compression `objects.tar.gz` per collection instead of
+  one PUT per JSON.
+- Added collection `_SUCCESS.json` and run `_READY.json` markers under
+  `data/staging/enrichment/<run-id>/`. Canonical promotion is intentionally
+  separate; extraction-status Parquet remains blocked by the documented
+  missing-`video_id` schema gap.
+- Added the RTX 5060 Ti one-command wrapper and updated the R2/GPU runbooks.
+
+Verification:
+
+- Focused R2/operations/provider/object/script regression: 194 passed.
+- Full repository regression: 1,471 passed, 15 skipped.
+- Python compilation, shell syntax, CLI `--help`, and `git diff --check`: passed.
+- No real Batch1 model run or R2 staging mutation was performed by this code
+  change.
+
+---
+
+# 2026-09-02 - R2 enrichment runner extended with OCR and ASR
+
+Status: IMPLEMENTED; SYNTHETIC SIX-FEATURE CONTRACT TESTED; REAL GPU CANARY PENDING
+
+Branch: `perf/r2-enrichment-runner`
+
+- Expanded the run contract from four visual branches to all six canonical
+  enrichment branches: RF-DETR objects, BEiT-3, selector-produced MetaCLIP-2,
+  PE-Core-L, production DeepSolo/PARSeq OCR, and Silero/ChunkFormer ASR.
+- The visual branches still share canonical JPEGs. OCR and ASR now share one
+  exact raw-MP4 download per video; ingestion, TransNetV2, and keyframe
+  selection are not rerun.
+- OCR runs one combined resumable Docker job across every pending collection,
+  preserving the F-1/F/F+1 frame contract and then splitting audited artifacts
+  back into collection-scoped outputs.
+- ASR creates Silero and ChunkFormer once per run. A new cached FFmpeg provider
+  decodes one video's mono 16 kHz PCM once, memory-maps independent keyframe
+  windows, and evicts the prior video's PCM. The +/-3 second clamp, per-window
+  VAD, merge gap, and transcript schema are unchanged.
+- OCR/ASR per-keyframe envelopes are packaged into one archive per feature and
+  collection, while typed Parquets and manifests remain separately available.
+  Six-feature collection success and run readiness are required; canonical R2
+  paths are not mutated and promotion remains separate.
+- Resume state now fingerprints the OCR model lock and semantic ASR window
+  configuration. The all-null OCR confidence case is explicitly consolidated
+  as nullable Float64, and audio/input caches are removed only after successful
+  upload when eviction is enabled.
+- The RTX 5060 Ti wrapper now checks both OCR image presence and an actual CUDA
+  matrix operation inside each pinned image before downloading R2 data. This
+  catches incompatibility between the reused CUDA 11-era OCR images and newer
+  GPU architectures without silently changing model/runtime pins.
+
+Verification:
+
+- Focused cached-audio, six-feature runner, and Parquet regressions: 32 passed.
+- Full repository regression: 1,473 passed, 15 skipped.
+- Python compilation, shell syntax, CLI `--help`, and `git diff --check`: passed.
+- No real model inference, R2 upload, canonical promotion, or RTX 5060 Ti OCR
+  compatibility claim was made by this change.
+
+---
+
+# 2026-09-02 - Enrichment output moved to immutable versions with an active pointer
+
+Status: IMPLEMENTED; UNIT TESTED; NO REAL R2 MUTATION
+
+Branch: `perf/r2-enrichment-runner`
+
+- Replaced the enrichment staging destination with an immutable, run-scoped
+  version tree at `data/versions/enrichment/<version>/`. Versions deliberately
+  live outside `data/corpus` because `R2Sync.pull_corpus` pulls that prefix
+  blindly and would download every unreleased version.
+- Added `version_key()`, `enrichment_version_prefix()`, and `VERSIONS_PREFIX`
+  to `mvr.operations.r2_layout`, with single-segment validation for the feature
+  and version ids.
+- Added `mvr.operations.enrichment_version` holding the manifest pointer
+  schema (`active_enrichment_version` plus an `enrichment` block recording the
+  prefix, activation time, and the version it replaced) and the fail-closed
+  activation operation.
+- Added `scripts/operations/activate_enrichment_version.py`. Activation lists
+  the version prefix once, requires `_READY.json` and one `_SUCCESS.json` per
+  declared collection, backs up the current `dataset_manifest.json` under
+  `data/versions/manifest-backups/<activated_at>/`, and then writes the pointer.
+  No artifact is copied; rollback is the same command with the previous id.
+- Added the destination prefix to the runner's resume fingerprint. Without it a
+  state file written under the old staging layout would resume as "uploaded",
+  skip every upload, and still publish `_SUCCESS.json` into an empty version.
+- Estimated cost for a full Batch1 run over the activated corpus: ~273,500
+  Class B and ~3,000 Class A operations, plus 3 Class A to activate. The
+  superseded staging-plus-copy promotion would have added ~2,800 Class A on
+  first activation and ~5,600 on every re-activation.
+
+Verification:
+
+- `tests/unit/operations/test_enrichment_versioning.py` (new, 25 checks),
+  `tests/unit/scripts/test_activate_enrichment_version.py` (new),
+  `tests/unit/operations/test_r2_enrichment.py`: passed.
+- `scripts/operations/activate_enrichment_version.py --help`: passed.
+- Full `tests/unit` regression: 1,467 passed, 5 skipped. The five skips are the
+  `pymilvus` gates from the uninstalled `[milvus]` extra.
+- Environment note: `polars==1.43.2` belongs to the optional `[operations]`
+  extra added by `72d5d1a` (2026-08-27), which postdates this `.venv`
+  (2026-08-19). Until it was installed, six `test_ingestion_promotion.py`
+  checks failed as `IngestionPromotionError` and the synthetic six-feature
+  runner test skipped silently, hiding both behind non-obvious symptoms. At the
+  time of this entry the same extra also lacked `boto3` and `python-dotenv`,
+  and the wrapper preflighted none of the three; both were addressed in the
+  follow-up entry below.
+- No R2 bucket read, write, or activation was performed.
+
+---
+
+# 2026-09-02 - Wrapper preflights the operations extra
+
+Status: IMPLEMENTED; TESTED
+
+Branch: `perf/r2-enrichment-runner`
+
+- `run_enrichment_rtx5060ti.sh` now verifies `import boto3, dotenv, polars`
+  before Docker, the OCR images, and the CUDA canary. polars is not exercised
+  until the first Parquet consolidation, so without this check a fresh VM
+  passes every existing preflight, downloads the full keyframe and raw-MP4
+  working set, and only then fails.
+- Added `tests/unit/scripts/test_run_enrichment_wrapper.py`, which executes the
+  wrapper under bash against a temporary tree with a stubbed `.venv/bin/python`
+  and asserts both the refusal and the pass-through.
+- Installed the missing extra locally: polars 1.43.2, boto3 1.43.86,
+  python-dotenv 1.2.3.
+
+Verification:
+
+- Full `tests/unit` regression: 1,469 passed, 5 skipped (`pymilvus` gates).
+- `bash -n scripts/operations/run_enrichment_rtx5060ti.sh`: passed.
+- No R2 bucket read, write, or activation was performed.
+
+---
+
+# 2026-09-02 - Artifact-level validation before an enrichment version is activated
+
+Status: IMPLEMENTED; UNIT TESTED
+
+Branch: `perf/r2-enrichment-runner`
+
+- Activation previously accepted a version on marker presence alone, so a run
+  whose `_SUCCESS.json` was written over an incomplete upload could become the
+  active pointer.
+- Added `validate_enrichment_version`, which derives the expected object set
+  from the version's own markers: the artifact keys each `_SUCCESS.json`
+  declares, `manifest.json`/`feature_mapping.csv`/at least one non-empty `.npy`
+  per declared provider, the OCR and ASR manifests, and per-collection counts
+  that must sum to the `_READY.json` totals. Zero-byte objects are rejected as
+  failed uploads. Nothing is hard-coded, so the check follows the runner's
+  contract instead of duplicating it.
+- Every problem is collected before raising. An operator repairing a broken run
+  sees the full list rather than one entry per rerun.
+- `activate_enrichment_version` now delegates to it and refuses before any
+  upload, and the script gained `--validate-only` for running the check alone,
+  which is the separate validation step in the target flow.
+- Cost is unchanged for Class A: still one listing and two PUTs. Reads grow by
+  one GET per collection marker, roughly 22 Class B operations for Batch1.
+
+Verification:
+
+- `tests/unit/operations/test_enrichment_versioning.py` and
+  `tests/unit/scripts/test_activate_enrichment_version.py`: 39 passed.
+- `scripts/operations/activate_enrichment_version.py --help`: passed.
+- R2 connectivity confirmed with a narrow `r2 list data/corpus/ingest`
+  (read-only, one Class A operation). No version exists on R2 yet, so no
+  validation or activation was run against real data.
+
+---
+
+# 2026-09-02 - Index building reads the enrichment version, not extraction status
+
+Status: IMPLEMENTED; UNIT TESTED
+
+Branch: `perf/r2-enrichment-runner`
+
+- Investigated the documented extraction-status blocker rather than assuming
+  it. Measured both corpora: the organizer mapping has 632 distinct
+  `keyframe_id` strings across 177,321 rows, while the activated canonical
+  mapping on R2 has 133,265 distinct ids for 133,265 rows, all carrying
+  `video_id` as a prefix. Two id conventions coexist, so `video_id` must never
+  be parsed out of `keyframe_id`.
+- Enumerated every reference to `extraction_status`: the only production caller
+  of the module is `cli.py` calling `summary()`; `initialize_status`,
+  `update_status`, `find_todo` and `find_failed` are used by tests only; and no
+  code anywhere writes status records, so `consolidate_feature` skips the
+  feature and the Parquet is never produced. The review doc's concern about a
+  large caller surface across the OCR/ASR/embedding pipelines does not hold.
+- Chose to bypass the status table instead of building it. Added
+  `mvr.operations.enrichment_catalog`, which validates a version and returns
+  one `CatalogEntry` per keyframe with `(feature_file, feature_index)` for every
+  declared provider, keyed on the `(video_id, keyframe_id)` pair.
+- The read is fail-closed on cross-provider gaps, unpublished vector files,
+  duplicate identities, missing mapping columns, and unusable row indexes.
+- Not done here: rewiring `milvus_ingest` onto the catalog. Its `_load_mapping`
+  still expects a Parquet with `keyframe_id`/`row_idx` columns and keys on
+  `keyframe_id` alone, while the runner emits a CSV with
+  `keyframe_id`/`video_id`/`feature_file`/`feature_index`. That adapter is the
+  next step and is required by any route to Milvus, not just this one.
+
+Verification:
+
+- `tests/unit/operations/test_enrichment_versioning.py`: 36 passed, including a
+  regression test that two videos sharing keyframe id 034 produce two distinct
+  catalog entries.
+- Canonical mapping identity measured against the live R2 corpus with one
+  read-only GET. No bucket mutation.
+
+---
+
+# 2026-09-02 - Milvus entities built from the enrichment catalog
+
+Status: IMPLEMENTED; UNIT TESTED; NOT RUN AGAINST A LIVE MILVUS
+
+Branch: `perf/r2-enrichment-runner`
+
+- Added `build_entities_from_catalog` to `mvr.indexing.milvus_ingest`. It
+  consumes `CatalogEntry` values and produces Milvus entities whose primary key
+  is built from the `(video_id, keyframe_id)` pair, closing the identity gap at
+  the layer where it originally caused damage.
+- The vector row is taken from `feature_index`, never from iteration order, and
+  vector files are memory-mapped once per provider file and reused.
+- Failure handling is split deliberately. A vector file that was never
+  downloaded raises, because skipping it would silently drop a whole video. A
+  bad individual keyframe - row index past the end of the file, wrong
+  dimension, non-finite vector, missing provider - is counted in the
+  eligibility report so one bad row does not discard the run.
+- Documented in the module docstring that the `extraction_status` route is
+  legacy and currently unusable, and that the catalog path supersedes it.
+
+Verification:
+
+- `tests/unit/test_milvus_ingest_catalog.py`: 7 passed, including a check that
+  the vector comes from `feature_index` rather than order, and a regression
+  test that two videos sharing keyframe id 034 build two distinct entities
+  carrying their own vectors.
+- Full `tests/unit` regression: 1,489 passed, 5 skipped.
+- `pymilvus` is not installed here and no Milvus instance was available, so the
+  upsert, index creation and manifest steps of `ingest_to_milvus` remain
+  unverified by this change. Only entity construction is covered.
+
+---
+
+# 2026-09-03 - Milvus and Elasticsearch built from an enrichment version
+
+Status: IMPLEMENTED; UNIT TESTED; NO LIVE MILVUS OR ELASTICSEARCH RUN
+
+Branch: `perf/r2-enrichment-runner`
+
+- Added `mvr.indexing.version_ingest.ingest_version_to_milvus`: validate the
+  version, read its catalog, download each referenced vector file exactly once,
+  build pair-keyed entities, upsert in batches, and write a manifest whose
+  `dataset_version` names the version the index came from.
+- Added `mvr.indexing.version_documents.build_documents_from_version`, joining
+  the version's OCR, ASR and object Parquets on `(video_id, keyframe_id)`. A
+  keyframe with no text still yields a document, so the lexical index cannot
+  silently shrink relative to the vector index built from the same version.
+- Fixed the same identity flaw on the lexical side: `ElasticsearchIndex` used
+  `frame_id` as the document `_id`, so two videos sharing an organizer keyframe
+  id overwrote each other. `_id` is now the pair, derived through the shared
+  `make_entity_id` helper so both indexes resolve a keyframe identically, and a
+  document that cannot name its video is refused. The existing unit test that
+  asserted the old `_id` was updated, since the behaviour changed deliberately.
+- Installed the `[milvus]` extra and found `pymilvus==2.4.15` cannot import at
+  all on a current environment: it uses `pkg_resources`, which setuptools
+  removed in 81.0. Added a `setuptools<81` bound to the extra so the declared
+  pin is actually installable. The proper long-term fix is upgrading pymilvus.
+
+Verification:
+
+- Full `tests/unit` regression: 1,508 passed, 0 skipped. The five `pymilvus`
+  skips reported in earlier entries are gone now that the extra is installed.
+- New: `test_version_ingest.py` (5), `test_version_documents.py` (5),
+  `test_elasticsearch_document_id.py` (4).
+- Milvus and Elasticsearch were exercised through recording doubles. No live
+  Milvus or Elasticsearch instance was available, and no enrichment version
+  exists on R2 yet, so none of this has run against real infrastructure.
+
