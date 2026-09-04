@@ -147,6 +147,27 @@ def _client(*, multimodal: bool = True) -> TestClient:
     )
 
 
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:4173",
+    ],
+)
+def test_cors_allows_local_frontend_dev_ports(origin: str) -> None:
+    response = _client().options(
+        "/api/v1/search",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+
+
 def test_health_reports_real_service_readiness() -> None:
     response = _client().get("/health")
 
@@ -448,6 +469,104 @@ def test_ui_search_adapts_kis_results_for_frontend_contract(tmp_path) -> None:
     }
     assert client.get("/keyframes/video-1/frame-high.jpg").status_code == 200
     assert client.get("/videos/video-1.mp4").status_code == 200
+
+
+def test_ui_video_summary_lists_keyframes_with_original_frame_mapping(tmp_path) -> None:
+    keyframe_dir = tmp_path / "keyframes"
+    map_dir = tmp_path / "map_keyframes"
+    video_dir = tmp_path / "videos"
+    (keyframe_dir / "L21_V001").mkdir(parents=True)
+    map_dir.mkdir()
+    video_dir.mkdir()
+    (keyframe_dir / "L21_V001" / "001.jpg").write_bytes(b"jpeg-1")
+    (keyframe_dir / "L21_V001" / "002.jpg").write_bytes(b"jpeg-2")
+    (video_dir / "L21_V001.mp4").write_bytes(b"mp4")
+    (map_dir / "L21_V001.csv").write_text(
+        "n,pts_time,fps,frame_idx\n001,8.7,30.0,261\n002,9.1,30.0,273\n",
+        encoding="utf-8",
+    )
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=None,
+            keyframe_dir=keyframe_dir,
+            video_dir=video_dir,
+        )
+    )
+
+    response = client.get("/api/v1/videos/L21_V001/summary")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "video_id": "L21_V001",
+        "keyframe_count": 2,
+        "mapped_count": 2,
+        "results": [
+            {
+                "keyframe_id": "001",
+                "frame_id": 261,
+                "timestamp": "00:00:08",
+                "timestamp_sec": 8.7,
+                "thumbnail_url": "/keyframes/L21_V001/001.jpg",
+                "video_url": "/videos/L21_V001.mp4",
+                "mapped": True,
+            },
+            {
+                "keyframe_id": "002",
+                "frame_id": 273,
+                "timestamp": "00:00:09",
+                "timestamp_sec": 9.1,
+                "thumbnail_url": "/keyframes/L21_V001/002.jpg",
+                "video_url": "/videos/L21_V001.mp4",
+                "mapped": True,
+            },
+        ],
+    }
+    assert client.get("/keyframes/L21_V001/001.jpg").status_code == 200
+
+
+def test_ui_video_summary_keeps_unmapped_keyframes_visible(tmp_path) -> None:
+    keyframe_dir = tmp_path / "keyframes"
+    (keyframe_dir / "L21_V001").mkdir(parents=True)
+    (keyframe_dir / "L21_V001" / "003.jpg").write_bytes(b"jpeg")
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=None,
+            keyframe_dir=keyframe_dir,
+            video_dir=None,
+        )
+    )
+
+    response = client.get("/api/v1/videos/L21_V001/summary")
+
+    assert response.status_code == 200
+    assert response.json()["mapped_count"] == 0
+    assert response.json()["results"][0] == {
+        "keyframe_id": "003",
+        "frame_id": None,
+        "timestamp": None,
+        "timestamp_sec": None,
+        "thumbnail_url": "/keyframes/L21_V001/003.jpg",
+        "video_url": "",
+        "mapped": False,
+    }
+
+
+def test_ui_video_summary_rejects_path_like_video_ids(tmp_path) -> None:
+    client = TestClient(
+        create_app(
+            semantic_service=FakeSemanticService(),
+            multimodal_service=None,
+            keyframe_dir=tmp_path,
+            video_dir=None,
+        )
+    )
+
+    response = client.get("/api/v1/videos/%2E%2E/summary")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "video_id must be a single video name, not a path"
 
 
 def test_ui_submit_previews_official_submission_rows() -> None:

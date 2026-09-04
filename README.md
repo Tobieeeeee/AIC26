@@ -180,6 +180,37 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8015/search/hybrid" `
 
 `/search/semantic` is always registered, but returns `503` when no valid `MVR_SEMANTIC_INDEX` is configured. The text, object, and hybrid routes are registered only when `MVR_ES_URL` is explicitly configured, reachable at startup, and contains `MVR_ES_INDEX`; the health payload reports the actual runtime state instead of treating unavailable dependencies as healthy.
 
+## Frontend Video Summary
+
+The retrieval UI includes a Video Summary page that mirrors the organizer-style
+keyframe browser: a grid of `keyframes/<video_id>/*.jpg` with original-video
+`frame_idx` values resolved from `map_keyframes/<video_id>.csv`. Configure both
+static roots before starting the API:
+
+```powershell
+$env:MVR_AIC_DATASET_ROOT="<local AIC dataset root>"
+$env:MVR_KEYFRAME_DIR=(Resolve-Path -LiteralPath "$env:MVR_AIC_DATASET_ROOT\keyframes").Path
+$env:MVR_VIDEO_DIR=(Resolve-Path -LiteralPath "$env:MVR_AIC_DATASET_ROOT\videos").Path
+py -3.12 -m uvicorn mvr.api.app:app --host 127.0.0.1 --port 8000
+```
+
+The backend endpoint is:
+
+```text
+GET /api/v1/videos/{video_id}/summary
+```
+
+For local frontend development:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Set `VITE_API_BASE_URL` in `frontend/.env` if the API is not running on
+`http://127.0.0.1:8000`.
+
 ## Verified Textual KIS commands
 
 KIS returns competition predictions as `<video_id>, <frame_id>` pairs on the

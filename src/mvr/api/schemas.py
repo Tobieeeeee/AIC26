@@ -219,6 +219,23 @@ class UiSearchResponse(BaseModel):
     results: list[UiKeyframeResult]
 
 
+class VideoSummaryKeyframe(BaseModel):
+    keyframe_id: str
+    frame_id: int | None = None
+    timestamp: str | None = None
+    timestamp_sec: float | None = None
+    thumbnail_url: str
+    video_url: str
+    mapped: bool
+
+
+class VideoSummaryResponse(BaseModel):
+    video_id: str
+    keyframe_count: int = Field(ge=0)
+    mapped_count: int = Field(ge=0)
+    results: list[VideoSummaryKeyframe]
+
+
 class UiSubmissionItem(BaseModel):
     video_id: str
     frame_id: int

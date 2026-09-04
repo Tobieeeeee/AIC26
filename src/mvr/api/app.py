@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from ..enrichment.qna_answer import AnswerReasoner, AnswerReasonerUnavailable, HuggingFaceCausalLmBackend
 from ..enrichment.qna_translation import DEFAULT_TRANSLATION_MODEL, HelsinkiViEnTranslator, TranslatorUnavailable
 from ..ingestion.aic_dataset import AicDatasetRegistry
+from ..ingestion.video_summary import build_video_summary
 from ..retrieval.hybrid import rrf_fuse
 from ..retrieval.kis import KeyframeFrameIndexResolver, search_kis
 from ..retrieval.lexical import search_lexical
@@ -46,6 +48,8 @@ from .schemas import (
     UiSearchResponse,
     UiSubmitRequest,
     UiSubmitResponse,
+    VideoSummaryKeyframe as ApiVideoSummaryKeyframe,
+    VideoSummaryResponse,
 )
 
 
@@ -116,7 +120,7 @@ class LazyFaissSemanticService:
         if self._runtime_error is not None:
             return False
         try:
-            self._load_index()
+            self._read_manifest()
         except RuntimeError:
             return False
         return True
@@ -128,6 +132,17 @@ class LazyFaissSemanticService:
     def _load_index(self):
         if self._index is not None:
             return self._index
+        self._read_manifest()
+        try:
+            from ..indexing.faiss_index import FaissIndex
+
+            self._index = FaissIndex.load(self.index_root)
+        except Exception as exc:
+            self._readiness_error = exc
+            raise RuntimeError("semantic index is unavailable") from exc
+        return self._index
+
+    def _read_manifest(self) -> dict[str, Any]:
         if self._readiness_error is not None:
             raise RuntimeError(
                 "semantic index is unavailable"
@@ -140,23 +155,26 @@ class LazyFaissSemanticService:
         if find_spec("faiss") is None or find_spec("open_clip") is None:
             raise RuntimeError("semantic runtime dependencies are unavailable")
         try:
-            from ..indexing.faiss_index import FaissIndex
-
-            self._index = FaissIndex.load(self.index_root)
+            manifest = json.loads(
+                (self.index_root / "manifest.json").read_text(encoding="utf-8")
+            )
         except Exception as exc:
             self._readiness_error = exc
             raise RuntimeError("semantic index is unavailable") from exc
-        return self._index
+        if not isinstance(manifest, dict):
+            self._readiness_error = ValueError("semantic index manifest must be an object")
+            raise RuntimeError("semantic index is unavailable") from self._readiness_error
+        return manifest
 
     def _load_retriever(self):
-        index = self._load_index()
         if self._retriever is None:
             try:
                 from ..enrichment.embeddings.openclip import OpenClipEncoder
                 from ..retrieval.semantic import SemanticRetriever
 
-                model_name = index.manifest.get("embedding_model")
-                pretrained = index.manifest.get("pretrained")
+                manifest = self._read_manifest()
+                model_name = manifest.get("embedding_model")
+                pretrained = manifest.get("pretrained")
                 if not isinstance(model_name, str) or not model_name.strip():
                     raise RuntimeError("semantic index manifest has no embedding model")
                 if not isinstance(pretrained, str) or not pretrained.strip():
@@ -166,6 +184,7 @@ class LazyFaissSemanticService:
                     pretrained=pretrained,
                     device=self.device,
                 )
+                index = self._load_index()
                 self._retriever = SemanticRetriever(encoder, index)
             except Exception as exc:
                 self._runtime_error = exc
@@ -584,6 +603,23 @@ def _format_timestamp(seconds: float | None) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def _summary_mapping_csv(
+    video_id: str,
+    keyframe_dir: Path | None,
+    aic_registry: Any | None,
+) -> Path | None:
+    registry_root = getattr(aic_registry, "root", None)
+    if isinstance(registry_root, Path):
+        candidate = registry_root / "map_keyframes" / f"{video_id}.csv"
+        if candidate.is_file():
+            return candidate
+    if keyframe_dir is not None:
+        candidate = keyframe_dir.parent / "map_keyframes" / f"{video_id}.csv"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _frame_asset_urls(
     *,
     video_id: str,
@@ -694,6 +730,7 @@ def create_app(
             "http://127.0.0.1:5173",
             "http://localhost:5173",
         ],
+        allow_origin_regex=r"^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -870,6 +907,50 @@ def create_app(
             for candidate in candidates
         ]
         return UiSearchResponse(total_results=len(results), results=results)
+
+    @application.get("/api/v1/videos/{video_id}/summary", response_model=VideoSummaryResponse)
+    def ui_video_summary(video_id: str) -> VideoSummaryResponse:
+        served_keyframes = keyframe_dir if isinstance(keyframe_dir, Path) else None
+        served_videos = video_dir if isinstance(video_dir, Path) else None
+        if served_keyframes is None:
+            raise HTTPException(status_code=503, detail="keyframe directory is unavailable")
+        try:
+            video_id = video_id.strip()
+            if video_id in {".", ".."} or "/" in video_id or "\\" in video_id:
+                raise ValueError("video_id must be a single video name, not a path")
+            summary = build_video_summary(
+                video_id=video_id,
+                keyframe_root=served_keyframes,
+                mapping_csv=_summary_mapping_csv(video_id, served_keyframes, kis_aic_registry),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        results = []
+        for item in summary.keyframes:
+            thumbnail = _servable_keyframe_url(str(item.image_path), served_keyframes)
+            if thumbnail is None:
+                thumbnail = f"/keyframes/{summary.video_id}/{item.keyframe_id}.jpg"
+            video_url = f"/videos/{summary.video_id}.mp4" if served_videos is not None else ""
+            results.append(
+                ApiVideoSummaryKeyframe(
+                    keyframe_id=item.keyframe_id,
+                    frame_id=item.frame_id,
+                    timestamp=_format_timestamp(item.timestamp) if item.timestamp is not None else None,
+                    timestamp_sec=item.timestamp,
+                    thumbnail_url=thumbnail,
+                    video_url=video_url,
+                    mapped=item.frame_id is not None,
+                )
+            )
+        return VideoSummaryResponse(
+            video_id=summary.video_id,
+            keyframe_count=summary.keyframe_count,
+            mapped_count=summary.mapped_count,
+            results=results,
+        )
 
     @application.post("/api/v1/submit", response_model=UiSubmitResponse)
     def ui_submit(request: UiSubmitRequest) -> UiSubmitResponse:
