@@ -211,6 +211,147 @@ npm run dev
 Set `VITE_API_BASE_URL` in `frontend/.env` if the API is not running on
 `http://127.0.0.1:8000`.
 
+## Vast.ai + Cloudflare R2 quick start
+
+Data does **not** need to be downloaded to a personal computer before running
+on Vast.ai. Use R2 as the source of truth and pull the required corpus, videos,
+and FAISS index directly onto the Vast instance disk or an attached Vast
+Volume. The current backend reads keyframes, videos, mapping CSV files, and the
+FAISS index from the Vast filesystem while it is running.
+
+Clone the frontend/backend branch on Vast:
+
+```bash
+cd /workspace
+git clone -b feat/backend-ui-api --single-branch \
+  https://github.com/Tobieeeeee/AIC26.git
+cd AIC26
+
+python3 -m venv --system-site-packages .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -e ".[dev,api,semantic]"
+python -m pip install boto3
+```
+
+Create a local `.env` on the Vast instance. Never commit this file or paste its
+secret values into source code:
+
+```bash
+cp .env.example .env
+```
+
+Fill these values in `.env` using credentials from the Cloudflare dashboard:
+
+```dotenv
+R2_ACCOUNT_ID=<cloudflare-account-id>
+R2_ACCESS_KEY_ID=<r2-access-key-id>
+R2_SECRET_ACCESS_KEY=<r2-secret-access-key>
+R2_BUCKET=<r2-bucket-name>
+R2_ENDPOINT=https://<cloudflare-account-id>.r2.cloudflarestorage.com
+```
+
+Load the variables and inspect the remote layout before downloading. The
+current `r2 pull` CLI has no `--dry-run` option, so use `r2 list` first:
+
+```bash
+set -a
+source .env
+set +a
+
+python -m mvr.cli r2 list data/corpus/keyframes --max-keys 5
+python -m mvr.cli r2 list data/corpus/indexes --max-keys 20
+python -m mvr.cli r2 list data/raw --max-keys 20
+```
+
+Pull the canonical corpus, including keyframes, metadata, embeddings, and any
+indexes stored under `data/corpus/`:
+
+```bash
+mkdir -p /workspace/r2-runtime
+python -m mvr.cli r2 pull \
+  --corpus \
+  --local-root /workspace/r2-runtime
+```
+
+Raw videos live outside the corpus tree. Pull only the demo videos when
+possible:
+
+```bash
+python -m mvr.cli r2 pull \
+  --videos L21_V001,L21_V002 \
+  --batch 1 \
+  --collection L21 \
+  --local-root /workspace/r2-runtime
+```
+
+The downloaded canonical paths are:
+
+```text
+/workspace/r2-runtime/data/corpus/keyframes/
+/workspace/r2-runtime/data/corpus/indexes/
+/workspace/r2-runtime/data/raw/1/videos/L21/
+```
+
+Create the filesystem layout expected by the UI backend:
+
+```bash
+mkdir -p /workspace/aic-data
+ln -s /workspace/r2-runtime/data/corpus/keyframes \
+  /workspace/aic-data/keyframes
+ln -s /workspace/r2-runtime/data/raw/1/videos/L21 \
+  /workspace/aic-data/videos
+
+find /workspace/r2-runtime -type f -path '*map_keyframes*' | head
+find /workspace/r2-runtime/data/corpus/indexes \
+  -type f -name manifest.json -print
+```
+
+Link the mapping directory and the FAISS index directory found above:
+
+```bash
+ln -s <R2_MAPPING_DIRECTORY> /workspace/aic-data/map_keyframes
+ln -s <R2_FAISS_INDEX_DIRECTORY> /workspace/aic-index
+```
+
+Start the backend:
+
+```bash
+export KMP_DUPLICATE_LIB_OK=TRUE
+export MVR_SEMANTIC_BACKEND=faiss_reference
+export MVR_SEMANTIC_INDEX=/workspace/aic-index
+export MVR_AIC_DATASET_ROOT=/workspace/aic-data
+export MVR_KEYFRAME_DIR=/workspace/aic-data/keyframes
+export MVR_VIDEO_DIR=/workspace/aic-data/videos
+export MVR_DEVICE=cuda
+export PYTHONPATH=src
+
+python -m uvicorn mvr.api.app:app \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+In a second terminal or tmux session, start the frontend:
+
+```bash
+cd /workspace/AIC26/frontend
+npm ci
+VITE_API_BASE_URL=http://127.0.0.1:8000 \
+  npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+From the personal computer, use the SSH host and port shown by Vast:
+
+```bash
+ssh -N -p <SSH_PORT> root@<VAST_IP> \
+  -L 5173:127.0.0.1:5173 \
+  -L 8000:127.0.0.1:8000
+```
+
+Open `http://127.0.0.1:5173`. See
+`docs/VAST_AI_DEPLOYMENT.md` for the complete setup, index-build commands,
+tmux usage, storage guidance, and troubleshooting.
+
 ## Verified Textual KIS commands
 
 KIS returns competition predictions as `<video_id>, <frame_id>` pairs on the
@@ -359,6 +500,7 @@ limitations — most notably that benchmark queries were written in English
 
 Đọc tiếp:
 
+- `docs/VAST_AI_DEPLOYMENT.md`
 - `docs/SOURCE_FILE_ANALYSIS.md`
 - `docs/ARCHITECTURE.md`
 - `docs/ROADMAP.md`
